@@ -551,6 +551,9 @@ fn openshift_never_syncs_default_kube_and_openshift_and_starts_user_openshift_na
         // The label turns it on for a user-created `openshift-*` namespace.
         ("openshift-acme", SyncLabel::On, true),
         ("openshift-acme", SyncLabel::Off, false),
+        // A system namespace is exempt even with the label `true`.
+        ("openshift-monitoring", SyncLabel::On, false),
+        ("openshift-kube-apiserver", SyncLabel::On, false),
         // The one system namespace of that prefix that the controller does sync.
         ("openshift-operators", SyncLabel::Unset, true),
         // Only the exact names and prefixes count.

@@ -40,7 +40,7 @@ The seven built checks are sound on semantics, API groups and RBAC degrade: a fo
 partial with the grant to ask for and never a block, and the guard and the audit prove it. The three OpenShift
 label-sync details of M1-115 were wrong or missing in `k8s.admission` and are fixed here with tests. The
 citation test is complete for the stack: `NOT_BUILT_YET` is empty and every cited check is registered. One
-pair (`pods` with `k8s.nodes`) is read by no fixture because its check half is not built (SF-01). The four
+pair (`pods` with `k8s.nodes`) was read by no fixture because its check half is not built, so its entry is removed (SF-01). The four
 open PRs cannot merge as they stand: they add duplicate `ALLOWED` entries (SF-02). This review lists zero
 open must-fix items.
 
@@ -51,7 +51,7 @@ open must-fix items.
 | MF-01 | Must fix | `crates/rdy-checks-k8s/src/admission/judge.rs`, `admission.rs` | The OpenShift label-sync rules were by label only: no per-namespace rule, no cluster default note | closed in this branch | M1-115 |
 | MF-02 | Must fix | `client/guard/tests/parser.rs` | Nothing stopped two `ALLOWED` entries for one resource; the audit uses the first | closed in this branch (test) | M1-115 |
 | MF-03 | Must fix | `client/mock.rs`, six `tests.rs` | No test proved each `(entry, check)` pair is read by a fixture | closed in this branch | M1-115 |
-| SF-01 | Should fix | `client/guard/rules.rs` (`pods`), `nodes/tests.rs` | `pods` with `k8s.nodes` is read by no fixture of the check | open, enforced by a test | M1-159 |
+| SF-01 | Should fix | `client/guard/rules.rs` (`pods`), `nodes/tests.rs` | `pods` with `k8s.nodes` was read by no fixture of the check | closed: entry removed until M1-159 | M1-159 |
 | SF-02 | Should fix | PRs #62, #64, #65, #78: `rules.rs`, `registry.rs`, `family.rs` | Duplicate `ALLOWED` entries, a doubled `GetIn` variant, no `build_check` arms | open | the PR authors, at merge |
 | SF-03 | Should fix | `version/apis.rs` | Group-version rows for `networking.k8s.io`, `storage.k8s.io` and `admissionregistration.k8s.io` v1beta1 misreport newer betas | open | new M2 row |
 | SF-04 | Should fix | `tests/fixtures/checks/k8s.storageclass/` | No AKS, RKE2, kind or vSphere class fixture | open | new M2 row |
@@ -72,7 +72,7 @@ open must-fix items.
   said so.
 - Fix, built: `NsFacts.sync_label` (`Unset`, `On`, `Off`) and `label_sync_applies(name, label)` in
   `admission/judge.rs`. `default`, `kube-*` and `openshift` never sync. `openshift-operators` syncs by
-  default. Every other `openshift-*` namespace counts as unsynced unless its label says `true`. Any other
+  default. The well-known system `openshift-*` namespaces never sync, even with the label `true`. Every other `openshift-*` namespace counts as unsynced unless its label says `true`. Any other
   namespace syncs unless its label says `false`. Where the sync does not run, `warn` and `audit` are
   judged like any label. With the sync not running, OpenShift, and neither label set, a note says the cluster
   default applies and rdy cannot read it (only when the need is below `restricted`).
@@ -90,16 +90,17 @@ open must-fix items.
 - Fix, built: the audit records each pair into a thread local (`client/mock.rs`, `hits`). Each of the six
   checks that cite entries has `every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run`, which
   runs named fixture tests and compares `hits::unhit(check)` with the check own `NOT_READ_YET`. All pairs of
-  the six checks are hit except `pods` with `k8s.nodes` (SF-01). `k8s.access` cites no entry. The test fails
+  the six checks are hit. `k8s.access` cites no entry. The test fails
   both ways: a pair that is not hit, and an exempt pair that is hit.
 - The citation test has an empty `NOT_BUILT_YET` and every one of the seven checks is in `infos()`.
 
 ## Should fix
 
-**SF-01. `pods` with `k8s.nodes` is read by no fixture of the check.** The `ALLOWED` entry belongs to the
-free capacity half (`free`), which is M1-159. Today `free` is "not evaluated", and the only reads of the
-entry are in `client/mock.rs` tests. The pair is the one entry of `NOT_READ_YET` in `nodes/tests.rs`. When
-M1-159 lands, the list must be empty, and the test fails until it is. Owner: M1-159 (check-author).
+**SF-01. `pods` with `k8s.nodes` was read by no fixture of the check. Closed: entry removed until M1-159.** The
+`ALLOWED` entry belonged to the free capacity half (`free`), which is M1-159, so 0.1.0 would have granted `list pods`
+for nothing. The entry and the `pods` grant in `examples/rbac/rdy-readonly.yaml` are removed, `NOT_READ_YET` in
+`nodes/tests.rs` is empty, and the guard field selector tests use `events` and the type. M1-159 adds the entry, the
+grant, a fixture and the pair test back. Owner: M1-159 (check-author).
 
 **SF-02. The four open PRs conflict with each other and with the stack.**
 - Duplicate `ALLOWED` entries once all merge: `services` (PR #62 `GetIn`, PR #65 `ListInNamespace`),
@@ -197,11 +198,11 @@ Folds (extra exit-test clauses on existing tickets):
 
 | Existing ticket | Added clause | +h |
 | --- | --- | --- |
-| [M1] M1-159 k8s.nodes free capacity | SF-01: `NOT_READ_YET` in `nodes/tests.rs` is empty and the pair test passes | 0 |
+| [M1] M1-159 k8s.nodes free capacity | SF-01: add back the `pods` ALLOWED entry, the `list pods` grant in `examples/rbac/rdy-readonly.yaml`, a fixture and the pair test | 0 |
 | [M1] M1-162, M1-163, M1-164, M1-165 (PRs #62, #64, #65, #78) | SF-02: one `ALLOWED` entry per resource (the guard test passes), a `build_check` arm, and the pair test of MF-03 in the module | 0.5 each |
 | [M2] M2-126 | SF-05: security-reviewer confirms `GetInNamespace` for PR #64 | 0 |
 | [M2] M2-125 | SF-06: the `rke2-loop` fixture reads the Corefile and the loop is told | 0 |
 
-Must fix: 0 open (MF-01, MF-02 and MF-03 closed in this branch). Should fix: 6 open (SF-01 to SF-06). Nits: 4,
+Must fix: 0 open (MF-01, MF-02 and MF-03 closed in this branch). Should fix: 5 open (SF-02 to SF-06), SF-01 closed. Nits: 4,
 all closed. This review lists zero open must-fix items and the M1-115 exit test is met for the stack. The
 registration of `k8s.dns`, `k8s.crds`, `k8s.ingress` and `k8s.cni` waits for PRs #62, #64, #65 and #78.

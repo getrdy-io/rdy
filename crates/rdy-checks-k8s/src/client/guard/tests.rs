@@ -287,49 +287,29 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
 }
 
 #[test]
-fn a_pod_list_needs_the_phase_field_selector() {
-    let pods = "/api/v1/pods";
-    for query in [
-        "&fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed&limit=500",
-        "fieldSelector=status.phase%3DRunning",
-        "fieldSelector=status.phase%3D%3DRunning",
-        "fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed",
-        "fieldSelector=status.phase%21%3DFailed%2Cspec.nodeName%3Dn1&limit=100",
+fn a_key_selector_needs_a_term_on_its_key() {
+    // No entry uses `FieldSelector::Key` until the pod list returns (M1-159), so the rule is tested on
+    // the type. The text is the decoded `fieldSelector` value.
+    let phase = FieldSelector::Key("status.phase");
+    for text in [
+        "status.phase!=Succeeded,status.phase!=Failed",
+        "status.phase=Running",
+        "status.phase==Running",
+        "spec.nodeName=n1,status.phase!=Failed",
+        "status.phase!=Failed,spec.nodeName=n1",
     ] {
-        assert_eq!(judge_get(&format!("{pods}?{query}")), Ok(()), "{query}");
+        assert!(phase.met_by(Some(text)), "{text}");
     }
-    // Missing, or a selector on another key.
-    for query in [
+    for text in [
+        "spec.nodeName=n1",
+        "metadata.name=status.phase",
+        "xstatus.phase=Running",
+        "status.phasex=Running",
         "",
-        "?",
-        "?&limit=500",
-        "?labelSelector=status.phase%3DRunning",
-        "?fieldSelector=spec.nodeName%3Dn1",
-        "?fieldSelector=",
-        "?fieldSelector=metadata.name%3Dstatus.phase",
-        "?fieldSelector=xstatus.phase%3DRunning",
-        "?fieldSelector=status.phasex%3DRunning",
     ] {
-        assert_eq!(
-            judge_get(&format!("{pods}{query}")),
-            Err(RULE_SELECTOR),
-            "{query}"
-        );
+        assert!(!phase.met_by(Some(text)), "{text}");
     }
-    // A selector the guard cannot read is a query error, not a pass. A term with no operator is one.
-    for query in [
-        "fieldSelector=status.phase",
-        "fieldSelector=status.phase%2Cspec.nodeName%3Dn1",
-        "fieldSelector=status.phase%21%3DFailed&fieldSelector=status.phase%21%3DRunning",
-        "fieldSelector=spec.nodeName%3Da%5C%2Cstatus.phase%3Dx",
-        "fieldSelector=status.phase%3D%ff",
-    ] {
-        assert_eq!(
-            judge_get(&format!("{pods}?{query}")),
-            Err(RULE_QUERY),
-            "{query}"
-        );
-    }
+    assert!(!phase.met_by(None));
 }
 
 #[test]
@@ -366,9 +346,6 @@ fn a_raw_semicolon_in_the_query_is_refused() {
     // Go's `URL.Query()` drops a pair that holds a raw `;`, so the server would list without the
     // selector that the guard saw.
     for uri in [
-        "/api/v1/pods?&fieldSelector=status.phase%21%3DFailed;&limit=500",
-        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed;",
-        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed&limit=5;00",
         "/api/v1/namespaces/app/events?&fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;&limit=500",
         "/api/v1/namespaces/app/events?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;x",
         "/api/v1/nodes?labelSelector=a;",
@@ -1165,7 +1142,6 @@ const SSAR_BODY: &[u8] = br#"{"apiVersion":"authorization.k8s.io/v1","kind":"Sel
 const SSR: &str = "/apis/authentication.k8s.io/v1/selfsubjectreviews";
 const SSAR: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
 const SSRR: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
-const PHASE: &str = "fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed";
 
 /// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. Only the checks not
 /// built yet are listed (M1-107 onward), so these are the calls the design says each one sends, written as
@@ -1210,20 +1186,12 @@ fn calls_of(check: &str) -> Vec<Call> {
         ],
         "k8s.nodes" => vec![
             get("/api/v1/nodes?&limit=500"),
-            get(pods_uri()),
-            get("/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed"),
             get("/apis/karpenter.sh"),
             get("/apis/karpenter.k8s.aws"),
             get("/apis/apps/v1/namespaces/kube-system/deployments?&limit=500"),
         ],
         other => panic!("no calls for {other}"),
     }
-}
-
-fn pods_uri() -> &'static str {
-    // `PHASE` is the selector 03 gives for the pod list. Built once so the test table stays readable.
-    static URI: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    URI.get_or_init(|| format!("/api/v1/pods?&{PHASE}&limit=500"))
 }
 
 /// What a faulty or hostile check could try. Each is refused, from any check.

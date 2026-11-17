@@ -54,10 +54,10 @@ rules:
     resources: ["namespaces"]
     verbs: ["get"]
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
-  # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
+  # k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
   - apiGroups: [""]
-    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
+    resources: ["nodes", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
     verbs: ["list"]
   # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
   - apiGroups: ["storage.k8s.io"]

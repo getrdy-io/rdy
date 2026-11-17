@@ -57,6 +57,31 @@ impl SyncLabel {
     }
 }
 
+/// The system `openshift-*` namespaces the controller never syncs, even with the label `true` (the
+/// upstream `isNSControlled` exemption). `openshift-operators` is not one of them.
+fn is_system(name: &str) -> bool {
+    const PREFIXES: [&str; 17] = [
+        "openshift-kube-",
+        "openshift-config",
+        "openshift-monitoring",
+        "openshift-ingress",
+        "openshift-etcd",
+        "openshift-infra",
+        "openshift-dns",
+        "openshift-authentication",
+        "openshift-apiserver",
+        "openshift-controller-manager",
+        "openshift-cluster-",
+        "openshift-operator-lifecycle-manager",
+        "openshift-network-",
+        "openshift-ovn-kubernetes",
+        "openshift-sdn",
+        "openshift-image-registry",
+        "openshift-console",
+    ];
+    PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+}
+
 /// Whether OpenShift writes the `warn` and `audit` labels of namespace `name` from the SCCs.
 ///
 /// The label sync controller never touches `default`, `kube-*` and `openshift`, and the system `openshift-*`
@@ -65,7 +90,7 @@ impl SyncLabel {
 /// `openshift-*` namespace counts as unsynced unless its label says `true`. Any other namespace is synced
 /// unless its label says `false`.
 fn label_sync_applies(name: &str, label: SyncLabel) -> bool {
-    if name == "default" || name == "openshift" || name.starts_with("kube-") {
+    if name == "default" || name == "openshift" || name.starts_with("kube-") || is_system(name) {
         return false;
     }
     match label {

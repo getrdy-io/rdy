@@ -130,7 +130,7 @@ pub enum FieldSelector {
 
 impl FieldSelector {
     /// True when `decoded` (the value of the `fieldSelector` key) meets the requirement.
-    fn met_by(self, decoded: Option<&str>) -> bool {
+    pub(super) fn met_by(self, decoded: Option<&str>) -> bool {
         let mut terms = decoded
             .into_iter()
             .flat_map(|text| text.split(','))
@@ -204,15 +204,6 @@ pub const ALLOWED: &[Allowed] = &[
         checks: &["k8s.nodes", "k8s.version"],
         reads: "allocatable, conditions, taints, labels; providerID and kubeletVersion",
         field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "",
-        version: "v1",
-        resource: "pods",
-        access: &[Access::List],
-        checks: &["k8s.nodes"],
-        reads: "requests, nodeName and phase only, with a status.phase field selector",
-        field_selector: FieldSelector::Key("status.phase"),
     },
     Allowed {
         group: "",

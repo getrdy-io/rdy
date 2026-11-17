@@ -785,13 +785,12 @@ fn the_remediation_text_is_on_the_allow_list() {
 
 // ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
 
-/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
-const NOT_READ_YET: &[&str] = &["/v1/pods"];
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet. None: the pod list entry
+/// was removed until M1-159 builds the free capacity half, and it comes back with its own fixture.
+const NOT_READ_YET: &[&str] = &[];
 
 #[test]
 fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
-    // Not read yet: the pod list belongs to the free capacity half, which M1-159 builds. When it lands,
-    // this list must be empty, and the assert below fails until it is.
     // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
     // records each (entry, check) pair a recorded request hit.
     crate::client::mock::hits::clear();
