@@ -97,6 +97,9 @@ by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a fi
 `checks/net.egress/` holds six scripted `net.json` cases (M1-095): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused` and `nxdomain`. They have no `expect.json` yet: the tests register the `web` server in code (a `serve` entry needs one), which
 `assert_cases` cannot do, so the check's own tests assert the results (the completeness rule for `net` comes with M1-117).
+`checks/net.tls_intercept/` holds one scripted case (M1-099), `refused`: a closed port, so no chain is had and the host is not tested. The
+class cases need chains generated at test time, which a static file cannot hold, so the check's own tests run them against loopback
+servers, and M1-100 adds the generated-chain rig and the `expect.json` files (PENDING row in the env harness).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout

@@ -71,10 +71,21 @@ impl Trust {
     }
 
     /// The Mozilla roots that `webpki-roots` bundles.
+    #[cfg(test)]
     pub(super) fn bundled(provider: &Arc<CryptoProvider>) -> Self {
-        let store = RootCertStore {
+        Self::bundled_plus(provider, &[])
+    }
+
+    /// The bundled set and `extra` certificates (DER). Only a test passes any (`ProbeHub::trust_as_public`,
+    /// feature `testing`), so a release build always gets the list as `webpki-roots` ships it.
+    pub(super) fn bundled_plus(provider: &Arc<CryptoProvider>, extra: &[Vec<u8>]) -> Self {
+        let mut store = RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
+        for der in extra {
+            // A certificate that does not parse is left out. The test then sees the verdict it earned.
+            let _ = store.add(CertificateDer::from(der.as_slice()));
+        }
         Self::from_store(store, provider)
     }
 
