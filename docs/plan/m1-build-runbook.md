@@ -440,8 +440,8 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       `form: delegated` field (02, M1-107 reviews).
     - M2-139: Linux spec reads open with `O_PATH`, then `fstat`, then reopen `/proc/self/fd/N` (#98
       security).
-    - M2-140: `rdy spec sign` opens `--sig` and `--secret-key` at identification level on Windows, not
-      through `canonicalize` and `symlink_metadata` (#98 security).
+    - M2-140: `rdy spec sign` opens `--sig` and `--secret-key`, and `rdy spec keygen` checks its key paths,
+      at identification level on Windows, not through `canonicalize` and `symlink_metadata` (#98 security).
     - M2-141: the kind job runs `rdy run` on a k8s.version spec, and a three-node variant pages the node
       list with `continue` tokens (M1-107 reviews).
   - M1-107 (correction-54): its row says the plugin token is registered before the first request leaves.
