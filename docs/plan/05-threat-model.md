@@ -196,6 +196,9 @@ STRIDE table: Appendix B.
   (M1-122, ADR 0021). The mitigation is that a store is trusted only if its owner is right and its mode
   bits are tight, and on macOS the system store is in `/etc/rdy`, which only root can create. Windows
   refuses any store and has no user store, until the ACL rules land (M2-105, ADR 0027).
+- A `--key` file has no owner check, also when root reads it. A user who can write a shared folder can
+  swap the key file before a root run. The mitigation is the KEY NOT PINNED banner, which prints the
+  fingerprint of the key that was used. M1-132 reviews this (PR #84 security review, F7).
 
 ## Surface 3: install script and release pipeline
 

@@ -492,3 +492,19 @@ the corrections log of `11-backlog.md`.
   the k8s family joins `rdy run` with M1-107. M1-107 adds k8s.version and the `api/` tree to it and
   regenerates its goldens (4 h); the item moves to M1-117 if M1-117 is not merged first. M1-175 gets a
   missing comma (PR #79 review). No test-pinned document changed.
+- **Correction-50, `--key` needs a signature, the unknown-key line, the proxy carries of M1-097, the `timeouts`
+  env, and one M2 ticket.** From the reviews of PR #84 (M1-126) and of the M1-097 and M1-119 builds.
+  Correction-49 is PR #85. A `--key` run of a spec with no signature exits 64 even with `--allow-unsigned`,
+  with its own first line (01 section 4.7). The `spec_key_unknown` line shows the key id and no fingerprint,
+  because the sidecar carries only the key id, and its fix says to compare the vendor's fingerprint, because
+  a key id can be forged (01 section 4.8, 07 C.5). M1-181 writes the page that says UNSIGNED SPEC, the HTML
+  half of M1-126's "both reports say unsigned". 05 Surface 2 lists a residual for M1-132: a `--key` file read
+  as root has no owner check, and the fingerprint in the KEY NOT PINNED banner is the mitigation. The
+  "direct works, proxy fails" sentence of `auto` needs the `NO_PROXY` rules and moves to M1-098, which also
+  reports upper- and lower-case proxy variables that disagree and extends `ProbeHub::set_proxy_from_env`.
+  M1-107 must not use a proxy read from `HTTP_PROXY` for https (05 INV-11, ADR 0037). In the `timeouts` env
+  only the hung statvfs gives Timeout; the black-hole endpoint gives a bounded Block, because net.egress cuts
+  each endpoint to its own budget. k8s.version never calls `/version`, so M1-119 proves a slow cluster at
+  family level by delaying `GET /apis`, and the slow `/version` case in the CLI env moves to M1-107. 08 says
+  the same. The real-time `Fake::Block` test is M1-051's and is built. New M2-131 (qa-engineer) takes the
+  cancellation tests of 08 section 5. 07 C.5 changed, but no test reads it; no 01 block changed.
