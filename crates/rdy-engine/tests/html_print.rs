@@ -301,3 +301,48 @@ fn a_report_with_no_blocks_matches_its_golden() -> TestResult {
     );
     Ok(())
 }
+
+/// The sample with every check left out by the spec's `os` list, so nothing was measured (07 C.13).
+fn nothing_verified_doc() -> TestResult<Value> {
+    let mut doc = sample()?;
+    for check in doc["checks"].as_array_mut().ok_or("checks is not a list")? {
+        check["status"] = Value::from("skipped");
+        check["bucket"] = Value::from("not_applicable");
+        check["skip_kind"] = Value::from("not_applicable");
+        check["message"] = Value::from("Does not apply on Linux.");
+        check["observed"] = Value::Null;
+        check["expected"] = Value::Null;
+    }
+    Ok(doc)
+}
+
+/// 07 D.7 "What to do next", one sentence per verdict, and always the share sentence.
+#[test]
+fn the_next_step_follows_the_verdict() -> TestResult {
+    let share = "To share this result, send the .json file from the same folder.";
+    let cases = [
+        (sample()?, "Fix the 2 blocks below, then run rdy again."),
+        (
+            nothing_verified_doc()?,
+            "rdy checked nothing on this machine. Every check in the spec is for another OS. Ask the vendor if that is expected.",
+        ),
+    ];
+    for (doc, sentence) in cases {
+        let html = html_of(doc)?;
+        let line = format!("<p class=\"next\">What to do next: {sentence} {share}");
+        assert!(html.contains(&line), "{sentence}");
+    }
+    let html = html_of(nothing_verified_doc()?)?;
+    assert!(html.contains("<title>rdy report: READY with warnings"));
+    Ok(())
+}
+
+/// The page of a report where nothing was checked, byte for byte (07 C.13).
+#[test]
+fn a_report_where_nothing_was_checked_matches_its_golden() -> TestResult {
+    assert_golden(
+        fixtures_dir().join("reports/golden/ready-with-warnings-nothing-verified.html"),
+        html_of(nothing_verified_doc()?)?.as_bytes(),
+    );
+    Ok(())
+}
