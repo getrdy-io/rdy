@@ -450,6 +450,39 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
   - License: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT. Allowed as Apache-2.0 or MIT. The
     Windows-only transitive `winx` is Apache-2.0 WITH LLVM-exception and has the one exception in
     `deny.toml`.
+- `anstream` 1.0.0 with `anstyle` 1.0.14, `anstyle-parse` 1.0.0, `anstyle-query` 1.1.5, `anstyle-wincon`
+  3.0.11 (Windows only), `colorchoice` 1.0.5, `utf8parse` 0.2.2 and `is_terminal_polyfill` 1.70.2 (M1-086,
+  07 D.5). A direct dependency of the `rdy` binary crate only (`rdy-cli`), with features `auto` and `wincon`
+  and no default features. **Approved by security-reviewer, PR #42 (S1 to S5 fixed).** The check
+  crates and the engine do not use it. New packages in the lock file: `anstream`, `anstyle-parse`,
+  `anstyle-query`, `anstyle-wincon`, `colorchoice`, `utf8parse`, `is_terminal_polyfill` and, for Windows,
+  `once_cell_polyfill`; `anstyle` and `windows-sys` were there already.
+  - Purpose: strip colour codes when colour is off, and turn them into console calls where a Windows
+    console needs it (07 section 6). It replaces `atty`, which `deny.toml` bans; the TTY checks stay on
+    `std::io::IsTerminal`.
+  - Maintainers (crates.io owners, confirmed in review, SEC-42): `anstream`, `anstyle-parse`,
+    `anstyle-query`, `anstyle-wincon` and `colorchoice` are owned by `epage` and
+    `github:rust-cli:maintainers`. `utf8parse` is owned by `jwilm`, `chrisduerr` and
+    `github:alacritty:publishers`. `is_terminal_polyfill` and `once_cell_polyfill` are owned by `epage`
+    alone, so they are single-maintainer crates; both are tiny and every bump is seen in the lock file.
+  - `unsafe`: yes, in small places, read in this PR. `anstream`: `from_utf8_unchecked` in the strip
+    adapter, over bytes the parser already proved to be UTF-8. `anstyle`: one block in `color.rs`.
+    `anstyle-parse`: a `MaybeUninit` table and a `transmute` of state numbers. `utf8parse`: one
+    `char::from_u32_unchecked` after its own range check. `anstyle-query` and `anstyle-wincon`: Windows
+    console calls through `windows-sys`. Our crates keep `#![forbid(unsafe_code)]`.
+  - `build.rs`: none in any of them. License: MIT OR Apache-2.0 for all eight (`utf8parse` lists Apache-2.0
+    first). Allowed in `deny.toml`.
+  - Guard: `clippy.toml` bans `AutoStream::auto`, `AutoStream::new`, `anstream::stdout`, `anstream::stderr`
+    and `ColorChoice::write_global`, so no second place can decide colour.
+  - How rdy uses it, and what stays true: rdy decides colour once, in `style::use_color`, and never gives
+    anstream the choice `Auto`. `AutoStream::always` wraps stderr in `entry.rs` (the Windows console half),
+    and `style::write_styled` calls `anstream::adapter::strip_str` when colour is off. The `auto` feature is
+    on only so that `AutoStream::always` can check that the stream is a console before it switches to
+    console calls. When colour is off the entry wraps stderr with `AutoStream::never`, so a Windows console's
+    mode is not changed (only `always` calls `enable_ansi_colors`). Nothing calls `AutoStream::auto`, `choice` or `current_choice`, so no variable decides
+    whether colour is on. On Windows only, `AutoStream::always` reads `TERM` to choose between console
+    calls and passing the codes through; that changes how the codes are drawn, never whether they are. Untrusted text is escaped by `style::untrusted` before it is written, so the strip
+    pass never has to remove a sequence that came from the machine or the spec.
 
 ## SECURITY.md
 

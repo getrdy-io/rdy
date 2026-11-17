@@ -1,0 +1,12 @@
+schema = 1
+name = "crio-cgroup-spec"
+summary = "CRI-O when the spec asks for a cgroup driver rdy cannot read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

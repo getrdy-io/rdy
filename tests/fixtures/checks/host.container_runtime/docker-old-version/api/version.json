@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/version",
+    "query": ""
+  },
+  "status": 200,
+  "body": {
+    "Platform": {
+      "Name": "Docker Engine - Community"
+    },
+    "Components": [
+      {
+        "Name": "Engine",
+        "Version": "20.10.5",
+        "Details": {
+          "ApiVersion": "1.43",
+          "Arch": "amd64",
+          "MinAPIVersion": "1.12",
+          "Os": "linux"
+        }
+      },
+      {
+        "Name": "containerd",
+        "Version": "1.6.26"
+      }
+    ],
+    "Version": "20.10.5",
+    "ApiVersion": "1.43",
+    "MinAPIVersion": "1.12",
+    "Os": "linux",
+    "Arch": "amd64",
+    "KernelVersion": "5.14.0-362.el9.x86_64"
+  },
+  "delay_ms": 0
+}

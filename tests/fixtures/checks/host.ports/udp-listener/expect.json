@@ -1,0 +1,67 @@
+{
+  "entry": {
+    "id": "host.ports",
+    "udp_free": [
+      5353,
+      8472
+    ]
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [],
+      "udp_free": [
+        5353,
+        8472
+      ]
+    },
+    "fix": "Port 5353/udp is held by `avahi-daemon` (pid 702). Stop it with `systemctl stop avahi-daemon.service`, or change the product's port setting.",
+    "level": "fail",
+    "message": "Port 5353/udp is held by `avahi-daemon` (pid 702).",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 3,
+      "reserved_ports": "",
+      "tcp": [],
+      "udp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": {
+                "name": "avahi-daemon",
+                "pid": 702,
+                "unit": "avahi-daemon.service"
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 5353,
+          "state": "in_use",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 8472,
+          "state": "free",
+          "unverified": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}

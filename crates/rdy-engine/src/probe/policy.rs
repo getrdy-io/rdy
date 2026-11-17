@@ -104,8 +104,10 @@ pub(crate) const RULE_PRIVATE_KEY: &str = "private key files are never read";
 pub(crate) const RULE_KUBECONFIG: &str = "kubeconfig and cluster credential files are never read";
 /// `/proc/<pid>/` entries that are not on the short allowlist.
 pub(crate) const RULE_PROC: &str = "process memory, environment and command lines are never read";
-/// A link in `/proc/<pid>/fd` that does not lead to a socket. The target is never logged or returned.
-pub(crate) const RULE_FD_TARGET: &str = "only socket links are read from a process's fd directory";
+/// The rule text of the refusal of a link in `/proc/<pid>/fd` that does not lead to a socket. The target
+/// is never logged or returned. A fd walk (`host.ports`) compares the `rule` of a
+/// [`ProbeError::Denied`](super::ProbeError::Denied) with it to tell this expected refusal from a bug.
+pub const RULE_FD_TARGET: &str = "only socket links are read from a process's fd directory";
 /// `/dev`.
 pub(crate) const RULE_DEVICE: &str = "device files are never read";
 
