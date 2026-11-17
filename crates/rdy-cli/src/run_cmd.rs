@@ -29,8 +29,8 @@
 //! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--jobs` (M1-059), the kube flags (M1-107) and `--key` (M1-126). `--quiet` and `--verbose` (M1-143)
-//! and the live progress line (M1-142) change the output later; this is the plain run.
+//! `--key` and the full unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose`
+//! (M1-143) and the live progress line (M1-142) change the output later; this is the plain run.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -45,7 +45,7 @@ use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
-use rdy_engine::sched::cap_jobs;
+use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
     CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
@@ -166,6 +166,8 @@ async fn execute(
             command: "run with a one-run key",
         }));
     }
+    // A bad `--jobs` is a usage error and comes before the spec is read.
+    let jobs = jobs_from(args.jobs)?;
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
@@ -188,7 +190,11 @@ async fn execute(
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?.map(Arc::new);
 
+    if let Some(note) = jobs.note {
+        let _ = writeln!(stderr, "{note}");
+    }
     let mut options = EngineOptions::new();
+    options.jobs = jobs.count;
     options.network = !args.no_network;
     options.deadline = deadline;
     options.spec_arg = shell_word(&name);
@@ -314,6 +320,37 @@ async fn execute(
             ))
         }
     }
+}
+
+/// What `--jobs` came to.
+struct Jobs {
+    /// How many checks run at once.
+    count: usize,
+    /// The stderr line that says the request was lowered. `None` when it was not.
+    note: Option<String>,
+}
+
+/// Reads `--jobs` (07, `rdy run` flags). Zero is a usage error. Above [`MAX_JOBS`] is capped, with a
+/// note. Not given means the default.
+fn jobs_from(requested: Option<u32>) -> Result<Jobs, CliError> {
+    let Some(asked) = requested else {
+        return Ok(Jobs {
+            count: DEFAULT_JOBS,
+            note: None,
+        });
+    };
+    if asked == 0 {
+        return Err(CliError::usage(
+            "--jobs must be 1 or more",
+            format!("use a number from 1 to {MAX_JOBS}, for example --jobs {DEFAULT_JOBS}"),
+        ));
+    }
+    let asked = usize::try_from(asked).unwrap_or(usize::MAX);
+    let count = cap_jobs(asked);
+    let note = (count < asked).then(|| {
+        format!("note: --jobs {asked} is more than the limit of {MAX_JOBS}, so rdy runs {count} checks at once")
+    });
+    Ok(Jobs { count, note })
 }
 
 /// What the watchdog writes into the report folder when it has to: the spec copy and the partial

@@ -240,6 +240,9 @@ pub struct CommandEntry {
     pub checks: &'static [&'static str],
     /// Absolute directories searched after the fixed search path, for operator-managed tools.
     pub extra_dirs: &'static [&'static str],
+    /// Whether the command may open an internet or packet socket (AF_INET, AF_INET6, AF_PACKET), by
+    /// itself or through the resolver. `--no-network` refuses these before they start (SEC-01).
+    pub network: bool,
     /// The only environment variable names a command may declare. Empty for every entry.
     pub env: &'static [&'static str],
     /// The allowed argv shapes.
@@ -613,6 +616,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/getent",
         os: LINUX,
         checks: &["net.dns"],
+        network: true,
         extra_dirs: &[],
         env: &[],
         forms: &[Form {
@@ -628,6 +632,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/timedatectl",
         os: LINUX,
         checks: &["host.time_sync"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[
@@ -652,6 +657,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/chronyc",
         os: LINUX,
         checks: &["host.time_sync"],
+        network: true,
         extra_dirs: &[],
         env: &[],
         forms: &[form(
@@ -665,6 +671,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/firewall-cmd",
         os: LINUX,
         checks: &["host.firewall"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[
@@ -696,6 +703,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/containerd",
         os: LINUX,
         checks: &["host.container_runtime"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[form("version", &[lit("--version")], SECS_3)],
@@ -705,6 +713,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/crio",
         os: LINUX,
         checks: &["host.container_runtime"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[form("version", &[lit("--version")], SECS_3)],
@@ -714,6 +723,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/sbin/scutil",
         os: MACOS,
         checks: &["net.proxy", "net.dns"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[
@@ -726,6 +736,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/sbin/netstat",
         os: MACOS,
         checks: &["host.ports"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[
@@ -738,6 +749,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/sbin/sysctl",
         os: MACOS,
         checks: &["host.cpu"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[Form {
@@ -757,6 +769,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: r"C:\Windows\System32\NETSTAT.EXE",
         os: WINDOWS,
         checks: &["host.ports"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[form("ano", &[lit("-ano")], SECS_5)],
@@ -766,6 +779,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: r"C:\Windows\System32\netsh.exe",
         os: WINDOWS,
         checks: &["host.ports"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[form(
@@ -785,6 +799,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/nvidia-smi",
         os: LINUX,
         checks: &["gpu.*"],
+        network: false,
         extra_dirs: GPU_DIRS,
         env: &[],
         forms: &[
@@ -812,6 +827,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: r"C:\Windows\System32\nvidia-smi.exe",
         os: WINDOWS,
         checks: &["gpu.*"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[Form {
@@ -827,6 +843,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/nvidia-ctk",
         os: LINUX,
         checks: &["gpu.runtime"],
+        network: false,
         extra_dirs: GPU_DIRS,
         env: &[],
         forms: &[form("version", &[lit("--version")], SECS_5)],
@@ -836,6 +853,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/local/cuda/bin/nvcc",
         os: LINUX,
         checks: &["gpu.cuda"],
+        network: false,
         extra_dirs: &["/usr/local/cuda/bin"],
         env: &[],
         forms: &[form("version", &[lit("--version")], SECS_5)],
@@ -845,6 +863,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: "/usr/bin/nv-fabricmanager",
         os: LINUX,
         checks: &["gpu.fabric"],
+        network: false,
         extra_dirs: GPU_DIRS,
         env: &[],
         forms: &[form("version", &[lit("-v")], SECS_5)],
@@ -854,6 +873,7 @@ static COMMANDS: &[CommandEntry] = &[
         path: WINDOWS_WHOAMI,
         os: WINDOWS,
         checks: &["engine.root"],
+        network: false,
         extra_dirs: &[],
         env: &[],
         forms: &[form(

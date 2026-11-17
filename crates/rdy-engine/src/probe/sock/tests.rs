@@ -68,7 +68,9 @@ fn runtime() -> &'static CheckInfo {
 }
 
 fn hub(backend: impl crate::probe::Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([3; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([3; 32])));
+    hub.set_network(true);
+    hub
 }
 
 fn target(text: &str) -> Target {
