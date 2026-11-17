@@ -112,7 +112,8 @@ fn a_command_that_is_not_built_yet_prints_an_internal_error_object() {
         doc["error"]["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("not yet implemented")
+            .contains("not yet implemented"),
+        "{doc}"
     );
 }
 

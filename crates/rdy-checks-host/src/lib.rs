@@ -6,10 +6,11 @@
 //! (M1-067), [`ContainerRuntimeCheck`] (`host.container_runtime`, M1-150), [`CpuCheck`] (`host.cpu`, M1-071), [`Disk`] (`host.disk`, M1-068), [`Firewall`]
 //! (`host.firewall`, M1-147), [`CgroupsCheck`] (`host.cgroups`, M1-151), [`Kernel`] (`host.kernel`, M1-152),
 //! [`Lsm`] (`host.lsm`, M1-145), [`Memory`] (`host.memory`, M1-069), [`OsCheck`] (`host.os`, M1-073),
-//! [`Ports`] (`host.ports`, M1-072), [`SecurityAgents`] (`host.security_agents`, M1-146) and [`Sysctl`]
-//! (`host.sysctl`, M1-149), which the family builds from their spec entries (M1-172), the security-software catalog ([`agents`]), and the
-//! cgroup helper ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups` share.
-//! [`read_os_facts`] gives `rdy run` the parse of `host.os` for `report.host.os` (M1-180). The real
+//! [`Ports`] (`host.ports`, M1-072), [`SecurityAgents`] (`host.security_agents`, M1-146), [`Sysctl`]
+//! (`host.sysctl`, M1-149) and [`TimeSync`] (`host.time_sync`, M1-148), which the family builds from their
+//! spec entries (M1-172), the security-software catalog ([`agents`]), and the cgroup helper ([`cgroup`],
+//! M1-065) that `host.memory`, `host.cpu` and `host.cgroups` share. [`read_os_facts`] gives `rdy run` the
+//! parse of `host.os` for `report.host.os` (M1-180). The real
 //! checks replace the stubs one ticket at a time. Every check compiles on every target. Where a data
 //! source is not built, the check is `NotYet` on that OS, and the planner skips it with
 //! `skip_kind: not_yet_on_os` before it runs.
@@ -57,6 +58,7 @@ mod reads;
 mod security_agents;
 mod sysctl;
 mod text;
+mod time_sync;
 
 pub use cgroups::CgroupsCheck;
 pub use container_runtime::ContainerRuntimeCheck;
@@ -71,3 +73,4 @@ pub use os::{OsCheck, OsFacts, read_os_facts};
 pub use ports::Ports;
 pub use security_agents::SecurityAgents;
 pub use sysctl::Sysctl;
+pub use time_sync::TimeSync;

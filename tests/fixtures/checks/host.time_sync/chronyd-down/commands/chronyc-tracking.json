@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/chronyc",
+    "-n",
+    "-c",
+    "tracking"
+  ],
+  "stdout": "",
+  "stderr": "506 Cannot talk to daemon\n",
+  "exit": 1,
+  "delay_ms": 0
+}

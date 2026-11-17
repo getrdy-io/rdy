@@ -84,6 +84,7 @@ secrecy = { version = "0.10", default-features = false }
 # tree already through kube; the versions are the ones kube-client uses.
 http = { version = "1", default-features = false }
 http-body = { version = "1", default-features = false }
+futures-util = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 # Test-only: a TLS server with a throwaway CA for the client tests (M1-102) and for the loopback servers of

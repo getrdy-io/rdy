@@ -27,6 +27,8 @@ use crate::error::{CliError, ErrorCode};
 use crate::hooks::RunHooks;
 use crate::output::report_error;
 
+mod flags;
+
 const CANARY: &str = "canary-run-cmd-token-9917";
 
 const FULL: OsSupport = OsSupport {
