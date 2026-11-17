@@ -3,7 +3,10 @@ use super::*;
 fn on() -> Gate {
     Gate {
         terminal: true,
-        ..Gate::default()
+        term_dumb: false,
+        rust_log: false,
+        detail: Detail::Normal,
+        progress: ProgressChoice::Auto,
     }
 }
 
@@ -32,21 +35,24 @@ fn one_check_is_singular() {
 #[test]
 fn every_reason_to_stay_quiet_prints_nothing() {
     let gates = [
-        Gate::default(),
+        Gate {
+            terminal: false,
+            ..on()
+        },
         Gate {
             term_dumb: true,
             ..on()
         },
         Gate {
-            quiet: true,
+            detail: Detail::Quiet,
             ..on()
         },
         Gate {
-            verbose: true,
+            detail: Detail::Verbose,
             ..on()
         },
         Gate {
-            progress_never: true,
+            progress: ProgressChoice::Never,
             ..on()
         },
         Gate {
@@ -60,6 +66,13 @@ fn every_reason_to_stay_quiet_prints_nothing() {
 }
 
 #[test]
+fn the_flags_make_the_detail() {
+    assert_eq!(Detail::from_flags(false, false), Detail::Normal);
+    assert_eq!(Detail::from_flags(true, false), Detail::Quiet);
+    assert_eq!(Detail::from_flags(false, true), Detail::Verbose);
+}
+
+#[test]
 fn the_clear_uses_no_escape_sequence_and_runs_once() {
     let mut err = Vec::new();
     let mut line = StaticLine::show(on(), 3, &mut err);
@@ -68,6 +81,21 @@ fn the_clear_uses_no_escape_sequence_and_runs_once() {
     line.clear(&mut err);
     assert_eq!(err.len(), after_first);
     assert!(!err.contains(&0x1b));
+}
+
+#[test]
+fn a_cleared_line_has_nothing_left_for_the_drop_to_write() {
+    let mut err = Vec::new();
+    let mut line = StaticLine::show(on(), 3, &mut err);
+    line.clear(&mut err);
+    assert!(line.shown.is_none());
+}
+
+#[test]
+fn a_line_that_is_still_shown_is_what_the_drop_clears() {
+    let mut err = Vec::new();
+    let line = StaticLine::show(on(), 3, &mut err);
+    assert_eq!(line.shown, Some("Running 3 checks...".len()));
 }
 
 #[test]

@@ -2,7 +2,8 @@
 //!
 //! The built `rdy` runs the quickstart spec offline in a pseudo terminal. The line shows before the
 //! first check and is cleared before the check list, so the final screen holds no trace of it. A pipe,
-//! `--quiet`, `--progress never` and `TERM=dumb` print nothing. No example binary is built: the test
+//! `--quiet`, `--progress never`, `TERM=dumb` and `RUST_LOG` print nothing. The `--color never` run in
+//! the first test is the plain-text terminal case: the line and its clear hold no escape byte. No example binary is built: the test
 //! runs `rdy` itself, so it needs no entry in the `pty-probe` nextest group.
 #![cfg(unix)]
 // Helper functions in tests/ are not covered by clippy.toml, and a failed spawn must fail the test.
@@ -16,7 +17,8 @@ use rexpect::session::spawn_command;
 
 mod common;
 
-const TIMEOUT_MS: u64 = 60_000;
+// Under nextest's 120 s kill, so a hung read fails with a message and does not pass as a kill.
+const TIMEOUT_MS: u64 = 30_000;
 
 /// One pty test at a time within this binary: rexpect forks.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
@@ -25,7 +27,7 @@ fn quickstart() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/specs/acme-quickstart.yaml")
 }
 
-fn command(extra: &[&str], term: &str) -> (Command, tempfile::TempDir) {
+fn command(extra: &[&str], term: &str, rust_log: Option<&str>) -> (Command, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rdy"));
     cmd.arg("run")
@@ -36,15 +38,18 @@ fn command(extra: &[&str], term: &str) -> (Command, tempfile::TempDir) {
         .args(extra)
         .current_dir(dir.path())
         .env("TERM", term)
-        .env_remove("RUST_LOG")
         .env_remove("RDY_PROGRESS");
+    match rust_log {
+        Some(value) => cmd.env("RUST_LOG", value),
+        None => cmd.env_remove("RUST_LOG"),
+    };
     (cmd, dir)
 }
 
 /// What the terminal shows after `rdy` ends, as raw bytes in order.
-fn on_pty(extra: &[&str], term: &str) -> String {
+fn on_pty(extra: &[&str], term: &str, rust_log: Option<&str>) -> String {
     let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
-    let (cmd, _dir) = command(extra, term);
+    let (cmd, _dir) = command(extra, term, rust_log);
     let mut session = spawn_command(cmd, Some(TIMEOUT_MS)).expect("spawn rdy on a pty");
     session.exp_eof().expect("eof")
 }
@@ -87,7 +92,7 @@ fn static_line(text: &str) -> Option<(usize, usize)> {
 
 #[test]
 fn the_line_shows_before_the_first_check_and_leaves_no_trace() {
-    let seen = on_pty(&[], "xterm");
+    let seen = on_pty(&[], "xterm", None);
     let (at, len) = static_line(&seen).unwrap_or_else(|| panic!("no static line in {seen:?}"));
     let after = &seen[at + len..];
     // Cleared at once: a carriage return, as many spaces as the line, and a carriage return.
@@ -105,20 +110,32 @@ fn the_line_shows_before_the_first_check_and_leaves_no_trace() {
 }
 
 #[test]
-fn quiet_progress_never_and_a_dumb_terminal_print_nothing() {
-    for (extra, term) in [
-        (&["--quiet"][..], "xterm"),
-        (&["--progress", "never"][..], "xterm"),
-        (&[][..], "dumb"),
-    ] {
-        let seen = on_pty(extra, term);
-        assert!(!seen.contains("Running"), "{extra:?} TERM={term}: {seen:?}");
-    }
+fn quiet_prints_no_static_line() {
+    let seen = on_pty(&["--quiet"], "xterm", None);
+    assert!(!seen.contains("Running"), "{seen:?}");
+}
+
+#[test]
+fn progress_never_prints_no_static_line() {
+    let seen = on_pty(&["--progress", "never"], "xterm", None);
+    assert!(!seen.contains("Running"), "{seen:?}");
+}
+
+#[test]
+fn a_dumb_terminal_prints_no_static_line() {
+    let seen = on_pty(&[], "dumb", None);
+    assert!(!seen.contains("Running"), "{seen:?}");
+}
+
+#[test]
+fn rust_log_prints_no_static_line() {
+    let seen = on_pty(&[], "xterm", Some("rdy=info"));
+    assert!(static_line(&seen).is_none(), "{seen:?}");
 }
 
 #[test]
 fn a_pipe_prints_nothing() {
-    let (mut cmd, _dir) = command(&[], "xterm");
+    let (mut cmd, _dir) = command(&[], "xterm", None);
     let out = common::quiet(
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())

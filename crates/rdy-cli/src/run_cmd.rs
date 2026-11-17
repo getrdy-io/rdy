@@ -64,7 +64,7 @@ use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
-use crate::static_line::{Gate, StaticLine};
+use crate::static_line::{Detail, Gate, StaticLine};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
 use crate::terminal::{View, banner, render};
 use crate::trust::{self, Layout, Vars};
@@ -272,8 +272,7 @@ async fn execute(
     // and cleared before anything else is written to stderr.
     let gate = Gate::new(
         progress,
-        quiet,
-        verbose,
+        Detail::from_flags(quiet, verbose),
         hooks
             .stderr_terminal
             .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr())),
