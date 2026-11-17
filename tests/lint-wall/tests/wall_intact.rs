@@ -556,6 +556,43 @@ fn no_workflow_sets_flags_and_the_clippy_steps_are_the_six_pinned_ones() {
     }
 }
 
+/// The release gate for a stale security-agent catalog (M1-173), line for line. No `--max-days`: a
+/// workflow that loosens the limit is a change to this test, which is in CODEOWNERS.
+const AGENTS_STALE_STEP: &str =
+    "run: cargo run --locked --quiet --package xtask -- agents-stale --today \"$(date -u +%F)\"";
+
+#[test]
+fn the_release_workflow_gates_on_a_stale_agent_catalog_with_the_pinned_command() {
+    let text = read(&root().join(".github/workflows/check-release-artifacts.yml"));
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter(|l| l.contains("agents-stale"))
+        .collect();
+    let steps: Vec<&&str> = lines.iter().filter(|l| l.starts_with("run:")).collect();
+    assert_eq!(
+        steps,
+        [&AGENTS_STALE_STEP],
+        "check-release-artifacts.yml must run exactly the pinned agents-stale command (AGENTS_STALE_STEP)"
+    );
+    for file in workflow_files() {
+        let body = read(&file);
+        for line in body.lines().filter(|l| !l.trim_start().starts_with('#')) {
+            assert!(
+                !(line.contains("agents-stale") && line.contains("--max-days")),
+                "{}: `{line}` loosens the staleness limit",
+                file.display()
+            );
+        }
+    }
+    // The step sits in a job of the same reusable workflow, so release.yml's check job fails with it.
+    assert!(
+        text.contains("agents-stale:\n    name:"),
+        "the agents-stale job is missing"
+    );
+}
+
 #[test]
 fn the_workflow_reader_sees_what_it_must() {
     let check = |text: &str| {

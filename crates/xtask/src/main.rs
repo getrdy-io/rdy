@@ -74,7 +74,7 @@ enum Command {
     /// release workflow runs it.
     AgentsStale {
         /// The day to count from, as YYYY-MM-DD. The workflow passes the date of the run.
-        #[arg(long, value_name = "YYYY-MM-DD")]
+        #[arg(long, value_name = "YYYY-MM-DD", value_parser = agents::parse_today)]
         today: String,
         /// The oldest `checked_on` that still passes, in days.
         #[arg(long, value_name = "DAYS", default_value_t = agents::MAX_AGE_DAYS)]

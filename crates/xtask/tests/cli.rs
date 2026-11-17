@@ -577,8 +577,8 @@ fn agents_stale(args: &[&str]) -> Result<Output> {
 }
 
 #[test]
-fn agents_stale_passes_the_day_the_seed_list_was_read() -> Result<()> {
-    let out = agents_stale(&["--today", "2026-11-17"])?;
+fn agents_stale_passes_on_a_day_inside_the_limit() -> Result<()> {
+    let out = agents_stale(&["--today", "2026-10-30"])?;
     assert_eq!(code(&out), Some(0), "{}", stderr(&out));
     assert!(stderr(&out).contains("none checked more than 180 days"));
     Ok(())
@@ -589,7 +589,11 @@ fn agents_stale_exits_one_and_names_each_stale_entry() -> Result<()> {
     let out = agents_stale(&["--today", "2099-01-01"])?;
     assert_eq!(code(&out), Some(1));
     let text = stderr(&out);
-    assert!(text.contains("microsoft-defender-endpoint-linux was checked on"));
+    // Every entry of the shipped catalog is named, not only the first.
+    let catalog = rdy_checks_host::agents::catalog().expect("the shipped catalog parses");
+    for id in catalog.ids() {
+        assert!(text.contains(&format!("{id} was checked on")), "{id}");
+    }
     assert!(text.contains("The release stops here."));
     assert!(text.contains("crates/rdy-checks-host/data/agents.toml"));
     Ok(())
@@ -606,9 +610,16 @@ fn agents_stale_takes_the_age_limit_from_the_flag() -> Result<()> {
 fn agents_stale_refuses_a_today_that_is_not_a_date() -> Result<()> {
     for today in ["tomorrow", "2026-13-01", "20261117", ""] {
         let out = agents_stale(&["--today", today])?;
-        assert_eq!(code(&out), Some(70), "{today:?} passed the gate");
+        assert_eq!(code(&out), Some(64), "{today:?} passed the gate");
         assert!(stderr(&out).contains("is not a date"), "{today:?}");
     }
+    Ok(())
+}
+
+#[test]
+fn agents_stale_fails_an_entry_dated_after_today() -> Result<()> {
+    let out = agents_stale(&["--today", "2000-01-01"])?;
+    assert_eq!(code(&out), Some(1), "{}", stderr(&out));
     Ok(())
 }
 

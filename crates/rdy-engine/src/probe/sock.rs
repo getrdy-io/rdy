@@ -185,7 +185,7 @@ impl Peers {
     /// its own, so it takes the port of the entry that names the host.
     ///
     /// Only the network module (`runtime` or `loopback`) calls it.
-    #[cfg(any(feature = "runtime", feature = "loopback", test))]
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
     pub(super) fn spec_host(&self, host: &Host) -> Option<(Host, u16)> {
         self.hosts.get().and_then(|hosts| {
             hosts
