@@ -131,3 +131,9 @@ rule = "ip"
 path = "tests/fixtures/checks/host.time_sync/named-server-metadata/net.json"
 value = "169.254.169.123"
 reason = "The resolver answer that host.time_sync must refuse (the Amazon time address behind a name); no test sends a packet to it"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/aks-app-routing/api/ingressclasses.json"
+value = "webapprouting.kubernetes.azure.com"
+reason = "The name of the IngressClass that AKS application routing creates, not a host a test contacts (k8s.ingress)"

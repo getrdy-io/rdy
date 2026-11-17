@@ -94,9 +94,9 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
-`checks/k8s.ingress/` holds 43 clusters (the class cases `nginx-community`, `nginx-f5`, `traefik-k3s`, `eks-alb`,
+`checks/k8s.ingress/` holds 48 clusters (the class cases `nginx-community`, `nginx-f5`, `traefik-k3s`, `eks-alb`,
 `eks-alb-default`, `gke-no-class`, `openshift`, `none-bare`, `two-classes`, `two-defaults`, `classes-forbidden`,
-`classes-not-served`, `classes-cut`, `classes-cut-no-match`, `classes-hostile`, `last-applied`, the Gateway API cases `gateway-*`, the load
+`classes-not-served`, `classes-cut`, `classes-cut-no-match`, `classes-hostile`, `classes-mixed-case`, `aks-app-routing`, `rke2-nginx`, `last-applied`, the Gateway API cases `gateway-*`, the load
 balancer cases `lb-*`, `no-lb-ask`, `route-missing` and `apis-forbidden`), `generated` by `scripts/gen-k8s-ingress-fixtures.py`
 (`--check` fails on drift and on a file the script did not write). Controller strings are the ones each project documents.
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a

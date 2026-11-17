@@ -215,11 +215,21 @@ EKS_ALB = ingress_class(
     parameters={"apiGroup": "elbv2.k8s.aws", "kind": "IngressClassParams", "name": "acme-alb"},
 )
 EKS_ALB_DEFAULT = ingress_class("alb", "ingress.k8s.aws/alb", default=True, labels=EKS_ALB["metadata"]["labels"])
-OPENSHIFT_DEFAULT = ingress_class(
-    "openshift-default",
-    "openshift.io/ingress-to-route",
+# OpenShift's router creates this class with no default annotation: its router takes an Ingress with no class.
+OPENSHIFT_DEFAULT = ingress_class("openshift-default", "openshift.io/ingress-to-route")
+# AKS application routing: the managed NGINX class uses the community controller string.
+AKS_ROUTING = ingress_class(
+    "webapprouting.kubernetes.azure.com",
+    "k8s.io/ingress-nginx",
     default=True,
-    annotations={"ingressclass.kubernetes.io/is-default-class": "true"},
+    labels={"app.kubernetes.io/managed-by": "aks-app-routing-operator"},
+)
+# RKE2 bundles the community controller as rke2-ingress-nginx, with the class `nginx`.
+RKE2_NGINX = ingress_class(
+    "nginx",
+    "k8s.io/ingress-nginx",
+    labels={"app.kubernetes.io/managed-by": "Helm", "app.kubernetes.io/name": "rke2-ingress-nginx", "helm.sh/chart": "rke2-ingress-nginx-4.12.1"},
+    annotations={"meta.helm.sh/release-name": "rke2-ingress-nginx", "meta.helm.sh/release-namespace": "kube-system"},
 )
 HOSTILE_NAME = "c\u001b[2J`rm -rf /`‮" + "x" * 80
 LAST_APPLIED = ingress_class(
@@ -435,6 +445,9 @@ def case(name, summary, groups=(), items=None, more=False, class_code=200, apis_
 case("nginx-community", "A community ingress-nginx class, the default: the retirement warning", items=[NGINX_COMMUNITY])
 case("nginx-f5", "An F5 NGINX controller class, the default: no retirement warning", items=[NGINX_F5])
 case("traefik-k3s", "k3s with its bundled Traefik class, the default", items=[TRAEFIK_K3S])
+case("aks-app-routing", "AKS application routing: the managed class uses the community controller, so it warns", items=[AKS_ROUTING])
+case("rke2-nginx", "RKE2 ships the community ingress-nginx as the class nginx", items=[RKE2_NGINX])
+case("classes-mixed-case", "A controller string with capitals: the match is exact", items=[ingress_class("acme", "Acme.example/Ingress", default=True)])
 case("eks-alb", "EKS with the AWS Load Balancer Controller class, not marked default", items=[EKS_ALB])
 case("eks-alb-default", "EKS with the AWS Load Balancer Controller class marked default", items=[EKS_ALB_DEFAULT])
 case("gke-no-class", "GKE has no IngressClass objects: its built-in ingress needs none")
@@ -535,8 +548,16 @@ case(c, "A LoadBalancer service with no address for 3 minutes", items=[NGINX_F5]
 services(c, [service("acme-gateway", created="2026-11-17T11:57:00Z")])
 
 c = "lb-pending-boundary"
-case(c, "A LoadBalancer service with no address for exactly 10 minutes", items=[NGINX_F5])
+case(c, "A LoadBalancer service with no address for exactly 10 minutes (600 seconds): not older than 10 minutes", items=[NGINX_F5])
 services(c, [service("acme-gateway", created="2026-11-17T11:50:00Z")])
+
+c = "lb-pending-over"
+case(c, "A LoadBalancer service with no address for 10 minutes and 1 second (601 seconds)", items=[NGINX_F5])
+services(c, [service("acme-gateway", created="2026-11-17T11:49:59Z")])
+
+c = "lb-pending-under"
+case(c, "A LoadBalancer service with no address for 599 seconds", items=[NGINX_F5])
+services(c, [service("acme-gateway", created="2026-11-17T11:50:01Z")])
 
 c = "lb-assigned"
 case(c, "LoadBalancer services that have an address, a ClusterIP service and a NodePort service", items=[NGINX_F5])

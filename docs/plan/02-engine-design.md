@@ -1316,7 +1316,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
 | `networking.k8s.io` `ingressclasses` | LIST | `k8s.ingress`: class name, `spec.controller`, the default-class annotation |
 | `gateway.networking.k8s.io` `gatewayclasses` | LIST | `k8s.ingress`: class name, `spec.controllerName`, the `Accepted` condition |
-| core `services` | LIST in the target namespace | `k8s.ingress`: name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; nothing else of a Service is held |
+| core `services` | LIST in the target namespace, granted by an optional Role of that namespace | `k8s.ingress`: name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; nothing else of a Service is held |
 
 5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
    configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`

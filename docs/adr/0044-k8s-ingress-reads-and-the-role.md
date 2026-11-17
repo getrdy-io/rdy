@@ -1,6 +1,6 @@
 # ADR 0044: `k8s.ingress` reads classes, Gateway API classes and namespace Services, and the example role grows by three lists
 
-- Status: Accepted, security-reviewed and k8s-reviewed (PR pending)
+- Status: Proposed (reviews of PR #65 are not linked yet)
 - Date: 2026-11-17
 
 ## Context
@@ -15,10 +15,14 @@ request count together.
 1. **Three new `ALLOWED` entries, all `list`.** `networking.k8s.io` `ingressclasses` (cluster scope),
    `gateway.networking.k8s.io` `gatewayclasses` (cluster scope) and core `services` in a namespace. No get by
    name, no watch, no write. The example role gets one rule for each, and `services` joins the core list rule.
-2. **Services only when the spec asks.** The Service list is sent only when `loadbalancer: true` and a family
-   namespace is known. A cluster-wide Service list is never asked. The role grant is cluster wide, because
-   the table's `ListInNamespace(Any)` shape is a `list` in any namespace (as for claims, quotas and limit
-   ranges), and a `Service` holds no secret.
+2. **Services only when the spec asks, and only through a namespaced Role.** The Service list is sent only when
+   `loadbalancer: true` and a family namespace is known. A cluster-wide Service list is never asked. The cluster
+   role does not hold `services`. The grant is `examples/rbac/rdy-readonly-target-namespace.yaml`, an optional
+   template with a `Role` and `RoleBinding` of the one install namespace (`list` only), applied with
+   `sed -e 's/<target-namespace>/<ns>/g' ... | kubectl apply -f -`, like the other optional Roles. Without it the
+   result is partial with `list services` in `missing_grants` and a `kubectl auth can-i list services -n <ns>`
+   hint. A Service carries a selector, ports and annotations that can hold sensitive configuration, so the
+   grant is as narrow as the read. The kind job renders the template for `default`.
 3. **Discovery before the Gateway API.** `GET /apis` (open to every signed-in caller) tells whether the Gateway
    API group is served at `v1`. Only then is `GET /apis/gateway.networking.k8s.io/v1` and the `GatewayClass`
    list sent. On a cluster without the CRDs the check never asks for a list that would answer 404. The kind job
@@ -36,15 +40,19 @@ request count together.
 
 ## Consequences
 
-- The role holder can read every Service of every namespace (spec, selector, ports, annotations). rdy drops
-  all but four facts while parsing. A cluster that wants less can bind the role per namespace.
+- The Role holder can read every Service of the one namespace it is applied in (spec, selector, ports,
+  annotations). rdy drops all but four facts while parsing. The cluster role reads no Service.
+- The guard does not tie the namespace of the Service list to the spec's namespace: any namespace in the
+  Role's reach is accepted. Pinning it is a follow-up ticket.
+- Open question for a correction: whether two default classes should warn. 03 does not say, so they are a note.
 - `services` is also read by `k8s.dns` (PR #62) by name in two namespaces. Whichever lands second folds the two
   table entries into one `services` entry that cites both checks and lists both access shapes.
-- The kind job's request count goes from 12 to 15 reads. Its grant list gains the three lists.
+- The kind job's request count goes from 12 to 15 reads. Its grant list gains the two cluster lists, and the Service list is a Role of `default`.
 - GKE and OpenShift are told apart by `-gke.` in the server version and by `route.openshift.io` (or the cluster
   facts), so a missing class or Gateway API there is "not verified". A heuristic that fails shows a block, which
   the spec's `severity` can lower.
 
 ## Tickets implied
 
+- [M2] Pin the Service list namespace to the spec namespace in the guard | owner: rust-engineer | est: 1.5h | depends on: M1-163 | exit test: a Service list in any other namespace than the one the check was built with is refused by the guard.
 - [M2] Gateway API bundle version and channel from the CRD annotations | owner: check-author | est: 1.5h | depends on: M1-163 | exit test: a role with `get customresourcedefinitions` by name reads the two annotations, and a spec key names the bundle it needs.

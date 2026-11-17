@@ -14,7 +14,8 @@ use kube::core::{ClusterResourceScope, NamespaceResourceScope};
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer};
 
-/// The most conditions kept of a `GatewayClass`.
+/// The most conditions searched for `Accepted`. The whole list is parsed before this applies, so it bounds
+/// the work of the search, not the memory of the parse (the response is capped by the client).
 const MAX_CONDITIONS: usize = 16;
 
 macro_rules! resource {

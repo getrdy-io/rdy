@@ -20,10 +20,7 @@
           "uid": "00000000-0000-4000-8000-0000000000a1",
           "resourceVersion": "4711",
           "generation": 1,
-          "creationTimestamp": "2026-09-01T08:00:00Z",
-          "annotations": {
-            "ingressclass.kubernetes.io/is-default-class": "true"
-          }
+          "creationTimestamp": "2026-09-01T08:00:00Z"
         },
         "spec": {
           "controller": "openshift.io/ingress-to-route"

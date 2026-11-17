@@ -438,7 +438,6 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
-    ("list", "", "services", ""),
     ("list", "networking.k8s.io", "ingressclasses", ""),
     ("list", "gateway.networking.k8s.io", "gatewayclasses", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
@@ -666,6 +665,8 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let must_not_allow = [
         ("get", "", "secrets", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
+        // The Service list is a Role of `default`, not cluster wide.
+        ("list", "", "services", Some("kube-system"), None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
         ("patch", "", "nodes", None, None),
@@ -720,8 +721,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
                         )
                 })
             };
-            let optional =
-                *namespace == "kube-system" && listed(&[("list", "apps", "deployments", "")]);
+            let optional = (*namespace == "kube-system"
+                && listed(&[("list", "apps", "deployments", "")]))
+                // The target-namespace template, rendered for `default` by the kind job.
+                || (*namespace == "default" && listed(&[("list", "", "services", "")]));
             if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
                 unexpected.push(format!("{namespace}: {grant:?}"));
             }

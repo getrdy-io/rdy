@@ -211,7 +211,7 @@ async fn a_community_ingress_nginx_class_warns_with_the_retirement_text() {
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert_eq!(
         finding.message,
-        "Ingress class nginx uses the community Ingress NGINX controller, which was retired upstream in March 2026"
+        "Ingress class nginx uses the community Ingress NGINX controller (k8s.io/ingress-nginx), which was retired upstream in March 2026, whoever ships it"
     );
     let fix = fix_of(&finding);
     assert!(
@@ -328,13 +328,45 @@ async fn a_required_controller_that_no_class_names_blocks() {
 }
 
 #[tokio::test]
-async fn the_controller_match_ignores_case() {
-    let rig = rig("nginx-f5");
+async fn the_controller_match_is_exact_and_case_sensitive() {
+    // The class says `Acme.example/Ingress`. The spec type lower-cases what it is given, so it can never
+    // equal it: a controller string is compared as written.
+    let rig = rig("classes-mixed-case");
     let finding = rig
-        .finding(json!({"controller": "nginx.org/ingress-controller"}))
+        .finding(json!({"controller": "acme.example/ingress"}))
         .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    rig.audit();
+
+    let rig = self::rig("classes-mixed-case");
+    let finding = rig.finding(json!({"controller": "any"})).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     rig.audit();
+}
+
+#[tokio::test]
+async fn managed_and_bundled_copies_of_the_community_controller_warn_too() {
+    for case in ["aks-app-routing", "rke2-nginx"] {
+        let rig = rig(case);
+        let finding = rig.finding(json!({})).await;
+        assert_eq!(finding.level, Level::Warn, "{case}: {finding:?}");
+        assert!(
+            finding.message.contains(
+                "(k8s.io/ingress-nginx), which was retired upstream in March 2026, whoever ships it"
+            ),
+            "{}",
+            finding.message
+        );
+        let fix = fix_of(&finding);
+        assert!(
+            fix.contains(
+                "the AKS application routing add-on (class `webapprouting.kubernetes.azure.com`)"
+            ),
+            "{fix}"
+        );
+        assert!(fix.contains("RKE2's `rke2-ingress-nginx`"), "{fix}");
+        rig.audit();
+    }
 }
 
 #[tokio::test]
@@ -770,36 +802,56 @@ async fn load_balancers_are_read_only_when_the_spec_asks() {
 }
 
 #[tokio::test]
-async fn a_pending_load_balancer_is_a_warning_from_ten_minutes() {
-    let rig = rig("lb-pending-boundary");
-    let finding = rig.finding(json!({"loadbalancer": true})).await;
-    assert_eq!(finding.level, Level::Warn, "{finding:?}");
-    assert!(
-        finding
-            .message
-            .contains("has had no address for 10 minutes")
-    );
-    rig.audit();
+async fn a_pending_load_balancer_warns_when_older_than_ten_minutes() {
+    // 03 says "older than 10 minutes": 599 and 600 seconds do not warn, 601 does.
+    for (case, warns) in [
+        ("lb-pending-under", false),
+        ("lb-pending-boundary", false),
+        ("lb-pending-over", true),
+    ] {
+        let rig = rig(case);
+        let finding = rig.finding(json!({"loadbalancer": true})).await;
+        if warns {
+            assert_eq!(finding.level, Level::Warn, "{case}: {finding:?}");
+            assert!(
+                finding
+                    .message
+                    .contains("has had no address for 10 minutes")
+            );
+        } else {
+            assert_eq!(finding.level, Level::Pass, "{case}: {finding:?}");
+            assert!(
+                notes(&finding)
+                    .contains("acme-gateway has no address yet. It is under 10 minutes old"),
+                "{}",
+                notes(&finding)
+            );
+        }
+        rig.audit();
+    }
+}
 
-    let rig = self::rig("lb-pending-young");
+#[tokio::test]
+async fn a_young_pending_load_balancer_is_a_note() {
+    let rig = rig("lb-pending-young");
     let finding = rig.finding(json!({"loadbalancer": true})).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
-    assert!(
-        notes(&finding).contains("acme-gateway has no address yet. It is under 10 minutes old"),
-        "{}",
-        notes(&finding)
-    );
     rig.audit();
 }
 
 #[tokio::test]
-async fn several_pending_load_balancers_are_counted_and_the_oldest_listed_first_is_named() {
+async fn several_pending_load_balancers_are_counted_and_the_oldest_is_named() {
     let rig = rig("lb-pending-old-two");
     let finding = rig.finding(json!({"loadbalancer": true})).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert_eq!(
         finding.message,
-        "LoadBalancer service acme-gateway in acme-system has had no address for 20 minutes (and 1 more)"
+        "LoadBalancer service acme-metrics in acme-system has had no address for 45 minutes (and 1 more)"
+    );
+    assert!(
+        notes(&finding).contains(
+            "If its type was changed to LoadBalancer later, it has waited less than that."
+        )
     );
     rig.audit();
 }

@@ -29,7 +29,8 @@ const SHOWN: usize = 64;
 /// The most names listed in one sentence.
 const LISTED: usize = 5;
 
-/// A `LoadBalancer` Service with no address is a warning from this age (03).
+/// A `LoadBalancer` Service with no address is a warning when it is older than this (03: "older than 10
+/// minutes", so exactly 600 seconds does not warn).
 pub(super) const PENDING_AFTER_SECS: i64 = 10 * 60;
 
 /// The controller of the community ingress-nginx project, retired upstream in March 2026.
@@ -292,13 +293,13 @@ fn judge_classes(params: &K8sIngress, found: &Gathered, sink: &mut Sink) {
     let retired: Vec<&Class> = page
         .items
         .iter()
-        .filter(|class| class.controller.eq_ignore_ascii_case(RETIRED_CONTROLLER))
+        .filter(|class| class.controller == RETIRED_CONTROLLER)
         .collect();
     if !retired.is_empty() {
         sink.issue(
             Level::Warn,
             format!(
-                "Ingress class {} uses the community Ingress NGINX controller, which was retired upstream in March 2026",
+                "Ingress class {} uses the community Ingress NGINX controller (k8s.io/ingress-nginx), which was retired upstream in March 2026, whoever ships it",
                 list(retired.iter().map(|class| class.name.as_str()))
             ),
             fix::retired().to_owned(),
@@ -316,7 +317,7 @@ fn judge_classes(params: &K8sIngress, found: &Gathered, sink: &mut Sink) {
         Some(controller) => page
             .items
             .iter()
-            .any(|class| class.controller.eq_ignore_ascii_case(controller)),
+            .any(|class| class.controller == controller),
     };
     if !satisfied {
         if let Some(controller) = want {
@@ -335,7 +336,10 @@ fn judge_classes(params: &K8sIngress, found: &Gathered, sink: &mut Sink) {
     }
 
     let defaults: Vec<&Class> = page.items.iter().filter(|class| class.default).collect();
-    if want.is_some() && satisfied && defaults.is_empty() {
+    // OpenShift's router and GKE's built-in ingress take an Ingress with no class, so no default is no
+    // problem there.
+    let own_ingress = found.platform.gke || found.platform.openshift;
+    if want.is_some() && satisfied && defaults.is_empty() && !own_ingress {
         sink.issue(
             Level::Warn,
             "No ingress class is the default, so an Ingress with no class is ignored".to_owned(),
@@ -593,15 +597,17 @@ fn judge_balancers(params: &K8sIngress, found: &Gathered, sink: &mut Sink) {
     let metallb = matches!(&found.groups, Read::Ok(groups) if groups.metallb);
     match &found.services {
         Some(Read::Ok(page)) => {
-            let old: Vec<&Balancer> = page
+            let mut old: Vec<&Balancer> = page
                 .items
                 .iter()
-                .filter(|b| !b.assigned && b.age_secs.is_some_and(|age| age >= PENDING_AFTER_SECS))
+                .filter(|b| !b.assigned && b.age_secs.is_some_and(|age| age > PENDING_AFTER_SECS))
                 .collect();
+            // The oldest is named first, ties by name (the page is sorted by name already).
+            old.sort_by_key(|b| std::cmp::Reverse(b.age_secs));
             let young: Vec<&Balancer> = page
                 .items
                 .iter()
-                .filter(|b| !b.assigned && b.age_secs.is_some_and(|age| age < PENDING_AFTER_SECS))
+                .filter(|b| !b.assigned && b.age_secs.is_some_and(|age| age <= PENDING_AFTER_SECS))
                 .collect();
             let unknown_age: Vec<&Balancer> = page
                 .items
@@ -622,6 +628,10 @@ fn judge_balancers(params: &K8sIngress, found: &Gathered, sink: &mut Sink) {
                         }
                     ),
                     fix::pending_balancer(&first.name, namespace, minutes, metallb),
+                );
+                sink.notes.push(
+                    "A Service's age counts from its creation. If its type was changed to LoadBalancer later, it has waited less than that."
+                        .to_owned(),
                 );
             }
             if !young.is_empty() {

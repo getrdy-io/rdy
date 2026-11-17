@@ -328,7 +328,7 @@ pub const ALLOWED: &[Allowed] = &[
         resource: "services",
         access: &[Access::ListInNamespace(Only::Any)],
         checks: &["k8s.ingress"],
-        reads: "the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; the address itself, annotations and the rest of the spec are dropped while parsing",
+        reads: "the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; the address itself, annotations and the rest of the spec are dropped while parsing. The role grants it as a Role of that one namespace (examples/rbac/rdy-readonly-target-namespace.yaml), never cluster wide",
         field_selector: FieldSelector::NotRequired,
     },
 ];

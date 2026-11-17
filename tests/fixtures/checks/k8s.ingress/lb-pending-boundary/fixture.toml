@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-ingress-lb-pending-boundary"
-summary = "A LoadBalancer service with no address for exactly 10 minutes"
+summary = "A LoadBalancer service with no address for exactly 10 minutes (600 seconds): not older than 10 minutes"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

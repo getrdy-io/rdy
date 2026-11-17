@@ -28,7 +28,7 @@ fn object(name: &str) -> &str {
 
 /// The retirement text of 03 for the community Ingress NGINX controller.
 pub(super) fn retired() -> &'static str {
-    "Ingress NGINX (`k8s.io/ingress-nginx`) was retired upstream in March 2026. It still runs but gets no releases or security fixes. If the product needs an ingress controller, pick one your platform team supports (a Gateway API implementation, Traefik, or a cloud controller). Existing Ingress objects with `nginx` annotations do not carry over unchanged; the `ingress2gateway` tool helps convert them. The F5 controller (`nginx.org/ingress-controller`) is a different project and is not retired."
+    "Ingress NGINX (`k8s.io/ingress-nginx`) was retired upstream in March 2026. It still runs but gets no releases or security fixes. If the product needs an ingress controller, pick one your platform team supports (a Gateway API implementation, Traefik, or a cloud controller). Existing Ingress objects with `nginx` annotations do not carry over unchanged; the `ingress2gateway` tool helps convert them. The F5 controller (`nginx.org/ingress-controller`) is a different project and is not retired. Distributions that bundle the community controller carry the same warning, such as the AKS application routing add-on (class `webapprouting.kubernetes.azure.com`) and RKE2's `rke2-ingress-nginx`: read your distribution's notes for its replacement and its support end date."
 }
 
 /// The fix for a required controller that no class names.
