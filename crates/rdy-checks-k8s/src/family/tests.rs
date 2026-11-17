@@ -193,3 +193,39 @@ async fn every_built_check_runs_over_the_mock_and_passes_the_inv_14_audit() {
             .unwrap_or_else(|violations| panic!("{id}: INV-14: {violations:?}"));
     }
 }
+
+#[tokio::test]
+async fn the_family_namespace_reaches_k8s_storageclass_and_its_claim_evidence_is_read() {
+    let namespace: K8sName =
+        serde_json::from_value(serde_json::json!("acme-system")).expect("a namespace");
+    let fixture = Fixture::load(&fixtures_dir(), "checks/k8s.storageclass/pending-failed")
+        .expect("the fixture loads");
+    let harness = Harness::new(TestRun::for_fixture(&fixture), fixture.replay()).expect("a mock");
+    let cluster = Arc::new(Fixtured { harness });
+    let spec = family_spec();
+    let entry = spec
+        .checks
+        .iter()
+        .find(|entry| entry.id == "k8s.storageclass")
+        .expect("an entry");
+    let built =
+        crate::family::build_check(entry.decode_params(), Some(&namespace), cluster.clone())
+            .expect("built");
+    let ctx = cluster.harness.run().context_for(
+        built.check.info(),
+        "k8s.storageclass",
+        Os::Linux,
+        [Need::KubeContext],
+    );
+    // The check reads the real clock here, so the claim made two minutes ago in the fixture is old too.
+    let finding = built.check.run(&ctx).await.expect("the check ran");
+    assert!(
+        finding
+            .message
+            .contains("claims in acme-system on class gp3")
+            && finding.message.contains("data-db-0"),
+        "{}",
+        finding.message
+    );
+    cluster.harness.audit().expect("INV-14 audit is clean");
+}

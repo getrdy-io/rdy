@@ -75,9 +75,11 @@ static NOT_ATTEMPTED: DialOutcome = DialOutcome::NoNetwork;
 #[derive(Debug)]
 pub struct K8sFamily {
     holder: Arc<Holder>,
-    /// The family namespace: the target namespace of the checks that look at one, used when their own entry
-    /// names none. M1 has no source for it (the spec has no k8s block and `--namespace` is M2), so it is
-    /// `None` unless [`K8sFamily::with_namespace`] set it.
+    /// The family namespace: the target namespace of the checks that look at one. `k8s.admission` and
+    /// `k8s.namespace` use it when their entry has no `namespace` (the entry's wins). `k8s.storageclass` has
+    /// no `namespace` key, so it always uses this one. `rdy run` has no source for it in M1 (the spec has
+    /// no k8s block and `--namespace` belongs to `rdy bundle`), so it is `None` unless
+    /// [`K8sFamily::with_namespace`] set it.
     namespace: Option<K8sName>,
 }
 
@@ -110,8 +112,8 @@ impl K8sFamily {
         }
     }
 
-    /// Sets the family namespace: the target namespace of `k8s.storageclass`, `k8s.admission` and
-    /// `k8s.namespace` when their entry has no `namespace` of its own (the entry's wins).
+    /// Sets the family namespace: the target namespace of `k8s.storageclass` (which has no `namespace` key)
+    /// and of `k8s.admission` and `k8s.namespace` when their entry has no `namespace` of its own.
     #[must_use]
     pub fn with_namespace(mut self, namespace: K8sName) -> Self {
         self.namespace = Some(namespace);

@@ -447,7 +447,7 @@ async fn a_real_run_builds_every_k8s_check_and_k8s_rbac_keeps_its_as_and_the_ope
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let spec = spec(
         dir.path(),
-        "  - id: k8s.version\n  - id: k8s.access\n  - id: k8s.storageclass\n  - id: k8s.nodes\n  - id: k8s.admission\n    uses: [runAsRoot]\n    namespace: acme-system\n  - id: k8s.namespace\n    namespace: acme-system\n  - id: k8s.rbac\n    as: system:serviceaccount:acme-system:installer\n    can: [\"create namespaces\"]\n",
+        "  - id: k8s.version\n    min: \"1.28\"\n  - id: k8s.access\n  - id: k8s.storageclass\n  - id: k8s.nodes\n    min_ready: 1\n  - id: k8s.admission\n    uses: [runAsRoot]\n    namespace: acme-system\n  - id: k8s.namespace\n    namespace: acme-system\n  - id: k8s.rbac\n    as: system:serviceaccount:acme-system:installer\n    can: [\"create namespaces\"]\n",
     );
     let kubeconfig = kubeconfig(dir.path(), &format!("http://{addr}"));
     let out = dir.path().join("out");
@@ -460,7 +460,7 @@ async fn a_real_run_builds_every_k8s_check_and_k8s_rbac_keeps_its_as_and_the_ope
     .await;
 
     let report = json(&ran);
-    // Seven ids, seven results, none skipped as not in the build.
+    // Seven ids, seven results, none skipped for any reason.
     for id in [
         "k8s.version",
         "k8s.access",
@@ -471,13 +471,14 @@ async fn a_real_run_builds_every_k8s_check_and_k8s_rbac_keeps_its_as_and_the_ope
         "k8s.rbac",
     ] {
         let result = check(&report, id);
-        assert_ne!(result["skip_kind"], "not_in_build", "{id}: {result}");
+        assert!(result["skip_kind"].is_null(), "{id}: {result}");
     }
     // k8s.rbac asked as the service account, and the fix names the OpenShift command.
     let rbac = check(&report, "k8s.rbac");
     assert_eq!(rbac["status"], "block", "{rbac}");
     let fix = rbac["fix"].as_str().unwrap_or_default();
     assert!(fix.contains("On OpenShift, `oc adm policy"), "{fix}");
+    assert!(fix.contains("-z installer -n acme-system"), "{fix}");
     let seen = seen
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

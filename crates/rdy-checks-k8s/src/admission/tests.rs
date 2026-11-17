@@ -701,6 +701,10 @@ async fn no_namespace_means_no_namespace_request() {
             .contains("`namespace: <name>`"),
     );
     assert_eq!(finding.observed["namespace_read"], "not_named");
+    // K1: the engine never turns it into a clean pass: the partial stays on the result.
+    let result = engine(&rig, finding, None);
+    assert!(result.partial.is_some(), "{result:?}");
+    assert_ne!(result.status, Status::Pass, "{result:?}");
     assert_eq!(rig.paths(), [APIS]);
     rig.audit();
 }
