@@ -4,8 +4,8 @@ use std::net::IpAddr;
 
 use rcgen::string::Ia5String;
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
-    KeyUsagePurpose, SanType, date_time_ymd,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, SanType, date_time_ymd,
 };
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
@@ -61,12 +61,32 @@ impl TestCa {
     ///
     /// If the crypto provider cannot make a key or sign, which is a broken build and not a test result.
     #[must_use]
+    pub fn root(common_name: &str) -> Self {
+        Self::root_from(ca_params(common_name))
+    }
+
+    /// A new self-signed root whose name has three parts, written `C=..., O=..., CN=...`, for a test of
+    /// a name with several parts.
+    ///
+    /// # Panics
+    ///
+    /// If the crypto provider cannot make a key or sign (see [`TestCa::root`]).
+    #[must_use]
+    pub fn root_with_parts(common_name: &str, organization: &str, country: &str) -> Self {
+        let mut params = ca_params(common_name);
+        let mut name = DistinguishedName::new();
+        name.push(DnType::CountryName, country);
+        name.push(DnType::OrganizationName, organization);
+        name.push(DnType::CommonName, common_name);
+        params.distinguished_name = name;
+        Self::root_from(params)
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "test support: setup that cannot fail in a working build panics with a message"
     )]
-    pub fn root(common_name: &str) -> Self {
-        let params = ca_params(common_name);
+    fn root_from(params: CertificateParams) -> Self {
         let key = KeyPair::generate().expect("generate the CA key");
         let cert = params.self_signed(&key).expect("self-sign the root");
         Self {
@@ -190,6 +210,14 @@ impl std::fmt::Debug for Leaf {
 }
 
 impl Leaf {
+    /// The same leaf with one more certificate after its chain, for a test of a server that appends a
+    /// certificate it holds no key for.
+    #[must_use]
+    pub fn append(mut self, der: Vec<u8>) -> Self {
+        self.chain.push(CertificateDer::from(der));
+        self
+    }
+
     /// The certificates a server sends: the leaf, then each intermediate. Never the root.
     #[must_use]
     pub fn chain(&self) -> &[CertificateDer<'static>] {

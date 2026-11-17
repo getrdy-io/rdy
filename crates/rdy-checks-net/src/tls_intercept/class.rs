@@ -213,9 +213,9 @@ pub(super) fn issuer_fix(host: &str) -> String {
     )
 }
 
-/// The `Fix:` text for a chain in which no certificate matches the spec's `pin_sha256`.
+/// The `Fix:` text for a chain whose leaf does not match the spec's `pin_sha256`.
 pub(super) fn pin_fix(host: &str) -> String {
     format!(
-        "No certificate in the chain of {host} matches `pin_sha256`. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for {host}. If the server's certificate was renewed, ask the vendor for the new pin."
+        "The leaf certificate of {host} does not match `pin_sha256`, so the chain is not the one the vendor pinned. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for {host}. If the server's certificate was renewed, ask the vendor for the new pin. A pin names the leaf the server sends; the root is not sent and never matches, and a pin on a CA certificate is only a partial result."
     )
 }

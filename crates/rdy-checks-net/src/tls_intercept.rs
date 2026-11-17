@@ -24,16 +24,21 @@
 //! port. At most [`MAX_HOSTS`]; the rest are named as not tested.
 //!
 //! **Evidence (M1-100).** For each chain: the leaf's issuer and subject (read with `x509-parser`, cleaned
-//! and cut), the chain depth, the SHA-256 of the last certificate sent (`root_sha256`) and whether the OS
-//! store holds it. For the run: where the OS roots came from (`trust_store`), and "no OS trust store
-//! found" when there are none. A source named by `SSL_CERT_FILE` or `SSL_CERT_DIR` shows the variable and
-//! the path with the home directory as `~`.
+//! and cut), the chain depth, `last_sha256` (the SHA-256 of the last certificate sent), `root_sha256` and
+//! `root_in_os_store` (only when that certificate is self-signed, which a server rarely sends). For the
+//! run: where the OS roots came from (`trust_store`), and "no OS trust store found" when there are none. A
+//! source named by `SSL_CERT_FILE` or `SSL_CERT_DIR` shows the variable and the path with the home
+//! directory as `~`.
 //!
-//! **Rules (M1-100).** `expected_issuer` is a regex matched against the issuer of the leaf, written as
-//! `CN=..., O=...`. `pin_sha256` lists SHA-256 digests of DER certificates: some certificate the server
-//! sent must hash to one of them. A chain that breaks either rule blocks, whatever its class, and a chain
-//! that meets it passes that rule. A host that was not tested is never read as meeting a rule. A host
-//! behind a proxy is not tried (M1-097).
+//! **Rules (M1-100).** `expected_issuer` is a regex matched anywhere in the issuer of the leaf, written
+//! as x509-parser writes a name: the parts in certificate order, `C=US, O=Acme, CN=Acme Issuing CA`. It
+//! is an unauthenticated name match: a middlebox can copy a name, so only the pin proves anything.
+//! `pin_sha256` lists SHA-256 digests of DER certificates and matches the leaf only, the one certificate
+//! the server proves it holds the key of. A pin on a later certificate is a partial result ("rdy cannot
+//! yet prove it is in the verified path"), never a pass, because a server can append any public
+//! certificate after its own. A chain that misses a rule blocks, whatever its class, and a chain that
+//! meets it passes that rule. A host that was not tested is never read as meeting a rule. A host behind
+//! a proxy is not tried (M1-097).
 //!
 //! **Needs.** `Need::Network`, the same limits as `net.egress`: 10 s per host, 8 hosts at a time, 2 s of
 //! the check's time left for the result. The probe reaches only the check's own hosts (INV-11) and
@@ -58,7 +63,7 @@ use rdy_spec::spec::Spec;
 use serde_json::{Value, json};
 
 use self::class::Class;
-use self::evidence::{ChainEvidence, store_json};
+use self::evidence::{ChainEvidence, PinState, names_a_variable, store_json};
 
 mod class;
 mod evidence;
@@ -105,9 +110,10 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     },
     reads: &[],
     statfs: &[],
-    // Read only to show a trust store path from `SSL_CERT_FILE` or `SSL_CERT_DIR` with the home directory as
-    // `~`. The values are never put in the report.
-    env: &["HOME", "USERPROFILE"],
+    // Read only when a trust store source came from `SSL_CERT_FILE` or `SSL_CERT_DIR`, to show its path with
+    // the home directory as `~`. The value is never put in the report. Windows reads no PEM file in M1, so
+    // `USERPROFILE` is not declared yet.
+    env: &["HOME"],
     commands: &[],
     peers: &[PeerClass::SpecHosts],
 };
@@ -246,7 +252,7 @@ struct Tested {
 #[derive(Debug)]
 enum What {
     /// The handshake gave a chain.
-    Chain { class: Class, seen: Seen },
+    Chain { class: Class, seen: Box<Seen> },
     /// No chain was had, for this reason. The probe's own words, never the peer's.
     Untested(&'static str),
 }
@@ -265,8 +271,8 @@ struct Seen {
     evidence: ChainEvidence,
     /// Whether the issuer matches `expected_issuer`. `None` when the spec sets none.
     issuer_ok: Option<bool>,
-    /// Whether a certificate of the chain matches `pin_sha256`. `None` when the spec sets none.
-    pin_ok: Option<bool>,
+    /// Where the chain stands against `pin_sha256`. `None` when the spec sets none.
+    pin: Option<PinState>,
 }
 
 fn verdict_id(verdict: TrustVerdict) -> &'static str {
@@ -295,11 +301,11 @@ impl Seen {
             .issuer
             .as_ref()
             .map(|rule| evidence.issuer_matches(&*rule.matches));
-        let pin_ok = (!rules.pins.is_empty()).then(|| evidence.pinned(&rules.pins));
+        let pin = (!rules.pins.is_empty()).then(|| evidence.pin_state(&rules.pins));
         Self {
             evidence,
             issuer_ok,
-            pin_ok,
+            pin,
             depth: chain.certs.len(),
             bundled: verdict_id(chain.bundled),
             system: verdict_id(chain.system),
@@ -326,14 +332,19 @@ impl Tested {
                 out["protocol"] = seen.protocol.into();
                 out["issuer"] = seen.evidence.shown_issuer().into();
                 out["subject"] = seen.evidence.shown_subject().into();
+                out["last_sha256"] = seen.evidence.last_sha256.clone().into();
                 out["root_sha256"] = seen.evidence.root_sha256.clone().into();
-                out["root_self_signed"] = seen.evidence.root_self_signed.into();
                 out["root_in_os_store"] = self.in_store.into();
                 if let Some(ok) = seen.issuer_ok {
                     out["expected_issuer_matches"] = ok.into();
                 }
-                if let Some(ok) = seen.pin_ok {
-                    out["pin_sha256_matches"] = ok.into();
+                if let Some(pin) = seen.pin {
+                    out["pin_sha256_matches"] = match pin {
+                        PinState::Leaf => "leaf",
+                        PinState::CaOnly => "ca_only",
+                        PinState::Miss => "none",
+                    }
+                    .into();
                 }
             }
             What::Untested(why) => {
@@ -400,7 +411,7 @@ async fn test_host(
     {
         Some(Ok(chain)) => What::Chain {
             class: Class::of_verdicts(chain.bundled, chain.system),
-            seen: Seen::of(&chain, rules),
+            seen: Box::new(Seen::of(&chain, rules)),
         },
         Some(Err(error)) => What::Untested(untested(error)?),
         None => What::Untested(TIMED_OUT),
@@ -515,7 +526,7 @@ impl TlsInterceptCheck {
             if v.issuer_ok == Some(false) {
                 add("issuer_mismatch", Some(class::issuer_fix(&v.t.host)));
             }
-            if v.pin_ok == Some(false) {
+            if v.pin != Some(PinState::Leaf) && v.pin.is_some() {
                 add("pin_mismatch", Some(class::pin_fix(&v.t.host)));
             }
         }
@@ -568,6 +579,18 @@ impl TlsInterceptCheck {
                 named.join(", ")
             ));
         }
+        let ca_only: Vec<&str> = verdicts
+            .iter()
+            .filter(|v| v.ca_pin_only())
+            .take(NAMED)
+            .map(|v| v.t.label.as_str())
+            .collect();
+        if !ca_only.is_empty() {
+            not_verified.push(format!(
+                "pin_sha256 matches a CA certificate the server sent; rdy cannot yet prove it is in the verified path ({})",
+                ca_only.join(", ")
+            ));
+        }
         if self.dropped > 0 {
             not_verified.push(format!(
                 "{} hosts over the limit of {MAX_HOSTS} were not tested",
@@ -586,7 +609,9 @@ struct Verdict<'a> {
     t: &'a Tested,
     class: Class,
     issuer_ok: Option<bool>,
-    pin_ok: Option<bool>,
+    /// The issuer could not be read, so `issuer_ok` is a miss for that reason.
+    issuer_unread: bool,
+    pin: Option<PinState>,
 }
 
 impl<'a> Verdict<'a> {
@@ -596,7 +621,8 @@ impl<'a> Verdict<'a> {
                 t,
                 class: *class,
                 issuer_ok: seen.issuer_ok,
-                pin_ok: seen.pin_ok,
+                issuer_unread: seen.evidence.issuer.is_none(),
+                pin: seen.pin,
             }),
             What::Untested(_) => None,
         }
@@ -604,19 +630,24 @@ impl<'a> Verdict<'a> {
 
     /// A rule the spec set that the chain does not meet. It blocks whatever the class says.
     fn broke_a_rule(&self) -> bool {
-        self.issuer_ok == Some(false) || self.pin_ok == Some(false)
+        self.issuer_ok == Some(false) || self.pin == Some(PinState::Miss)
+    }
+
+    /// The pin matches only a later certificate of the chain: not a block, never a pass.
+    fn ca_pin_only(&self) -> bool {
+        self.pin == Some(PinState::CaOnly)
     }
 
     fn level(&self, forbid: bool) -> Level {
-        if self.broke_a_rule() {
-            Level::Fail
-        } else {
-            self.class.level(forbid)
+        match self.class.level(forbid) {
+            _ if self.broke_a_rule() => Level::Fail,
+            Level::Pass if self.ca_pin_only() => Level::Warn,
+            level => level,
         }
     }
 
     fn flagged(&self) -> bool {
-        self.class != Class::Public || self.broke_a_rule()
+        self.class != Class::Public || self.broke_a_rule() || self.ca_pin_only()
     }
 
     /// The phrases for the message, after the host.
@@ -635,10 +666,18 @@ impl<'a> Verdict<'a> {
             });
         }
         if self.issuer_ok == Some(false) {
-            out.push("issuer does not match expected_issuer".to_owned());
+            out.push(if self.issuer_unread {
+                "issuer could not be read, so expected_issuer is not met".to_owned()
+            } else {
+                "issuer does not match expected_issuer".to_owned()
+            });
         }
-        if self.pin_ok == Some(false) {
-            out.push("no certificate matches pin_sha256".to_owned());
+        match self.pin {
+            Some(PinState::Miss) => out.push("the leaf does not match pin_sha256".to_owned()),
+            Some(PinState::CaOnly) => {
+                out.push("pin_sha256 matches a CA certificate only, not the leaf".to_owned());
+            }
+            _ => {}
         }
         out
     }
@@ -677,17 +716,18 @@ const CONNECT_TIMED_OUT: &str = "the connection timed out";
 /// The trust store section of the report, once per run, and `in_store` for each chain.
 ///
 /// The store is asked only when a chain was had: a run that reached no host has nothing to put beside
-/// the store. A failure to read it is data (`not_read`), never an error of the check. `HOME` and
-/// `USERPROFILE` are read so a path from `SSL_CERT_FILE` or `SSL_CERT_DIR` shows `~` and not a user name.
+/// the store. A failure to read it is data (`not_read`), never an error of the check. `HOME` is read only
+/// when a source came from `SSL_CERT_FILE` or `SSL_CERT_DIR`, so its path shows `~` and not a user name.
 async fn trust_store_report(ctx: &CheckContext, done: &mut [Tested]) -> Option<Value> {
     if !done.iter().any(|t| matches!(t.what, What::Chain { .. })) {
         return None;
     }
     let answer = ctx.probe().trust_store().await;
-    let homes: Vec<String> = ["HOME", "USERPROFILE"]
-        .into_iter()
-        .filter_map(|name| ctx.probe().env(name).ok().flatten())
-        .collect();
+    let homes: Vec<String> = if names_a_variable(&answer) {
+        ctx.probe().env("HOME").ok().flatten().into_iter().collect()
+    } else {
+        Vec::new()
+    };
     if let Ok(store) = &answer {
         for t in done.iter_mut() {
             if let What::Chain { seen, .. } = &t.what {

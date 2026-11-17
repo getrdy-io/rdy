@@ -15,9 +15,9 @@
         "<sha256>"
       ]
     },
-    "fix": "No certificate in the chain of web.acme.test matches `pin_sha256`. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for web.acme.test. If the server's certificate was renewed, ask the vendor for the new pin.",
+    "fix": "The leaf certificate of web.acme.test does not match `pin_sha256`, so the chain is not the one the vendor pinned. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for web.acme.test. If the server's certificate was renewed, ask the vendor for the new pin. A pin names the leaf the server sends; the root is not sent and never matches, and a pin on a CA certificate is only a partial result.",
     "level": "fail",
-    "message": "web.acme.test:443 (no certificate matches pin_sha256)",
+    "message": "web.acme.test:443 (the leaf does not match pin_sha256)",
     "notes": [],
     "observed": {
       "hosts": [
@@ -26,14 +26,14 @@
           "class": "public",
           "host": "web.acme.test:443",
           "issuer": "CN=Acme Test Issuing CA",
+          "last_sha256": "<sha256>",
           "os_store": "unknown_issuer",
           "os_store_roots": 1,
-          "pin_sha256_matches": false,
+          "pin_sha256_matches": "none",
           "protocol": "TLS 1.3",
           "public_roots": "valid",
-          "root_in_os_store": false,
-          "root_self_signed": false,
-          "root_sha256": "<sha256>",
+          "root_in_os_store": null,
+          "root_sha256": null,
           "subject": "CN=web.acme.test"
         }
       ],

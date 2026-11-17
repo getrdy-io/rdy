@@ -178,7 +178,7 @@ const PENDING: &[Pending] = &[
         check: "net.tls_intercept",
         classes: &[Class::Timeout],
         owner: "M1-179",
-        why: "M1-100 added the generated-chain cases and the handshake-never-completes case (a blackhole). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class, and the stale-row finding then forces this row out",
+        why: "M1-100 added the generated-chain cases and the handshake-never-completes case (a listener that opens TCP and never answers the ClientHello). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget (5 s for the handshake) and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class (correction-52 adds net.tls_intercept to its row; the case needs a hang marker M1-179 accepts), and the stale-row finding then forces this row out",
     },
     Pending {
         check: "host.time_sync",
@@ -193,12 +193,14 @@ const PENDING: &[Pending] = &[
 const TLS_LEVELS: &[(&str, &str)] = &[
     ("empty-os-store", "fail"),
     ("env-store-canary-user", "warn"),
+    ("expired-inside-window", "warn"),
     ("expired-pinned-clock", "fail"),
     ("handshake-never-completes", "warn"),
     ("issuer-match", "pass"),
     ("issuer-mismatch", "fail"),
     ("machine-only", "warn"),
     ("machine-only-forbidden", "fail"),
+    ("pin-ca-only", "warn"),
     ("pin-match", "pass"),
     ("pin-mismatch", "fail"),
     ("pin-root-not-sent", "fail"),

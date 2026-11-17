@@ -1,7 +1,7 @@
 schema = 1
 name = "net-tls-intercept-handshake-never-completes"
-summary = "A host whose connection never completes, so no chain is had and the step is cut to its budget"
-origin = "hand"
+summary = "A listener that opens TCP and never answers the ClientHello, so the handshake stalls and is cut to its limit"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["net.tls_intercept"]

@@ -688,10 +688,10 @@ async fn the_result_names_the_issuer_the_depth_and_the_hash_of_the_last_certific
     assert_eq!(host["chain_depth"], 2);
     assert_eq!(host["issuer"], "CN=Acme Test Issuing CA");
     assert_eq!(host["subject"], format!("CN={NAME}"));
-    assert_eq!(host["root_sha256"], hex_of(issuing.der().as_ref()));
-    assert_eq!(host["root_self_signed"], false);
-    // The server did not send the root, so the last certificate it sent is not in the OS store.
-    assert_eq!(host["root_in_os_store"], false);
+    assert_eq!(host["last_sha256"], hex_of(issuing.der().as_ref()));
+    // The server did not send the root, so there is no root hash and no answer about the OS store.
+    assert_eq!(host["root_sha256"], Value::Null);
+    assert_eq!(host["root_in_os_store"], Value::Null);
     assert!(
         ran.finding()
             .message
@@ -709,8 +709,9 @@ fn a_root_the_server_sends_is_read_as_self_signed() {
     let mut chain: Vec<Vec<u8>> = leaf.chain().iter().map(|c| c.as_ref().to_vec()).collect();
     chain.push(der(&root));
     let evidence = evidence::ChainEvidence::of(&chain);
-    assert!(evidence.root_self_signed);
     assert_eq!(evidence.root_sha256, Some(hex_of(&der(&root))));
+    assert_eq!(evidence.last_sha256, evidence.root_sha256);
+    assert!(evidence.root_hash.is_some());
     assert_eq!(evidence.issuer.as_deref(), Some("CN=Acme Sent Root"));
     assert_eq!(evidence.hashes.len(), 2);
 }
@@ -720,7 +721,8 @@ fn a_chain_that_is_not_a_certificate_reads_as_no_issuer_and_still_hashes() {
     let evidence = evidence::ChainEvidence::of(&[vec![1, 2, 3]]);
     assert_eq!(evidence.issuer, None);
     assert_eq!(evidence.subject, None);
-    assert!(!evidence.root_self_signed);
+    assert_eq!(evidence.root_sha256, None);
+    assert_eq!(evidence.last_sha256, Some(hex_of(&[1, 2, 3])));
     assert_eq!(evidence.hashes, [hex_of(&[1, 2, 3])]);
     let none = evidence::ChainEvidence::of(&[]);
     assert_eq!(none.root_sha256, None);
@@ -732,7 +734,7 @@ fn a_chain_that_is_not_a_certificate_reads_as_no_issuer_and_still_hashes() {
 
 #[tokio::test]
 async fn a_hostile_issuer_name_is_cleaned_before_it_reaches_the_report() {
-    let evil = "Evil\u{1b}[2J\u{202e}`CA\u{7}";
+    let evil = "Evil\u{1b}[2J\u{202e}`CA\u{7}\u{61c}\u{2028}\u{e0041}";
     let ca = TestCa::root(evil);
     let web = server(&ca, NAME, Validity::Always).await;
     let run = TestRun::new(machine(NAME, web.addr(), vec![der(&ca)]));
@@ -814,7 +816,7 @@ async fn an_empty_store_says_no_os_trust_store_found_and_lists_no_source() {
     assert_eq!(store["status"], "missing");
     assert_eq!(store["reason"], "no OS trust store found");
     assert_eq!(store["sources"], json!([]));
-    assert_eq!(ran.host(0)["root_in_os_store"], false);
+    assert_eq!(ran.host(0)["root_in_os_store"], Value::Null);
 }
 
 /// The canary user name no report may hold.
@@ -1049,19 +1051,19 @@ async fn the_issuer_of_the_leaf_is_what_expected_issuer_reads_and_not_the_root()
 }
 
 #[tokio::test]
-async fn a_pin_that_matches_no_certificate_of_the_chain_blocks() {
+async fn a_pin_that_does_not_match_the_leaf_blocks() {
     let (_root, _issuing, web, run) = public_chain().await;
     let mut extra = hosts_of(NAME, &web);
     extra["pin_sha256"] = json!([format!("{:0>64}", "ab")]);
     let ran = run_with(run, extra).await;
     let finding = ran.finding();
-    assert_eq!(ran.host(0)["pin_sha256_matches"], false);
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "none");
     assert_eq!(finding.level, Level::Fail, "{}", finding.message);
     assert_eq!(ran.result().status, Status::Block);
     assert!(
         finding
             .message
-            .contains("no certificate matches pin_sha256"),
+            .contains("the leaf does not match pin_sha256"),
         "{}",
         finding.message
     );
@@ -1086,10 +1088,9 @@ async fn a_pin_on_any_certificate_of_the_chain_passes_the_rule() {
         .await
         .expect("a server");
     let other = format!("{:0>64}", "cd");
-    // The leaf, the issuing CA, and a list that holds a wrong pin first.
+    // The leaf alone, and the leaf after a wrong pin.
     for pins in [
         vec![leaf_hash.clone()],
-        vec![hex_of(issuing.der().as_ref())],
         vec![other.clone(), leaf_hash.clone()],
     ] {
         let run = TestRun::new(machine(NAME, web.addr(), Vec::new()));
@@ -1097,7 +1098,7 @@ async fn a_pin_on_any_certificate_of_the_chain_passes_the_rule() {
         let mut extra = hosts_of(NAME, &web);
         extra["pin_sha256"] = json!(pins);
         let ran = run_with(run, extra).await;
-        assert_eq!(ran.host(0)["pin_sha256_matches"], true, "{pins:?}");
+        assert_eq!(ran.host(0)["pin_sha256_matches"], "leaf", "{pins:?}");
         assert_eq!(
             ran.finding().level,
             Level::Pass,
@@ -1114,23 +1115,79 @@ async fn a_pin_on_any_certificate_of_the_chain_passes_the_rule() {
 }
 
 #[tokio::test]
+async fn a_pin_on_a_ca_certificate_is_a_partial_result_and_never_a_pass() {
+    let (_root, issuing, web, run) = public_chain().await;
+    let mut extra = hosts_of(NAME, &web);
+    extra["pin_sha256"] = json!([hex_of(issuing.der().as_ref())]);
+    let ran = run_with(run, extra).await;
+    let finding = ran.finding();
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "ca_only");
+    assert_eq!(finding.level, Level::Warn, "{}", finding.message);
+    let partial = finding.partial.as_ref().expect("partial");
+    assert!(
+        partial
+            .note
+            .contains("pin_sha256 matches a CA certificate the server sent; rdy cannot yet prove it is in the verified path"),
+        "{}",
+        partial.note
+    );
+    assert!(finding.fix.as_deref().is_some_and(|f| f.contains("leaf")));
+    assert_eq!(ran.result().status, Status::Warn);
+}
+
+#[tokio::test]
+async fn a_forged_chain_with_the_real_leaf_appended_does_not_meet_the_pin() {
+    // The attacker's CA is trusted (a public root, or one this machine installed), the attacker's leaf
+    // comes first, and the real server's leaf is appended after it. Only the first certificate is bound
+    // to the server by the handshake, so the appended one must not satisfy the pin.
+    let real_root = TestCa::root("Acme Real Root");
+    let real_leaf = real_root.issue(&[NAME], Validity::Always);
+    let real_der = real_leaf.chain()[0].as_ref().to_vec();
+    let attacker = TestCa::root("Attacker Root");
+    let forged = attacker
+        .issue(&[NAME], Validity::Always)
+        .append(real_der.clone());
+    let web = HttpServer::start(HttpOptions::tls(&forged).alpn(&["http/1.1"]))
+        .await
+        .expect("a server");
+    let run = TestRun::new(machine(NAME, web.addr(), Vec::new()));
+    run.trust_as_public(&der(&attacker));
+    let mut extra = hosts_of(NAME, &web);
+    extra["pin_sha256"] = json!([hex_of(&real_der)]);
+    let ran = run_with(run, extra).await;
+    let finding = ran.finding();
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "ca_only");
+    assert_ne!(finding.level, Level::Pass, "{}", finding.message);
+    assert!(finding.partial.is_some());
+    assert_ne!(ran.result().status, Status::Pass);
+    // The pin of the attacker's own leaf is the only way to meet it, and the vendor never has that.
+    assert_eq!(ran.host(0)["chain_depth"], 2);
+}
+
+#[tokio::test]
 async fn the_pin_of_the_root_does_not_count_when_the_server_did_not_send_it() {
     let (root, _issuing, web, run) = public_chain().await;
     let mut extra = hosts_of(NAME, &web);
     extra["pin_sha256"] = json!([hex_of(root.root_der().as_ref())]);
     let ran = run_with(run, extra).await;
-    assert_eq!(ran.host(0)["pin_sha256_matches"], false);
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "none");
     assert_eq!(ran.finding().level, Level::Fail);
 }
 
 #[tokio::test]
 async fn both_rules_block_on_either_miss_and_a_matching_chain_still_warns_for_its_class() {
-    let (root, issuing, web, _) = public_chain().await;
+    let root = TestCa::root("Acme Test Root CA");
+    let issuing = root.intermediate("Acme Test Issuing CA");
+    let leaf = issuing.issue(&[NAME], Validity::Always);
+    let leaf_hex = hex_of(leaf.chain()[0].as_ref());
+    let web = HttpServer::start(HttpOptions::tls(&leaf).alpn(&["http/1.1"]))
+        .await
+        .expect("a server");
     // Machine-only chain, issuer and pin both right: the class still warns, and no rule fails.
     let run = TestRun::new(machine(NAME, web.addr(), vec![der(&root)]));
     let mut extra = hosts_of(NAME, &web);
     extra["expected_issuer"] = json!("Acme Test Issuing CA");
-    extra["pin_sha256"] = json!([hex_of(issuing.der().as_ref())]);
+    extra["pin_sha256"] = json!([leaf_hex]);
     let ran = run_with(run, extra.clone()).await;
     assert_eq!(
         ran.finding().level,
@@ -1139,7 +1196,7 @@ async fn both_rules_block_on_either_miss_and_a_matching_chain_still_warns_for_it
         ran.finding().message
     );
     assert_eq!(ran.host(0)["expected_issuer_matches"], true);
-    assert_eq!(ran.host(0)["pin_sha256_matches"], true);
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "leaf");
     // A wrong pin turns the same chain into a block, with both fixes in one text.
     extra["pin_sha256"] = json!([format!("{:0>64}", "ee")]);
     extra["expected_issuer"] = json!("Nobody");
@@ -1189,7 +1246,10 @@ fn an_unreadable_leaf_cannot_meet_expected_issuer() {
     // on the type: an unread issuer is a miss, and the pin still reads the DER.
     let evidence = evidence::ChainEvidence::of(&[b"not a certificate".to_vec()]);
     assert!(!evidence.issuer_matches(&|_| true));
-    assert!(evidence.pinned(&[hex_of(b"not a certificate")]));
+    assert_eq!(
+        evidence.pin_state(&[hex_of(b"not a certificate")]),
+        evidence::PinState::Leaf
+    );
 }
 
 #[test]
@@ -1241,4 +1301,143 @@ fn a_store_that_could_not_be_asked_is_reported_as_not_read() {
     let shown = evidence::store_json(&Err(ProbeError::Timeout), &[]);
     assert_eq!(shown["status"], "not_read");
     assert!(shown.get("sources").is_none());
+}
+
+#[test]
+fn a_home_value_cannot_turn_another_users_home_into_a_tilde_path() {
+    // `HOME=/home` is odd, and the usual places go first, so the user name still goes.
+    let homes = vec!["/home".to_owned()];
+    assert_eq!(
+        evidence::show_env_path("/home/alice/ca.pem", &homes),
+        "~/ca.pem"
+    );
+    // A place the usual rules do not know falls to the HOME value.
+    let homes = vec!["/srv/alice".to_owned()];
+    assert_eq!(
+        evidence::show_env_path("/srv/alice/ca.pem", &homes),
+        "~/ca.pem"
+    );
+    // Under sudo with HOME=/root another user's home still collapses by the usual rule, and a name
+    // outside a home place is the documented residual.
+    let homes = vec!["/root".to_owned()];
+    assert_eq!(
+        evidence::show_env_path("/Users/bob/ca.pem", &homes),
+        "~/ca.pem"
+    );
+    assert_eq!(
+        evidence::show_env_path("/srv/carol/ca.pem", &homes),
+        "/srv/carol/ca.pem"
+    );
+}
+
+#[tokio::test]
+async fn home_is_read_only_when_a_source_came_from_a_variable() {
+    let ca = TestCa::root("Acme Inspection Root");
+    let web = server(&ca, NAME, Validity::Always).await;
+    let standard = vec![StoreSource::new(
+        StoreKind::Bundle,
+        "/etc/ssl/certs/ca-certificates.crt",
+    )];
+    let replay = store_machine(NAME, web.addr(), vec![der(&ca)], standard).env("HOME", "/home/x");
+    let ran = run_with(TestRun::new(replay), hosts_of(NAME, &web)).await;
+    assert!(
+        !format!("{:?}", ran.run.action_log()).contains("HOME"),
+        "HOME was read with no variable source"
+    );
+    let named = vec![
+        StoreSource::new(StoreKind::Bundle, "/opt/ca.pem")
+            .origin(StoreOrigin::Env("SSL_CERT_FILE")),
+    ];
+    let replay = store_machine(NAME, web.addr(), vec![der(&ca)], named).env("HOME", "/home/x");
+    let ran = run_with(TestRun::new(replay), hosts_of(NAME, &web)).await;
+    assert!(format!("{:?}", ran.run.action_log()).contains("HOME"));
+    assert_eq!(INFO.env, ["HOME"]);
+}
+
+#[tokio::test]
+async fn an_issuer_with_several_parts_is_written_in_certificate_order() {
+    let ca = TestCa::root_with_parts("Acme Issuing CA", "Acme Corp", "US");
+    let web = server(&ca, NAME, Validity::Always).await;
+    let run = TestRun::new(machine(NAME, web.addr(), vec![der(&ca)]));
+    let ran = run_with(run, hosts_of(NAME, &web)).await;
+    assert_eq!(
+        ran.host(0)["issuer"],
+        "C=US, O=Acme Corp, CN=Acme Issuing CA"
+    );
+    // The anchored form that suits one name part does not match the whole text.
+    let mut extra = hosts_of(NAME, &web);
+    extra["expected_issuer"] = json!("^CN=Acme Issuing CA$");
+    let run = TestRun::new(machine(NAME, web.addr(), vec![der(&ca)]));
+    let ran = run_with(run, extra).await;
+    assert_eq!(ran.host(0)["expected_issuer_matches"], false);
+    // A pattern that names the part it means does.
+    let mut extra = hosts_of(NAME, &web);
+    extra["expected_issuer"] = json!("O=Acme Corp, CN=Acme Issuing CA$");
+    let run = TestRun::new(machine(NAME, web.addr(), vec![der(&ca)]));
+    let ran = run_with(run, extra).await;
+    assert_eq!(ran.host(0)["expected_issuer_matches"], true);
+}
+
+#[test]
+fn a_huge_certificate_or_issuer_is_never_read_or_matched() {
+    assert!(evidence::names_of(&vec![0x30; rdy_engine::probe::MAX_ROOT_BYTES + 1]).is_none());
+    let long = TestCa::root(&"y".repeat(1100));
+    let evidence = evidence::ChainEvidence::of(&[der(&long)]);
+    // The issuer is over 1024 characters: no prefix is matched, even by a pattern that would match it.
+    assert!(!evidence.issuer_matches(&|_| true));
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn evidence_never_panics_on_arbitrary_chains(
+        certs in proptest::collection::vec(
+            proptest::collection::vec(proptest::prelude::any::<u8>(), 0..300),
+            0..40
+        )
+    ) {
+        let evidence = evidence::ChainEvidence::of(&certs);
+        let _ = evidence.pin_state(&[hex_of(b"x")]);
+        let _ = evidence.issuer_matches(&|s| s.contains('a'));
+        let _ = evidence.shown_issuer();
+    }
+
+    #[test]
+    fn path_and_name_cleaning_never_panic_on_arbitrary_text(
+        text in ".{0,300}",
+        home in ".{0,40}",
+        max in 0_usize..300
+    ) {
+        let shown = evidence::show_env_path(&text, &[home]);
+        proptest::prop_assert!(shown.chars().count() <= evidence::SHOWN_CHARS.max(3));
+        let cleaned = evidence::clean(&text, max);
+        proptest::prop_assert!(!cleaned.contains('`') && !cleaned.chars().any(char::is_control));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_listener_that_opens_tcp_and_never_answers_the_hello_is_bounded_and_named() {
+    use rdy_engine::testing::loopback::NeverAccepts;
+    let silent = NeverAccepts::start().await.expect("a listener");
+    let replay = Replay::new()
+        .host(NAME, ["127.0.0.1".parse().expect("ip")])
+        .tcp(silent.addr(), TcpScript::Serve("silent".to_owned()))
+        .serve_tcp("silent", silent.addr())
+        .native(
+            NativeCall::SystemRoots,
+            NativeValue::SystemRoots(Vec::new().into()),
+        );
+    let extra = json!({"hosts": [format!("{NAME}:{}", silent.addr().port())]});
+    let ran = run_with(TestRun::new(replay), extra).await;
+    let finding = ran.finding();
+    assert_eq!(finding.level, Level::Warn, "{}", finding.message);
+    assert_eq!(ran.host(0)["class"], "not_tested");
+    assert_eq!(ran.host(0)["reason"], "a step ran out of time");
+    assert!(
+        finding.notes.iter().any(|n| n.contains("timed out")),
+        "{:?}",
+        finding.notes
+    );
+    assert!(finding.partial.is_some());
 }

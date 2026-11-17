@@ -2,20 +2,26 @@
 //! two rules a spec may set on a chain (03 section 3, M1-100).
 //!
 //! Everything here reads text the peer or the environment chose, so everything is cut and cleaned before
-//! it reaches a report: control characters, bidirectional and zero-width marks and backticks are removed,
-//! and a name is cut at [`SHOWN_CHARS`]. A path that came from `SSL_CERT_FILE` or `SSL_CERT_DIR` shows the
-//! variable and the path with the home directory collapsed to `~`, because it can hold a user name and no
-//! redaction rule rewrites a path (05, `system_roots`).
+//! it reaches a report: control characters, every invisible or reordering code point
+//! (`rdy_engine::text::is_invisible`) and backticks are removed, and a name is cut at [`SHOWN_CHARS`]. A
+//! path that came from `SSL_CERT_FILE` or `SSL_CERT_DIR` shows the variable and the path with the home
+//! directory collapsed to `~`, because it can hold a user name and no redaction rule rewrites a path (05,
+//! `system_roots`).
+//!
+//! Nothing here panics on any input: a certificate that does not parse, or is over [`MAX_ROOT_BYTES`], has
+//! no names, and a proptest feeds arbitrary bytes and text.
 
 use rdy_engine::probe::net::TrustStore;
-use rdy_engine::probe::{ProbeError, StoreKind, StoreOrigin, StoreSource};
+use rdy_engine::probe::{MAX_ROOT_BYTES, ProbeError, StoreKind, StoreOrigin, StoreSource};
+use rdy_engine::text::is_invisible;
 use serde_json::{Value, json};
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 /// The most characters of a certificate name or a path a report shows.
 pub(super) const SHOWN_CHARS: usize = 160;
 
-/// The most characters of the issuer text that `expected_issuer` is matched against.
+/// The most characters of an issuer that `expected_issuer` is matched against. A longer issuer is a miss:
+/// matching a prefix could pass a name that only starts like the expected one.
 const MATCHED_CHARS: usize = 1024;
 
 /// The most certificates of one chain that are hashed for `pin_sha256`.
@@ -24,20 +30,12 @@ const MAX_PINNED: usize = 32;
 /// The most trust store sources a report lists.
 const MAX_SOURCES: usize = 8;
 
-/// Marks that change how text is drawn or hide it: bidirectional controls, zero-width characters and the
-/// byte order mark. They are not control characters, so `char::is_control` misses them.
-fn is_mark(c: char) -> bool {
-    matches!(
-        c,
-        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
-    )
-}
-
-/// `text` without control characters, marks and backticks, cut to `max` characters (`...` marks a cut).
+/// `text` without control characters, invisible code points and backticks, cut to `max` characters (`...`
+/// marks a cut).
 pub(super) fn clean(text: &str, max: usize) -> String {
     let kept: String = text
         .chars()
-        .filter(|c| !c.is_control() && !is_mark(*c) && *c != '`')
+        .filter(|c| !c.is_control() && !is_invisible(*c) && *c != '`')
         .collect();
     if kept.chars().count() <= max {
         return kept;
@@ -50,7 +48,8 @@ pub(super) fn clean(text: &str, max: usize) -> String {
 /// The names of one certificate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Names {
-    /// The issuer as `CN=..., O=...`, with control characters removed. Not cut.
+    /// The issuer as x509-parser writes it, `C=..., O=..., CN=...` in certificate order, with control
+    /// characters removed. Not cut.
     pub(super) issuer: String,
     /// The subject, in the same form.
     pub(super) subject: String,
@@ -58,8 +57,12 @@ pub(super) struct Names {
     pub(super) self_signed: bool,
 }
 
-/// The names in `der`, or `None` when it is not a certificate x509-parser can read.
+/// The names in `der`, or `None` when it is over [`MAX_ROOT_BYTES`] or not a certificate x509-parser can
+/// read.
 pub(super) fn names_of(der: &[u8]) -> Option<Names> {
+    if der.len() > MAX_ROOT_BYTES {
+        return None;
+    }
     let (_, cert) = X509Certificate::from_der(der).ok()?;
     let plain = |text: String| -> String { text.chars().filter(|c| !c.is_control()).collect() };
     Some(Names {
@@ -69,6 +72,18 @@ pub(super) fn names_of(der: &[u8]) -> Option<Names> {
     })
 }
 
+/// How a chain stands against `pin_sha256`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PinState {
+    /// The leaf, the one certificate the server proves it holds the key of, is pinned.
+    Leaf,
+    /// Only a later certificate of the chain is pinned. The server can append any public certificate, so
+    /// this proves nothing about the path that was verified.
+    CaOnly,
+    /// No certificate the server sent is pinned.
+    Miss,
+}
+
 /// What a chain shows, read once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChainEvidence {
@@ -76,14 +91,14 @@ pub(super) struct ChainEvidence {
     pub(super) issuer: Option<String>,
     /// The subject of the leaf.
     pub(super) subject: Option<String>,
-    /// The SHA-256 of the last certificate the server sent, as 64 hex digits. It is the root itself only
-    /// when the server sent it, which is not the rule.
+    /// The SHA-256 of the last certificate the server sent, as 64 hex digits.
+    pub(super) last_sha256: Option<String>,
+    /// The same hash, only when that certificate is self-signed, which is what a root is. A server rarely
+    /// sends the root, so this is usually `None`.
     pub(super) root_sha256: Option<String>,
-    /// Whether that last certificate is self-signed.
-    pub(super) root_self_signed: bool,
-    /// The raw hash of that certificate, for the lookup in the OS store.
+    /// The raw hash of the root, for the lookup in the OS store.
     pub(super) root_hash: Option<[u8; 32]>,
-    /// The SHA-256 of every certificate sent (the first [`MAX_PINNED`]), as hex.
+    /// The SHA-256 of every certificate sent (the first [`MAX_PINNED`]), as hex, the leaf first.
     pub(super) hashes: Vec<String>,
 }
 
@@ -92,15 +107,19 @@ impl ChainEvidence {
     pub(super) fn of(certs: &[Vec<u8>]) -> Self {
         let leaf = certs.first().and_then(|der| names_of(der));
         let last = certs.last();
-        let root_hash = last.map(|der| TrustStore::hash(der));
+        let last_hash = last.map(|der| TrustStore::hash(der));
+        let self_signed = last
+            .and_then(|der| names_of(der))
+            .is_some_and(|n| n.self_signed);
         Self {
             issuer: leaf.as_ref().map(|n| n.issuer.clone()),
             subject: leaf.map(|n| n.subject),
-            root_sha256: root_hash.as_ref().map(TrustStore::hex),
-            root_self_signed: last
-                .and_then(|der| names_of(der))
-                .is_some_and(|n| n.self_signed),
-            root_hash,
+            last_sha256: last_hash.as_ref().map(TrustStore::hex),
+            root_sha256: last_hash
+                .as_ref()
+                .filter(|_| self_signed)
+                .map(TrustStore::hex),
+            root_hash: last_hash.filter(|_| self_signed),
             hashes: certs
                 .iter()
                 .take(MAX_PINNED)
@@ -109,17 +128,25 @@ impl ChainEvidence {
         }
     }
 
-    /// Whether the issuer text satisfies `matches`. An issuer that could not be read is a miss.
+    /// Whether the issuer text satisfies `matches`. An issuer that could not be read, or is over
+    /// [`MATCHED_CHARS`], is a miss.
     pub(super) fn issuer_matches(&self, matches: &dyn Fn(&str) -> bool) -> bool {
-        self.issuer.as_deref().is_some_and(|issuer| {
-            let text: String = issuer.chars().take(MATCHED_CHARS).collect();
-            matches(&text)
-        })
+        self.issuer
+            .as_deref()
+            .is_some_and(|issuer| issuer.chars().count() <= MATCHED_CHARS && matches(issuer))
     }
 
-    /// Whether any certificate of the chain has a SHA-256 that is in `pins`.
-    pub(super) fn pinned(&self, pins: &[String]) -> bool {
-        self.hashes.iter().any(|hash| pins.contains(hash))
+    /// Where the chain stands against `pins`. Only the leaf proves anything: a server can append any
+    /// certificate it likes after its own.
+    pub(super) fn pin_state(&self, pins: &[String]) -> PinState {
+        let mut hashes = self.hashes.iter();
+        if hashes.next().is_some_and(|leaf| pins.contains(leaf)) {
+            PinState::Leaf
+        } else if hashes.any(|hash| pins.contains(hash)) {
+            PinState::CaOnly
+        } else {
+            PinState::Miss
+        }
     }
 
     /// The issuer as a report shows it.
@@ -133,14 +160,20 @@ impl ChainEvidence {
     }
 }
 
-/// A path that came from an environment variable, as a report shows it: control characters and marks
-/// removed first (so `/ho\u{0}me/alice` cannot slip past the next step), then the home directory
-/// collapsed to `~`, then cut.
+/// A path that came from an environment variable, as a report shows it: control characters and invisible
+/// code points removed first (so `/ho\u{0}me/alice` cannot slip past the next step), then the usual home
+/// places collapsed to `~`, then the `homes` values, then cut.
 ///
-/// `homes` are the values of `HOME` and `USERPROFILE` as the check read them. Without them the usual
-/// places still collapse: `/home/<name>`, `/Users/<name>`, `/root` and `<drive>:\Users\<name>`.
+/// The usual places are `/home/<name>`, `/Users/<name>`, `/root` and `<drive>:\Users\<name>`. They go
+/// first, so a `HOME` of `/home` cannot turn `/home/alice` into `~/alice`. `homes` are the values of
+/// `HOME` as the check read them. A user name outside a home place (`/srv/alice`), or the invoking user's
+/// home under `sudo` with `HOME=/root`, still shows (05, `system_roots`).
 pub(super) fn show_env_path(path: &str, homes: &[String]) -> String {
     let flat = clean(path, usize::MAX);
+    let usual = collapse_usual_home(&flat);
+    if usual != flat {
+        return clean(&usual, SHOWN_CHARS);
+    }
     for home in homes {
         let home = clean(home, usize::MAX);
         let home = home.trim_end_matches(['/', '\\']);
@@ -153,13 +186,14 @@ pub(super) fn show_env_path(path: &str, homes: &[String]) -> String {
             return clean(&format!("~{rest}"), SHOWN_CHARS);
         }
     }
-    clean(&collapse_usual_home(&flat), SHOWN_CHARS)
+    clean(&flat, SHOWN_CHARS)
 }
 
 /// `~` in place of `/home/<name>`, `/Users/<name>`, `/root` or `<drive>:\Users\<name>` at the start.
 fn collapse_usual_home(path: &str) -> String {
     let lower = path.to_ascii_lowercase();
-    // The text after the user name, from the separator that ends it.
+    // The text after the user name, from the separator that ends it. `from` is a byte offset into an
+    // ASCII prefix of `path`, so it is a character boundary.
     let after_name = |from: usize| -> String {
         let tail = path.get(from..).unwrap_or_default();
         let end = tail.find(['/', '\\']).unwrap_or(tail.len());
@@ -203,6 +237,16 @@ fn source_json(source: &StoreSource, homes: &[String]) -> Value {
         }),
         _ => json!({"kind": kind, "location": clean(&source.location, SHOWN_CHARS)}),
     }
+}
+
+/// Whether any source of `answer` was named by an environment variable, so a path may need collapsing.
+pub(super) fn names_a_variable(answer: &Result<TrustStore, ProbeError>) -> bool {
+    answer.as_ref().is_ok_and(|store| {
+        store
+            .sources
+            .iter()
+            .any(|s| matches!(s.origin, StoreOrigin::Env(_)))
+    })
 }
 
 /// The trust store section of the report: where the OS roots came from, how many there are, or why there

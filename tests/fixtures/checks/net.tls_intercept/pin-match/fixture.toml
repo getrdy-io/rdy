@@ -1,6 +1,6 @@
 schema = 1
 name = "net-tls-intercept-pin-match"
-summary = "A public chain in which the issuing CA is pinned"
+summary = "A public chain in which the leaf is pinned"
 origin = "generated"
 os = "linux"
 arch = "x86_64"
