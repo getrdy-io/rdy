@@ -122,9 +122,11 @@ not in the code yet.
   whose signature does not verify, always. It refuses an unsigned spec unless you pass
   `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
-  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` only
-  `net.egress` and `net.mtu` touch the network, and `--no-network` skips both. `net.egress` makes no
-  HTTP request yet, so there is no redirect to follow. The rule for the HTTP path, when it lands, is
+  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` two
+  checks can reach the network. `net.egress` does, and `--no-network` skips it. `host.time_sync` sends
+  an SNTP packet only to servers the spec lists, and with `--no-network` it skips that measurement and
+  runs on local data. `net.mtu` reads local interface and route data and runs offline. `net.egress`
+  makes no HTTP request yet, so there is no redirect to follow. The rule for the HTTP path, when it lands, is
   that redirects are recorded and never followed. A vendor portal is planned, and it is optional.
 - **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
 - **No telemetry.**
@@ -219,7 +221,8 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
   macOS and Windows they report not run.
 - Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
-  and ALPN, direct) and `net.mtu`. `--no-network` skips them and says so.
+  and ALPN, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
+  local data and runs offline.
 - The spec format, the schema and a spec linter (`rdy spec lint`).
 - Signing: key generation, `rdy spec sign` and `rdy trust add|list|remove`. `rdy run` checks the
   signature and refuses a bad one.
