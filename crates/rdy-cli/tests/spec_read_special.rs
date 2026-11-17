@@ -6,8 +6,9 @@
 //! hang cannot stall CI. The swap between the `stat` and the open is covered by unit tests with a hook
 //! (no real race).
 //!
-//! Unix only: Windows has no named pipe at a file path and no `/dev/zero`. Its device names (`NUL`,
-//! `CON`) fail the `is_file` check of the same code.
+//! Unix only: Windows has no named pipe at a file path and no `/dev/zero`. Its twin is
+//! `spec_read_special_windows.rs`, which uses `NUL` and a pipe from `\\.\pipe\`, and relies on the
+//! `GetFileType` test of `signing::files` (the standard library's `is_file` passes both).
 #![cfg(unix)]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -19,8 +20,15 @@ mod common;
 
 const PASSWORD_VAR: &str = "RDY_KEY_PASSWORD";
 
+/// One start of the binary, so its pages are in the cache before a run is timed (a slow runner).
+fn warm_up() {
+    let _ = Command::new(env!("CARGO_BIN_EXE_rdy"))
+        .arg("version")
+        .stdin(Stdio::null())
+        .output();
+}
+
 fn run(dir: &Path, args: &[&str]) -> (Output, Duration) {
-    let start = Instant::now();
     let mut child = Command::new(env!("CARGO_BIN_EXE_rdy"))
         .args(args)
         .current_dir(dir)
@@ -31,6 +39,8 @@ fn run(dir: &Path, args: &[&str]) -> (Output, Duration) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the rdy binary starts");
+    // Timed from the spawn, after the warm-up, so a cold binary does not count.
+    let start = Instant::now();
     loop {
         if child.try_wait().expect("wait").is_some() {
             break;
@@ -95,6 +105,7 @@ fn assert_refused(dir: &Path, spec: &str, what: &str) {
 
 #[test]
 fn a_named_pipe_at_the_spec_path_exits_64_at_once() {
+    warm_up();
     let d = tempfile::tempdir().expect("tempdir");
     fifo(&d.path().join("spec.yaml"));
     assert_refused(d.path(), "spec.yaml", "a named pipe");
@@ -102,12 +113,14 @@ fn a_named_pipe_at_the_spec_path_exits_64_at_once() {
 
 #[test]
 fn a_device_at_the_spec_path_exits_64_at_once() {
+    warm_up();
     let d = tempfile::tempdir().expect("tempdir");
     assert_refused(d.path(), "/dev/zero", "/dev/zero");
 }
 
 #[test]
 fn a_link_to_a_named_pipe_exits_64_at_once() {
+    warm_up();
     let d = tempfile::tempdir().expect("tempdir");
     fifo(&d.path().join("real.fifo"));
     std::os::unix::fs::symlink("real.fifo", d.path().join("spec.yaml")).expect("symlink");
@@ -131,6 +144,7 @@ fn sign_refuses_an_expired_spec_before_the_key_and_writes_nothing() {
     assert!(err.contains("expired on 2020-01-01"), "{err}");
     assert!(err.contains("fix:"), "{err}");
     assert!(!err.contains("input hidden"), "{err}");
+    assert!(!err.contains("not signed:"), "{err}");
     assert!(!err.contains("missing.key"), "{err}");
     assert!(!d.path().join("spec.yaml.minisig").exists());
 }

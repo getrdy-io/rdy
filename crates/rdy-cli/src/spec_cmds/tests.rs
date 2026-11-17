@@ -1024,3 +1024,28 @@ fn sign_refuses_an_expired_spec_as_spec_expired_before_the_key_and_the_prompt() 
     assert!(shown_prompts(&log).is_empty());
     assert!(!d.path().join("acme-platform.yaml.minisig").exists());
 }
+
+#[test]
+fn sign_with_only_warnings_prints_the_finding_lines_and_no_summary_before_the_prompt() {
+    let d = dir();
+    let (made, _) = make_key(d.path(), "w", None);
+    made.expect("keygen");
+    let spec = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-platform\nchecks:\n  - id: gpu.cuda\n    min: \"12.4\"\n";
+    let spec_path = write_spec(d.path(), spec);
+    let args = sign_args(&spec_path, &d.path().join("w.key"));
+    let (result, shown) = run_sign(
+        &args,
+        &mut must_not_be_called,
+        &mut Scripted::no_terminal().0,
+    );
+    result.expect("warnings do not stop signing");
+    let lines: Vec<&str> = shown.lines().collect();
+    let first = lines
+        .iter()
+        .position(|l| l.contains(": warning: gpu.cuda"))
+        .unwrap_or_else(|| panic!("no warning in {shown}"));
+    assert!(lines[first + 1].starts_with("  fix: "), "{shown}");
+    // 07 C.9 shows no blank line and no "0 errors, 1 warning" line after the finding.
+    assert!(!lines[first + 2].is_empty(), "{shown}");
+    assert!(!shown.contains("0 errors"), "{shown}");
+}

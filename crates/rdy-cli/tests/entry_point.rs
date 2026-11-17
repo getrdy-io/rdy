@@ -207,13 +207,13 @@ fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Optio
     rx.recv_timeout(limit).ok()
 }
 
-/// A spec path that is a FIFO with no writer. The gate must refuse first, so `run` returns exit 70
-/// without opening the path. The control is the exit code: since M1-183 every spec read refuses a FIFO
+/// A spec path that is a FIFO with no writer. The gate must refuse first, so `rdy spec sign` returns
+/// exit 70 without opening the path. The control is the exit code: since M1-183 every spec read refuses a FIFO
 /// without blocking, so an unprivileged call returns 64 (`spec_unreadable`) where the gate returns 70.
 /// A command that opened the path before the gate would give 64 here, not 70.
 #[cfg(unix)]
 #[test]
-fn a_refused_run_never_opens_the_spec_path() {
+fn a_refused_spec_sign_never_opens_the_spec_path() {
     use std::time::Duration;
 
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
@@ -229,7 +229,7 @@ fn a_refused_run_never_opens_the_spec_path() {
     );
 
     let code = sign_a_fifo(privileged(), &path, Duration::from_secs(10))
-        .unwrap_or_else(|| panic!("run did not return: the spec path was opened"));
+        .unwrap_or_else(|| panic!("spec sign did not return: the spec path was opened"));
     assert_eq!(code, ExitCode::Internal);
 }
 

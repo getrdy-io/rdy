@@ -350,13 +350,13 @@ pub fn sign<T: Terminal>(
         parse_unverified(&bytes).map_err(|source| CliError::spec(spec_name.clone(), source))?;
     let report = lint_bytes(&escape_untrusted(&spec_name), &bytes);
     if report.has_errors() {
-        let _ = out.write_all(lint::text(&report).as_bytes());
-        // An expired spec has its own code and message. Parsing it for the loader finds the expiry.
+        // An expired spec has its own code and message, said once. Loading it for the loader finds it.
         if let Err(source @ SpecError::Expired { .. }) =
             load(&bytes, None, &TrustStore::new(), Policy::AllowUnsigned)
         {
             return Err(CliError::spec_in(spec_name, source, &bytes));
         }
+        let _ = out.write_all(lint::text(&report).as_bytes());
         let errors = report.errors;
         let plural = if errors == 1 { "" } else { "s" };
         return Err(CliError::usage(
@@ -367,9 +367,8 @@ pub fn sign<T: Terminal>(
             "correct the errors above and run rdy spec sign again",
         ));
     }
-    if !report.findings.is_empty() {
-        let _ = out.write_all(lint::text(&report).as_bytes());
-    }
+    // Warnings only: the finding lines, with no summary (07 C.9). Signing goes on.
+    let _ = out.write_all(lint::findings_text(&report).as_bytes());
 
     // 2. The place for the signature. Refuse an existing file before asking for a password.
     let sig_path = args

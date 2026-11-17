@@ -302,9 +302,9 @@ fn a_named_pipe_swapped_in_after_the_stat_is_refused_and_never_waited_on() {
 
 #[cfg(unix)]
 #[test]
-fn a_device_swapped_in_after_the_stat_is_refused_but_was_opened() {
-    // The residual of 05 Surface 2: the open of a swapped-in device has happened by the time the compare
-    // refuses it. The read never happens, so no bytes are taken from it.
+fn a_device_swapped_in_after_the_stat_is_still_refused() {
+    // The residual of 05 Surface 2: the open of a swapped-in device has already happened by the time
+    // the compare refuses it (a test cannot see the open). The read never happens, so no bytes are taken from it.
     let d = dir();
     let path = d.path().join("spec.yaml");
     std::fs::write(&path, "a: 1").expect("write");

@@ -127,7 +127,7 @@ pub fn read_public_prefix(path: &Path, limit: usize) -> Result<(Vec<u8>, bool), 
 /// # Errors
 ///
 /// [`FileError::Unreadable`] or [`FileError::NotRegular`].
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn read_public_prefix_between(
     path: &Path,
     limit: usize,
@@ -150,6 +150,11 @@ fn read_checked(
     }
     between();
     let mut file = open_public(path).map_err(|err| unreadable(&err))?;
+    // Windows: `is_file` only means "not a folder or a link", so a pipe or a console passes it. Ask the
+    // handle itself, before anything is read from it.
+    if !is_disk_file(&file) {
+        return Err(FileError::NotRegular);
+    }
     let opened = file.metadata().map_err(|err| unreadable(&err))?;
     if !opened.is_file() || !same_file(&seen, &opened) {
         return Err(FileError::NotRegular);
@@ -190,9 +195,37 @@ fn open_public(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-#[cfg(not(unix))]
+/// Windows: the open asks for identification level only (`SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`),
+/// so a pipe server at a path cannot impersonate the person who runs `rdy`. The flags are the documented
+/// values of `winbase.h`.
+#[cfg(windows)]
+fn open_public(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    OpenOptions::new()
+        .read(true)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_public(path: &Path) -> io::Result<File> {
     File::open(path)
+}
+
+/// Windows: `GetFileType` says a disk file. A pipe, a console or a device (`NUL`, `CON`) is refused. The
+/// call is `winapi-util`'s safe wrapper, so `rdy-cli` stays free of `unsafe`.
+#[cfg(windows)]
+fn is_disk_file(file: &File) -> bool {
+    winapi_util::file::typ(file).is_ok_and(|kind| kind.is_disk())
+}
+
+/// Unix tells a regular file from the open handle's mode, which the caller checks next.
+#[cfg(not(windows))]
+fn is_disk_file(_file: &File) -> bool {
+    true
 }
 
 #[cfg(unix)]

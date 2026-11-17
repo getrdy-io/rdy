@@ -50,7 +50,7 @@ pub(crate) fn read_spec(path: &Path, name: &str) -> Result<Vec<u8>, CliError> {
 }
 
 /// [`read_spec`] with a hook between the `stat` and the open, for the tests of the swap.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn read_spec_between(
     path: &Path,
     name: &str,
@@ -85,6 +85,23 @@ fn spec_file_error(name: &str, err: &FileError) -> CliError {
 #[must_use]
 pub fn text(report: &LintReport) -> String {
     let file = escape_untrusted(&report.file);
+    let mut out = findings_text(report);
+    if !report.findings.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "{file}: {}, {}\n",
+        count(report.errors, "error"),
+        count(report.warnings, "warning")
+    ));
+    out
+}
+
+/// The finding lines of [`text`] only, two lines each, with no blank line and no summary. `rdy spec sign`
+/// prints these for a spec that has warnings (07 C.9).
+#[must_use]
+pub fn findings_text(report: &LintReport) -> String {
+    let file = escape_untrusted(&report.file);
     let mut out = String::new();
     for finding in &report.findings {
         let level = finding.level.as_str();
@@ -98,14 +115,6 @@ pub fn text(report: &LintReport) -> String {
             escape_untrusted(&finding.fix)
         ));
     }
-    if !report.findings.is_empty() {
-        out.push('\n');
-    }
-    out.push_str(&format!(
-        "{file}: {}, {}\n",
-        count(report.errors, "error"),
-        count(report.warnings, "warning")
-    ));
     out
 }
 
@@ -207,7 +216,9 @@ mod swap_tests {
                 .expect("mkfifo");
             assert!(made.success());
         };
+        let start = std::time::Instant::now();
         let err = read_spec_between(&path, "s.yaml", &hook).unwrap_err();
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
         assert_eq!(err.code(), ErrorCode::SpecUnreadable);
         assert!(!err.hint().is_empty());
     }
