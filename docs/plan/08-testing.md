@@ -14,7 +14,8 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 1. Every side effect goes through `Probe`, so a fixture can answer every question a check asks.
 2. Every fixture is synthetic. A lint enforces it.
 3. Fixtures are data. A Linux environment replays on a Windows runner. Only the thin native closures
-   (`statvfs`, the Windows registry) are behind `cfg`.
+   (`statvfs`, the Windows registry) are behind `cfg`. In M1 the env harness still skips an environment of
+   another OS, until M2-130 (see Environments).
 4. The CLI is tested in process. Tests call `rdy_cli::run(args, backend, out, err)` with the Replay backend.
    No shipped binary contains a way to read a fixture directory.
 5. A golden is the exact bytes the product writes. It changes only with `UPDATE_GOLDENS=1`, and a golden
@@ -33,7 +34,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, Replay | One check against one fixture case; scheduler, timeouts, panics, cancellation | All five legs |
 | Loopback network | `rdy_engine::testing::loopback`, behind the `loopback` feature of `rdy-engine` (ADR 0035) | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
-| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
+| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs; in M1 an environment runs only on the legs of its own OS (see Environments) |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
 | Live CI jobs | `ci.yml`; the kind job is `kind.yml` (M1-108, ADR 0039, not a gate) | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
 | Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
@@ -214,8 +215,14 @@ M2 adds the rule that nothing in a fixture changes under the redactor (it needs 
 
 ### Environments
 
-Five in M1, because the M1 exit test needs exit codes 0, 1 and 2 on every leg, and `all-pass` already has
-host, net and k8s facts in it. The rest are M2.
+Five in M1, because the M1 exit test needs exit codes 0, 1 and 2, and `all-pass` already has host, net and
+k8s facts in it. The rest are M2.
+
+In M1 the env harness runs an environment only on the legs of its `os` (a deviation decided in M1-086, PR #42).
+`rdy_cli::run` plans for `current_os()` and has no hook to change it, so the harness skips an environment of
+another OS with a line on stderr. Every M1 environment is a Linux machine, so they run on the two Linux legs,
+and macOS and Windows skip them. M2-130 adds a `RunHooks` OS override, `None` in the shipped binary, and then
+every environment runs on all five legs (correction-48).
 
 | Env | Milestone | Story | Verdict, exit |
 | --- | --- | --- | --- |
@@ -732,7 +739,7 @@ below are coarse and move to 11-backlog.md when it is merged.
 - [M1] Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | owner: qa-engineer | est: 2h | depends on: Engine test helpers FakeCheck, run_fixture and normalize | exit test: a changed output fails with a diff and an `.actual` file, a missing golden fails, `UPDATE_GOLDENS=1` is refused when `CI` is set and never touches `tests/fixtures/redaction/**`, and `cargo xtask goldens check` fails on an orphan.
 - [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: `report.json` for the ready, warning and not-ready runs validates against the result schema, `report.html` passes the static checks (CSP, no off-file src or href, `</script>` hostname round trip), and all pass on five legs.
 - [M1] Env-level harness, in process | owner: qa-engineer | est: 3h | depends on: In-process CLI entry point rdy_cli::run taking a Backend; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: one test per env checks exit code, `report.json`, `terminal.txt` and, where present, `report.html`, with the clock, run id and environment pinned, and the `jobs = 1` and `jobs = 8` reports are equal.
-- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness, in process; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress staged connector (lookup, dual-stack connect, TLS, ALPN); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: the env exits 0 on all five legs with golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
+- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness, in process; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress staged connector (lookup, dual-stack connect, TLS, ALPN); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: the env exits 0 on the two Linux legs with golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
 - [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `missing_need` skips, and its verdict reason is `required_check_not_run`.
 - [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, every hung source gives `Timeout`, the run ends inside `deadline_ms` in virtual time, cancellation gives `interrupted: true` with `skip_kind: cancelled`, and only the `Fake::Block` test uses real time with a 1 s upper bound.
 - [M1] Property tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the section 4 table holds, 10,000 cases for never-panics and limits and 256 for the rest, with a fixed seed on PRs, committed regressions, `max_shrink_time` 30 s and the suite under 60 s on linux-x64.
