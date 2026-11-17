@@ -12,9 +12,6 @@ use std::sync::OnceLock;
 use k8s_openapi::jiff::civil::Date;
 use serde::Deserialize;
 
-/// The shipped table text.
-const EMBEDDED: &str = include_str!("../../data/cni.toml");
-
 /// The only schema number this build reads.
 const SCHEMA: u32 = 1;
 /// The most entries a table may hold.
@@ -156,7 +153,9 @@ impl Table {
     /// The reason the embedded file did not parse, which a test rules out.
     pub(super) fn shipped() -> Result<&'static Self, &'static TableError> {
         static SHIPPED: OnceLock<Result<Table, TableError>> = OnceLock::new();
-        SHIPPED.get_or_init(|| Self::parse(EMBEDDED)).as_ref()
+        SHIPPED
+            .get_or_init(|| Self::parse(super::EMBEDDED))
+            .as_ref()
     }
 
     /// The entries, in file order.

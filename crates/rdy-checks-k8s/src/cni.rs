@@ -64,6 +64,9 @@ use objects::{
 };
 use table::Table;
 
+/// The shipped network plugin table text (`data/cni.toml`, 03 Appendix B). `table` parses it.
+const EMBEDDED: &str = include_str!("../data/cni.toml");
+
 /// The most objects one list asks for. A longer list is read as its first page and the rest is "not read".
 const PAGE: u32 = 500;
 
