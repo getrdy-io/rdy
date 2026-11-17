@@ -1,0 +1,41 @@
+{
+  "entry": {
+    "hosts": [
+      "web.acme.test"
+    ],
+    "id": "net.tls_intercept"
+  },
+  "result": {
+    "expected": {
+      "forbid_interception": false
+    },
+    "fix": "web.acme.test is presented with a chain from a CA this machine does not trust, so the product's clients will fail. A TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for web.acme.test, or install that CA. Debian and Ubuntu: copy the CA to `/usr/local/share/ca-certificates/acme-inspection.crt` (the name must end in `.crt`), then run `update-ca-certificates`. RHEL: copy it to `/etc/pki/ca-trust/source/anchors/`, then run `update-ca-trust`. SUSE: copy it to `/usr/share/pki/trust/anchors/`, then run `update-ca-certificates`. Alpine: copy it to `/usr/local/share/ca-certificates/`, then run `update-ca-certificates`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store.",
+    "level": "fail",
+    "message": "web.acme.test:443 (issuer's CA is not installed on this machine, issuer CN=Acme Test Issuing CA)",
+    "notes": [],
+    "observed": {
+      "hosts": [
+        {
+          "chain_depth": 2,
+          "class": "unknown_ca",
+          "host": "web.acme.test:443",
+          "issuer": "CN=Acme Test Issuing CA",
+          "os_store": "unknown_issuer",
+          "os_store_roots": 1,
+          "protocol": "TLS 1.3",
+          "public_roots": "unknown_issuer",
+          "root_in_os_store": false,
+          "root_self_signed": false,
+          "root_sha256": "<sha256>",
+          "subject": "CN=web.acme.test"
+        }
+      ],
+      "trust_store": {
+        "roots": 1,
+        "sources": [],
+        "status": "found"
+      }
+    },
+    "partial": null
+  }
+}

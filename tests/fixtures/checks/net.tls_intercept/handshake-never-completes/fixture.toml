@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-handshake-never-completes"
+summary = "A host whose connection never completes, so no chain is had and the step is cut to its budget"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

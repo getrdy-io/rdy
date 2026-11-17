@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "hosts": [
+      "hang.acme.test"
+    ],
+    "id": "net.tls_intercept"
+  },
+  "result": {
+    "expected": {
+      "forbid_interception": false
+    },
+    "fix": null,
+    "level": "warn",
+    "message": "no host could be tested (1 not tested); net.egress shows why",
+    "notes": [
+      "1 of 1 hosts timed out: hang.acme.test:443"
+    ],
+    "observed": {
+      "hosts": [
+        {
+          "class": "not_tested",
+          "host": "hang.acme.test:443",
+          "reason": "the connection timed out"
+        }
+      ]
+    },
+    "partial": {
+      "missing": [],
+      "note": "1 of 1 hosts were not tested: hang.acme.test:443 (the connection timed out)"
+    }
+  }
+}

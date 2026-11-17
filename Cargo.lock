@@ -1922,6 +1922,7 @@ dependencies = [
  "rdy-spec",
  "serde_json",
  "tokio",
+ "x509-parser",
 ]
 
 [[package]]

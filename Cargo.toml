@@ -42,6 +42,9 @@ ring = { version = "0.17", default-features = false }
 regex = { version = "1", default-features = false }
 # The parsed form of a pattern, to read the shortest text it can match (01 section 2.8).
 regex-syntax = { version = "0.8", default-features = false }
+# Reads the issuer and subject names of a presented TLS chain, for net.tls_intercept (M1-100). Parser only: no
+# `verify` feature, so it pulls in neither ring nor aws-lc. Only rdy-checks-net may list it (ci/check-crate-deps.toml).
+x509-parser = { version = "0.18", default-features = false }
 # The scheduler (M1-034). Each crate names the features it uses.
 tokio = { version = "1", default-features = false }
 rpassword = { version = "7.5", default-features = false }

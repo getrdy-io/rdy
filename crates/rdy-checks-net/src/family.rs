@@ -47,7 +47,9 @@ impl Family for NetFamily {
             CheckParams::NetTlsIntercept(params) => {
                 let (hosts, dropped) = tls_intercept::hosts_for(&params, spec);
                 let set = HostSet::new(hosts.iter().cloned());
-                let check = TlsInterceptCheck::new(&params, hosts, dropped);
+                let check = TlsInterceptCheck::new(&params, hosts, dropped).map_err(|reason| {
+                    BuildError::Unsupported(format!("expected_issuer does not compile: {reason}"))
+                })?;
                 Ok(Built::new(Box::new(check)).with_hosts(set))
             }
             _ => Err(BuildError::Unsupported(

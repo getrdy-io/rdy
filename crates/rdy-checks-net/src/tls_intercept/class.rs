@@ -126,17 +126,7 @@ impl Class {
         forbid_interception: bool,
         why: Option<NoRoots>,
     ) -> Option<String> {
-        let install = match os {
-            Os::Windows => {
-                "import that CA into the Trusted Root Certification Authorities store with `certlm.msc`"
-            }
-            Os::Macos => {
-                "install that CA with `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt`"
-            }
-            _ => {
-                "install that CA (Debian and Ubuntu: `update-ca-certificates`; RHEL: `update-ca-trust`)"
-            }
-        };
+        let install = install_forms(os);
         Some(match self {
             Self::Public => return None,
             Self::MachineOnly => {
@@ -146,11 +136,11 @@ impl Class {
                     ""
                 };
                 format!(
-                    "{host} is presented with a chain that public roots do not vouch for but this machine's store trusts. An internal CA or a TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for {host}.{pinned} Container images and Java do not read the host store, so a product in one fails unless that CA is added there too."
+                    "{host} is presented with a chain that public roots do not vouch for but this machine's store trusts. An internal CA or a TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for {host}.{pinned} Where the product reads another store, install that CA there. {install}"
                 )
             }
             Self::UnknownCa => format!(
-                "{host} is presented with a chain from a CA this machine does not trust, so the product's clients will fail. A TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for {host}, or {install}."
+                "{host} is presented with a chain from a CA this machine does not trust, so the product's clients will fail. A TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for {host}, or install that CA. {install}"
             ),
             Self::ClockOrExpiry => {
                 let clock = match os {
@@ -187,7 +177,7 @@ impl Class {
                 _ => {
                     let store = match os {
                         Os::Linux => {
-                            "Install it with `apt-get install ca-certificates` or `dnf install ca-certificates`."
+                            "Install it. Debian and Ubuntu: `apt-get install ca-certificates`. RHEL: `dnf install ca-certificates`. SUSE: `zypper install ca-certificates`. Alpine: `apk add ca-certificates`."
                         }
                         _ => "Check that the OS certificate store is intact.",
                     };
@@ -198,4 +188,34 @@ impl Class {
             },
         })
     }
+}
+
+/// How to install a CA on `os`, how to add it to Java, and why the host store alone is not enough. Every
+/// command is on the fix-text allow-list. The file names are 03's.
+fn install_forms(os: Os) -> &'static str {
+    match os {
+        Os::Windows => {
+            "Import the CA into the Trusted Root Certification Authorities store with `certlm.msc`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store."
+        }
+        Os::Macos => {
+            "Install the CA with `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store."
+        }
+        _ => {
+            "Debian and Ubuntu: copy the CA to `/usr/local/share/ca-certificates/acme-inspection.crt` (the name must end in `.crt`), then run `update-ca-certificates`. RHEL: copy it to `/etc/pki/ca-trust/source/anchors/`, then run `update-ca-trust`. SUSE: copy it to `/usr/share/pki/trust/anchors/`, then run `update-ca-certificates`. Alpine: copy it to `/usr/local/share/ca-certificates/`, then run `update-ca-certificates`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store."
+        }
+    }
+}
+
+/// The `Fix:` text for a chain whose issuer does not match the spec's `expected_issuer`.
+pub(super) fn issuer_fix(host: &str) -> String {
+    format!(
+        "The chain of {host} was not issued by the CA the spec expects (`expected_issuer`). A TLS-inspecting proxy that re-signs the connection is the usual cause. Ask the network team to bypass inspection for {host}. If this issuer is right, ask the vendor to update `expected_issuer`."
+    )
+}
+
+/// The `Fix:` text for a chain in which no certificate matches the spec's `pin_sha256`.
+pub(super) fn pin_fix(host: &str) -> String {
+    format!(
+        "No certificate in the chain of {host} matches `pin_sha256`. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for {host}. If the server's certificate was renewed, ask the vendor for the new pin."
+    )
 }

@@ -59,12 +59,14 @@ proptest = { workspace = true, features = ["std"] }
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
 rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
 # `testing` adds the panicking-redactor seam. It is a dev-dependency feature, so the shipped binary
-# never has it (rdy-engine refuses a release build with it).
-rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
+# never has it (rdy-engine refuses a release build with it). `loopback` adds the TLS server and the
+# generated CA that the env harness builds its certificate chains from (M1-100, ADR 0035); the CI guard
+# on the normal build graph keeps it out of the binary.
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }
 sha2 = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 # `test-util` gives the harness a paused clock, so a hung source costs no real time.
-tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "test-util"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
