@@ -14,7 +14,8 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 1. Every side effect goes through `Probe`, so a fixture can answer every question a check asks.
 2. Every fixture is synthetic. A lint enforces it.
 3. Fixtures are data. A Linux environment replays on a Windows runner. Only the thin native closures
-   (`statvfs`, the Windows registry) are behind `cfg`.
+   (`statvfs`, the Windows registry) are behind `cfg`. In M1 the env harness still skips an environment of
+   another OS, until M2-130 (see Environments).
 4. The CLI is tested in process. Tests call `rdy_cli::run(args, backend, out, err)` with the Replay backend.
    No shipped binary contains a way to read a fixture directory.
 5. A golden is the exact bytes the product writes. It changes only with `UPDATE_GOLDENS=1`, and a golden
@@ -33,7 +34,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, Replay | One check against one fixture case; scheduler, timeouts, panics, cancellation | All five legs |
 | Loopback network | `rdy_engine::testing::loopback`, behind the `loopback` feature of `rdy-engine` (ADR 0035) | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
-| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
+| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs; in M1 an environment runs only on the legs of its own OS (see Environments) |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
 | Live CI jobs | `ci.yml`; the kind job is `kind.yml` (M1-108, ADR 0039, not a gate) | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
 | Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
@@ -214,8 +215,14 @@ M2 adds the rule that nothing in a fixture changes under the redactor (it needs 
 
 ### Environments
 
-Five in M1, because the M1 exit test needs exit codes 0, 1 and 2 on every leg, and `all-pass` already has
-host, net and k8s facts in it. The rest are M2.
+Five in M1, because the M1 exit test needs exit codes 0, 1 and 2, and `all-pass` already has host, net and
+k8s facts in it. The rest are M2.
+
+In M1 the env harness runs an environment only on the legs of its `os` (a deviation decided in M1-086, PR #42).
+`rdy_cli::run` plans for `current_os()` and has no hook to change it, so the harness skips an environment of
+another OS with a line on stderr. Every M1 environment is a Linux machine, so they run on the two Linux legs,
+and macOS and Windows skip them. M2-130 adds a `RunHooks` OS override, `None` in the shipped binary, and then
+every environment runs on all five legs (correction-48).
 
 | Env | Milestone | Story | Verdict, exit |
 | --- | --- | --- | --- |
