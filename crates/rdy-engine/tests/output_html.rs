@@ -44,7 +44,7 @@ fn the_file_is_render_html_and_hashes_the_json_file() -> TestResult {
     let parent = tempfile::tempdir()?;
     let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
     let page = render_page(&report)?;
-    let html_path = out.write_html(&page)?;
+    let html_path = out.write_html(&page)?.path().to_path_buf();
     let json_path = out.write_json(&report)?;
     assert!(html_path.ends_with("rdy-report-acme-platform-20270309T143005Z.html"));
 
@@ -71,7 +71,7 @@ fn the_file_is_0600() -> TestResult {
     let report = sample()?;
     let parent = tempfile::tempdir()?;
     let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
-    let path = out.write_html(&render_page(&report)?)?;
+    let path = out.write_html(&render_page(&report)?)?.path().to_path_buf();
     assert_eq!(std::fs::metadata(path)?.permissions().mode() & 0o777, 0o600);
     Ok(())
 }
@@ -82,7 +82,7 @@ fn a_page_is_never_written_over_a_file_that_is_there() -> TestResult {
     let page = render_page(&report)?;
     let parent = tempfile::tempdir()?;
     let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
-    let path = out.write_html(&page)?;
+    let path = out.write_html(&page)?.path().to_path_buf();
     let before = std::fs::read(&path)?;
     let again = out.write_html(&page);
     assert!(
@@ -92,5 +92,40 @@ fn a_page_is_never_written_over_a_file_that_is_there() -> TestResult {
     assert_eq!(std::fs::read(&path)?, before);
     // The failed write left no `.tmp`.
     assert_eq!(names(out.path())?.len(), 1);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_html_takes_back_its_own_file_and_leaves_a_swapped_one() -> TestResult {
+    let report = sample()?;
+    let page = render_page(&report)?;
+
+    // Its own file goes.
+    let parent = tempfile::tempdir()?;
+    let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
+    let written = out.write_html(&page)?;
+    out.remove_html(&written);
+    assert!(!written.path().exists());
+
+    // A file put under the name after the write stays. The planted file is made first, so it has its own
+    // inode even when the file system reuses the numbers of removed files.
+    let parent = tempfile::tempdir()?;
+    let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
+    let written = out.write_html(&page)?;
+    let planted = out.path().join("planted");
+    std::fs::write(&planted, b"planted")?;
+    std::fs::rename(&planted, written.path())?;
+    out.remove_html(&written);
+    assert_eq!(std::fs::read(written.path())?, b"planted");
+
+    // So does a symlink.
+    let parent = tempfile::tempdir()?;
+    let out = OutputDir::create_new(parent.path(), "acme-platform", "20270309T143005Z")?;
+    let written = out.write_html(&page)?;
+    std::fs::remove_file(written.path())?;
+    std::os::unix::fs::symlink("elsewhere", written.path())?;
+    out.remove_html(&written);
+    assert!(std::fs::symlink_metadata(written.path()).is_ok());
     Ok(())
 }

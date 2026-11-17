@@ -392,10 +392,10 @@ impl ReportSink for FolderSink {
         // the folder means every file of the run is there (M1-181, 07 section 4.1).
         let page = render_page(report)?;
         dir.write_spec(&self.spec)?;
-        dir.write_html(&page)?;
+        let html = dir.write_html(&page)?;
         if let Err(error) = dir.write_json(report) {
             // A page without its `.json` is not a result (M1-181).
-            dir.remove_html();
+            dir.remove_html(&html);
             return Err(error);
         }
         Ok(())
@@ -598,11 +598,12 @@ fn write_files(
 ) -> Result<Vec<String>, CliError> {
     let failed = |error| report_error(ReportStep::WriteFiles, dir.path(), error);
     let mut written = dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
-    written.push(dir.write_html(page).map_err(failed)?);
+    let html = dir.write_html(page).map_err(failed)?;
+    written.push(html.path().to_path_buf());
     match dir.write_json(report) {
         Ok(path) => written.push(path),
         Err(error) => {
-            dir.remove_html();
+            dir.remove_html(&html);
             return Err(failed(error));
         }
     }

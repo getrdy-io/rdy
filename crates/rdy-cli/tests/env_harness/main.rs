@@ -11,8 +11,9 @@
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
 //! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
-//! so one test runs the host-min environment (exit 0; switch it to the all-pass environment when M1-117, PR #80, lands) into a folder and checks the written page against the structure
-//! rules of M1-082. `driver` says what else the run does not do.
+//! so one test runs the host-min environment into a folder (exit 0; switch it to the all-pass
+//! environment when M1-117, PR #80, lands) and checks the written page against the structure rules of
+//! M1-082. `driver` says what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.

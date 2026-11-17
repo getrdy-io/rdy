@@ -191,6 +191,53 @@ impl ReportError {
     }
 }
 
+/// Who a file is: on Unix the device and inode, elsewhere only the size (the standard library has no
+/// stable file id).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileId {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+    #[cfg(not(unix))]
+    len: u64,
+}
+
+impl FileId {
+    fn of(meta: &cap_std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        {
+            use cap_std::fs::MetadataExt as _;
+            Self {
+                dev: meta.dev(),
+                ino: meta.ino(),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Self { len: meta.len() }
+        }
+    }
+}
+
+/// The `.html` file that [`OutputDir::write_html`] wrote, with the identity it had when it was
+/// written. [`OutputDir::remove_html`] takes it back.
+#[cfg(feature = "html")]
+#[derive(Debug, Clone)]
+pub struct WrittenHtml {
+    path: PathBuf,
+    id: FileId,
+}
+
+#[cfg(feature = "html")]
+impl WrittenHtml {
+    /// The path of the file, for the "Report written to" block.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 /// The folder that will hold the report folder, opened once and held until the report folder is made.
 ///
 /// [`ReportParent::open`] follows links, because the operator chose the path. [`default_report_parent`]
@@ -429,19 +476,31 @@ impl OutputDir {
     ///
     /// The errors of [`OutputDir::write_atomic`].
     #[cfg(feature = "html")]
-    pub fn write_html(&self, page: &HtmlPage) -> Result<PathBuf, ReportError> {
-        self.write_with(&self.report_file_name("html"), |file| {
+    pub fn write_html(&self, page: &HtmlPage) -> Result<WrittenHtml, ReportError> {
+        self.write_with_id(&self.report_file_name("html"), |file| {
             file.write_all(page.as_bytes())
         })
+        .map(|(path, id)| WrittenHtml { path, id })
     }
 
-    /// Removes the `.html` file of this run, best effort, through the held folder handle. For a run
-    /// whose `.json` could not be written after the page was: a `.html` without a `.json` beside it is
-    /// not a result. Call it only after [`OutputDir::write_html`] succeeded, so a file that was there
-    /// before is never touched.
+    /// Removes the `.html` file that [`OutputDir::write_html`] wrote, best effort, through the held
+    /// folder handle. For a run whose `.json` could not be written after the page was: a `.html`
+    /// without a `.json` beside it is not a result.
+    ///
+    /// It unlinks only when the name is still a regular file with the identity read from the temp
+    /// file's handle before it was linked (Unix: device and inode). A file swapped in under the name
+    /// stays. Other systems compare the size only, which is weaker. The check and the unlink are two
+    /// calls, but the folder is private (0700) and owned by this user.
     #[cfg(feature = "html")]
-    pub fn remove_html(&self) {
-        let _ = self.dir.remove_file(self.report_file_name("html"));
+    pub fn remove_html(&self, written: &WrittenHtml) {
+        let name = self.report_file_name("html");
+        let same = self
+            .dir
+            .symlink_metadata(&name)
+            .is_ok_and(|meta| meta.is_file() && FileId::of(&meta) == written.id);
+        if same {
+            let _ = self.dir.remove_file(&name);
+        }
     }
 
     /// Writes the verified spec as `spec.yaml` and, for a signed spec, its signature as
@@ -466,6 +525,16 @@ impl OutputDir {
         name: &str,
         fill: impl FnOnce(&mut File) -> io::Result<()>,
     ) -> Result<PathBuf, ReportError> {
+        self.write_with_id(name, fill).map(|(path, _)| path)
+    }
+
+    /// [`OutputDir::write_with`], and the identity of the file, read from the temp file's own handle
+    /// before the link. The link and the rename keep it.
+    fn write_with_id(
+        &self,
+        name: &str,
+        fill: impl FnOnce(&mut File) -> io::Result<()>,
+    ) -> Result<(PathBuf, FileId), ReportError> {
         if !is_file_name(name) {
             return Err(ReportError::BadFileName);
         }
@@ -479,16 +548,18 @@ impl OutputDir {
         let filled = set_private(&file)
             .and_then(|()| fill(&mut file))
             .and_then(|()| file.sync_all())
+            .and_then(|()| file.metadata())
+            .map(|meta| FileId::of(&meta))
             .map_err(|e| ReportError::io("write", &tmp_path, e));
         drop(file);
-        let result = filled.and_then(|()| self.publish(&tmp, name, &final_path));
+        let result = filled.and_then(|id| self.publish(&tmp, name, &final_path).map(|()| id));
         if result.is_err() {
             // The temp name is ours alone (create_new), so removing it cannot touch anything else.
             let _ = self.dir.remove_file(&tmp);
         } else {
             sync_dir(&self.dir);
         }
-        result.map(|()| final_path)
+        result.map(|id| (final_path, id))
     }
 
     /// Gives a finished temp file its final name. An existing file is never replaced.
