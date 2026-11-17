@@ -1,7 +1,8 @@
 {
   "request": {
     "method": "GET",
-    "path": "/apis/kyverno.io/v1"
+    "path": "/apis/kyverno.io/v1/clusterpolicies",
+    "query": "limit=500"
   },
   "status": 403,
   "body": {
@@ -9,7 +10,7 @@
     "apiVersion": "v1",
     "metadata": {},
     "status": "Failure",
-    "message": "forbidden: User \"acme-reader\" cannot get path \"/apis/kyverno.io/v1\"",
+    "message": "clusterpolicies.kyverno.io is forbidden: User \"acme-reader\" cannot list resource \"clusterpolicies.kyverno.io\" at the cluster scope",
     "reason": "Forbidden",
     "details": {},
     "code": 403
