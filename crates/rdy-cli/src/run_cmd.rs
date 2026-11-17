@@ -392,13 +392,14 @@ impl ReportSink for FolderSink {
 fn stand_in_host() -> Host {
     Host::new(
         "unknown",
-        HostOs::new(host_os_family()),
+        HostOs::new(os_family(current_os())),
         std::env::consts::ARCH,
     )
 }
 
-fn host_os_family() -> HostOsFamily {
-    match current_os() {
+/// The report family for an OS, taken from the probe that reads the facts and not from the build.
+fn os_family(os: Os) -> HostOsFamily {
+    match os {
         Os::Macos => HostOsFamily::Macos,
         Os::Windows => HostOsFamily::Windows,
         _ => HostOsFamily::Linux,
@@ -703,7 +704,8 @@ fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
 }
 
 /// The machine, coarsely: the host name, the kernel release and the architecture. `host_id` stays
-/// `null` until M2-002, and the OS release fields stay unset until the host report reads them.
+/// `null` until M2-002. The OS id, version and pretty name come from os-release through the run-level
+/// probe, with the parser `host.os` uses (M1-180); a missing or unreadable file leaves them `null`.
 async fn host_facts(probe: &Probe) -> Host {
     let hostname = match probe.native(NativeCall::Hostname).await {
         Ok(NativeValue::Hostname(name)) if !name.trim().is_empty() => name,
@@ -713,11 +715,17 @@ async fn host_facts(probe: &Probe) -> Host {
         Ok(NativeValue::Uname(info)) => Some(info),
         _ => None,
     };
-    let family = host_os_family();
+    let family = os_family(probe.os());
     let arch = uname
         .as_ref()
         .map_or_else(|| std::env::consts::ARCH.to_owned(), |u| u.machine.clone());
-    let mut host = Host::new(hostname, HostOs::new(family), arch);
+    let mut os = HostOs::new(family);
+    if let Some(facts) = rdy_checks_host::read_os_facts(probe).await {
+        os.id = Some(facts.id);
+        os.version = facts.version;
+        os.pretty_name = facts.pretty_name;
+    }
+    let mut host = Host::new(hostname, os, arch);
     host.kernel = uname.map(|u| u.release);
     host
 }
