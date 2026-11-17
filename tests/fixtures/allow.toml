@@ -89,6 +89,30 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 
 [[allow]]
 rule = "host"
+path = "tests/fixtures/reports/golden/five-sections-exec-plugin.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-7.2.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-hostile-host.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-no-blocks.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
 value = "metadata.name"
 reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"
 
@@ -109,3 +133,27 @@ rule = "host"
 path = "tests/fixtures/exit-codes/unsigned.stderr.txt"
 value = "docs.getrdy.io"
 reason = "The product's own docs page, named in the fix line of the unsigned refusal (01 section 4.8); the golden is text rdy prints, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/results-b1-ready.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/results-b2-ready-with-warnings.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/results-b3-not-ready.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/results-secrets-redacted.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
