@@ -868,13 +868,16 @@ humanised (`total_bytes` becomes "total"), `_bytes` values print as sizes, `_ms`
 **Text safety.** Every string from the spec or host is HTML-escaped by askama, control characters
 stripped. No string from data becomes a link; `contact` and URLs show as text.
 
-**Size.** Hard cap 5 MiB, typical under 300 KiB. Past the cap the action table is cut to the rows that
-fit and ends with the "N more entries" line; checks are never cut.
+**Size.** Hard cap 5 MiB, typical under 300 KiB. Checks are never cut. Past the cap the action table loses
+rows first and ends with the "N more entries" line. Then Found and Needed lines go, and each check that lost
+lines ends with "N more lines are in the embedded JSON." (07 D.4).
 
 **Print and dark mode.** `prefers-color-scheme` drives dark mode on screen, with `<meta
 name="color-scheme" content="light dark">` so it applies before first paint. `@media print` sets
-`color-scheme: light`, black text on white, no backgrounds, whatever the screen theme. The banner is a
-`position: fixed` block in print so it repeats on every page. Page breaks come only before Passed, the
+`color-scheme: light`, black text on white, no backgrounds, whatever the screen theme. In print the full
+banners stay in the page flow and print once, at the top of page one. When a banner is shown, every printed
+page also carries its title in the top page margin, as fixed text that rdy writes. Nothing covers the first
+lines of a page (07 D.3). Page breaks come only before Passed, the
 capabilities section and the action log, so the verdict, the blocks and the required checks not run share
 page one. Exit test: rendered with dark preferred and print media, text contrast is at least 4.5 to 1.
 

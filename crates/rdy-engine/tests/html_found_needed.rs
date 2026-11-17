@@ -285,8 +285,8 @@ fn a_bidi_control_in_a_key_or_a_value_stays_in_its_own_isolate() -> TestResult {
     Ok(())
 }
 
-/// The check ids that sit under "Required checks not run" in the sample are skipped with severity block.
-fn required_not_run_article(html: &str) -> TestResult<&str> {
+/// The whole "Required checks not run" section of the page, from its heading to its end.
+fn required_not_run_section(html: &str) -> TestResult<&str> {
     let section = between(html, "<h2 id=\"required-not-run\">", "</section>")?;
     Ok(section)
 }
@@ -299,7 +299,7 @@ fn a_required_check_that_did_not_run_says_who_requires_it() -> TestResult {
     let mut doc = sample()?;
     doc["spec"]["product"] = json!("acme\u{202e}-platform");
     let html = html_of(doc)?;
-    let section = required_not_run_article(&html)?;
+    let section = required_not_run_section(&html)?;
     assert!(
         section.contains("<p>required by <bdi>acme\u{202e}-platform</bdi></p>"),
         "{section}"
@@ -314,18 +314,45 @@ fn a_required_check_that_did_not_run_says_who_requires_it() -> TestResult {
             doc["signature"]["trust_source"] = signature;
         }
         let html = html_of(doc)?;
-        let section = required_not_run_article(&html)?;
+        let section = required_not_run_section(&html)?;
         assert!(
             section.contains("<p>required by the spec file</p>"),
             "{section}"
         );
         assert!(!section.contains("required by <bdi>"), "{section}");
     }
+    // A TIMEOUT or an ERROR with severity block sits in the same section (07 D.7) and has the line too,
+    // and so does a check in a bucket this version does not know, which sorts with them.
+    let mut doc = sample()?;
+    let template = doc["checks"][0].clone();
+    for (key, status, bucket) in [
+        ("x.timeout", "timeout", "required_not_run"),
+        ("x.error", "error", "required_not_run"),
+        ("x.future", "skipped", "future_bucket"),
+    ] {
+        let mut check = template.clone();
+        check["key"] = json!(key);
+        check["id"] = json!(key);
+        check["severity"] = json!("block");
+        check["status"] = json!(status);
+        check["bucket"] = json!(bucket);
+        doc["checks"].as_array_mut().ok_or("no checks")?.push(check);
+    }
+    let html = html_of(doc)?;
+    let section = required_not_run_section(&html)?;
+    for key in ["x.timeout", "x.error", "x.future"] {
+        let one = article(&html, key)?;
+        assert!(section.contains(one), "{key} is not in the section");
+        assert!(
+            one.contains("<p>required by <bdi>acme-platform</bdi></p>"),
+            "{one}"
+        );
+    }
     // Only a required check that did not run has the line: not a block, a warning or a pass.
     let html = html_of(sample()?)?;
     assert_eq!(
         html.matches("required by ").count(),
-        required_not_run_article(&html)?
+        required_not_run_section(&html)?
             .matches("<p>required by ")
             .count()
     );

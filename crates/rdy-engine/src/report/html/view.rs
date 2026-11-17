@@ -436,11 +436,6 @@ fn key_is_pinned(report: &Report) -> bool {
         )
 }
 
-/// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
-/// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
-/// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
-/// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
-/// for the vendor's.
 /// Who requires a check that is required and did not run. The product name is the vendor's own claim, so
 /// it is named only when the signature verified and the key is pinned (01 section 2.6), like a fix.
 fn required_by(report: &Report, check: &CheckResult) -> Option<Vec<Span>> {
@@ -455,6 +450,11 @@ fn required_by(report: &Report, check: &CheckResult) -> Option<Vec<Span>> {
     }
 }
 
+/// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
+/// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
+/// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
+/// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
+/// for the vendor's.
 fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
     let text = check.fix.clone()?;
     let label = match &check.fix_source {

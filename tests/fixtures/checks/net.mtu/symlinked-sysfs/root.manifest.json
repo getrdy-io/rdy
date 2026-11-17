@@ -1,0 +1,5 @@
+{
+  "symlinks": {
+    "sys/class/net/eth0": "../../devices/platform/acme-nic0/net/eth0"
+  }
+}

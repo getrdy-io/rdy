@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-jumbo-geneve"
+summary = "EC2 instance at 9001 with a Geneve pod network in the spec"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

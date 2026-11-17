@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-pass-1500"
+summary = "Ubuntu VM, eth0 at 1500 on a 10.0.0.0/24 network"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false
