@@ -74,7 +74,7 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, ResourceQuota, Secret,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, ResourceQuota, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
