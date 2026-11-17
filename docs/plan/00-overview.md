@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 182 | 402.5 |
-| M1, core | 151 | 338 |
+| M1, all | 183 | 405 |
+| M1, core | 152 | 340.5 |
 | M1, `core: no` (the cut list) | 31 | 64.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times

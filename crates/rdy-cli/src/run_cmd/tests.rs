@@ -789,7 +789,8 @@ fn a_failed_file_write_after_a_printed_report_says_so_plainly_on_stderr() {
         "the document is already on stdout; no second one"
     );
     let stderr = String::from_utf8(err).expect("utf-8");
-    let note = "error: report files not written. The JSON on stdout is complete but the exit code is 70.\n";
+    let note =
+        "note: report files not written. The JSON on stdout is complete but the exit code is 70.\n";
     assert!(stderr.contains(note), "{stderr}");
     // The note sits between the summary and the usual error, which keeps its fix line.
     let at_note = stderr.find(note).expect("note");
