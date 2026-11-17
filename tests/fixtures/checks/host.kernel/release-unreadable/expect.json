@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "host.kernel",
+    "min": "5.4",
+    "modules": [
+      "br_netfilter"
+    ]
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "source": "min",
+        "version": "5.4"
+      },
+      "min": "5.4",
+      "modules": [
+        "br_netfilter"
+      ]
+    },
+    "fix": "Run `uname -r` and compare it with the vendor's minimum by hand. Reboot into the newest installed kernel, or install the kernel modules package for the running kernel, then run rdy again. To check by hand, run `sudo modprobe -n -v br_netfilter`.",
+    "level": "warn",
+    "message": "The kernel version was not checked: the kernel release does not exist. The minimum is 5.4. Could not tell whether module `br_netfilter` is available: the kernel release could not be read.",
+    "notes": [],
+    "observed": {
+      "distro": "rhel",
+      "modules": {
+        "br_netfilter": "unknown"
+      }
+    },
+    "partial": null
+  }
+}

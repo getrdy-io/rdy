@@ -64,6 +64,11 @@ pub(super) struct Modules {
     pub(super) dir: String,
     /// `false` when the kernel release has characters rdy does not put in a path, so nothing was read there.
     pub(super) path_safe: bool,
+    /// The release string was read at all. With `path_safe` false it tells an unknown release from a
+    /// hostile one.
+    pub(super) release_read: bool,
+    /// Every module directory looked in for this release, in order.
+    pub(super) searched: Vec<String>,
     /// `/proc/modules`.
     pub(super) loaded: Got<BTreeSet<String>>,
     /// `modules.builtin`.
@@ -202,18 +207,26 @@ pub(super) enum Cause {
 fn unknown_reason(modules: &Modules) -> (Cause, String) {
     let dir = &modules.dir;
     if !modules.path_safe {
-        return (
-            Cause::Files,
-            "the kernel release is unknown or has characters rdy does not put in a path".to_owned(),
-        );
+        // An unread release and a hostile one have different fixes, so they have different words.
+        let why = if modules.release_read {
+            "the kernel release has characters rdy does not put in a path"
+        } else {
+            "the kernel release could not be read"
+        };
+        return (Cause::Files, why.to_owned());
     }
     match &modules.dep {
         Got::Absent => {
+            let missing = match modules.searched.as_slice() {
+                [] => format!("{dir}/modules.dep does not exist"),
+                [one] => format!("{one}/modules.dep does not exist"),
+                [first, .., last] => {
+                    format!("neither {first}/modules.dep nor {last}/modules.dep exists")
+                }
+            };
             return (
                 Cause::Files,
-                format!(
-                    "{dir}/modules.dep does not exist, so the modules installed for this kernel cannot be listed"
-                ),
+                format!("{missing}, so the modules installed for this kernel cannot be listed"),
             );
         }
         Got::Failed(why) => {
@@ -264,6 +277,9 @@ struct Threshold<'a> {
     notes: Vec<String>,
     /// A problem found while choosing, such as an unidentified distribution with nothing else to use.
     problem: Option<Problem>,
+    /// The `ID_LIKE` hint when `min` applies and `distro_min` has an entry for the parent. It goes in the
+    /// message of a kernel that is too old, and in the notes otherwise.
+    like_hint: Option<String>,
 }
 
 fn choose<'a>(rules: &'a Rules, distro: &Got<OsRelease>) -> Threshold<'a> {
@@ -272,6 +288,7 @@ fn choose<'a>(rules: &'a Rules, distro: &Got<OsRelease>) -> Threshold<'a> {
         unsure: false,
         notes: Vec::new(),
         problem: None,
+        like_hint: None,
     };
     let by_min = rules.min.as_ref().map(|min| (min, Source::Min));
     if rules.distro_min.is_empty() {
@@ -298,7 +315,7 @@ fn choose<'a>(rules: &'a Rules, distro: &Got<OsRelease>) -> Threshold<'a> {
                     code(&release.id),
                 );
                 if chosen.want.is_some() {
-                    chosen.notes.push(hint);
+                    chosen.like_hint = Some(hint);
                 } else {
                     chosen.problem = Some(Problem {
                         level: Level::Warn,
@@ -434,8 +451,9 @@ fn judge_version(rules: &Rules, facts: &Facts, cx: &VersionContext<'_>, out: &mu
             .insert("distro".to_owned(), json!(escape_untrusted(&release.id)));
     }
 
-    let chosen = choose(rules, &facts.distro);
-    out.notes.extend(chosen.notes);
+    let mut chosen = choose(rules, &facts.distro);
+    out.notes.extend(std::mem::take(&mut chosen.notes));
+    let like_hint = chosen.like_hint.take();
     if let Some(problem) = chosen.problem {
         out.problems.push(problem);
         return;
@@ -461,6 +479,7 @@ fn judge_version(rules: &Rules, facts: &Facts, cx: &VersionContext<'_>, out: &mu
     };
 
     let Some(parsed) = cx.parsed else {
+        out.notes.extend(like_hint);
         let why = match &facts.release {
             Got::Value(_) => format!("kernel release {} is not in a form rdy compares", cx.shown),
             Got::Absent => "the kernel release does not exist".to_owned(),
@@ -473,7 +492,13 @@ fn judge_version(rules: &Rules, facts: &Facts, cx: &VersionContext<'_>, out: &mu
         });
         return;
     };
-    match version::compare(parsed, want) {
+    let standing = version::compare(parsed, want);
+    if let Some(hint) = &like_hint
+        && standing != Standing::Below
+    {
+        out.notes.push(hint.clone());
+    }
+    match standing {
         Standing::AtLeast => out.passes.push(format!(
             "Kernel {} meets the minimum of {needs}.",
             cx.shown
@@ -484,10 +509,16 @@ fn judge_version(rules: &Rules, facts: &Facts, cx: &VersionContext<'_>, out: &mu
             } else {
                 Level::Fail
             },
-            message: format!(
-                "Kernel {} is older than the minimum of {needs}.",
-                cx.shown
-            ),
+            message: match &like_hint {
+                Some(hint) => format!(
+                    "Kernel {} is older than the minimum of {needs}. {hint}",
+                    cx.shown
+                ),
+                None => format!(
+                    "Kernel {} is older than the minimum of {needs}.",
+                    cx.shown
+                ),
+            },
             fix: upgrade_fix(cx.family),
         }),
         Standing::NoBuild => out.problems.push(Problem {

@@ -277,7 +277,7 @@ fn start_fix(seen: &Seen) -> String {
     format!("Run `systemctl enable --now {}`.", seen.unit())
 }
 
-fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<Issue> {
+fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet, root: bool) -> Vec<Issue> {
     let name = seen.named();
     let mut out = Vec::new();
 
@@ -292,7 +292,10 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
         Api::Denied => out.push(Issue::new(
             Level::Warn,
             format!("{name} is present, but this user may not open its socket {}, so rdy could not read its settings.", seen.socket),
-            if seen.kind == ContainerRuntime::Docker {
+            if root {
+                // Root was refused, so "run as root" would send the reader in a circle.
+                "Check that the daemon is running and that a security module (SELinux or AppArmor) allows rdy to open the socket.".to_owned()
+            } else if seen.kind == ContainerRuntime::Docker {
                 format!("Run rdy as root. Adding the user to the docker group with `usermod -aG docker USER` also works. {DOCKER_GROUP_WARNING}")
             } else {
                 "Run rdy as root, or as a user who may open the socket.".to_owned()
@@ -348,7 +351,7 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
         }
     }
 
-    out.extend(cgroup_issues(check, seen, kubelet, state_issue));
+    out.extend(cgroup_issues(check, seen, kubelet, state_issue, root));
     out.extend(storage_issues(check, seen, state_issue));
 
     if seen.d_type == Some(false) {
@@ -371,6 +374,7 @@ fn cgroup_issues(
     seen: &Seen,
     kubelet: &Kubelet,
     state_issue: bool,
+    root: bool,
 ) -> Vec<Issue> {
     let name = seen.named();
     let target = check.cgroup_driver.unwrap_or(CgroupDriver::Systemd);
@@ -402,10 +406,19 @@ fn cgroup_issues(
                 escape_untrusted(why),
                 seen.name()
             ),
-            format!(
-                "Run rdy as root, or check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
-                driver_text(have)
-            ),
+            // "Run rdy as root" is said once: not when rdy is root, and not when the denied socket
+            // already said it.
+            if root || matches!(seen.api, Api::Denied) {
+                format!(
+                    "Check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
+                    driver_text(have)
+                )
+            } else {
+                format!(
+                    "Run rdy as root, or check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
+                    driver_text(have)
+                )
+            },
         )]
         .into_iter()
         .chain(spec_cgroup_issue(check, seen, have))
@@ -696,7 +709,7 @@ pub(super) fn judge(
     } else {
         let results: Vec<(&Seen, Vec<Issue>)> = allowed
             .iter()
-            .map(|s| (*s, issues(check, s, kubelet)))
+            .map(|s| (*s, issues(check, s, kubelet, root)))
             .collect();
         // A hard issue (d_type) decides: the runtime that has it is not hidden by a good one. Otherwise the
         // first runtime with the least severe worst issue; `min_by_key` keeps the first of equals.
