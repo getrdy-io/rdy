@@ -52,6 +52,7 @@ use std::fmt;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use kube::Config;
@@ -678,9 +679,15 @@ impl Loaded {
             files,
             version: ServerVersion::from_info(info),
             latency,
+            openshift: OnceLock::new(),
             client,
         })
     }
+}
+
+/// The API groups that only an OpenShift cluster serves.
+fn is_openshift_group(name: &str) -> bool {
+    matches!(name, "config.openshift.io" | "security.openshift.io")
 }
 
 /// The trust roots the probe facade read from this machine, as DER, or `None` when it has none (an empty
@@ -698,6 +705,9 @@ pub struct Connected {
     files: Vec<PathBuf>,
     version: ServerVersion,
     latency: Duration,
+    /// Whether the server's group list names an OpenShift API group. Empty until
+    /// [`Connected::discover_openshift`] has asked.
+    openshift: OnceLock<bool>,
     // The unguarded client. It is private, and the only way to send with it is through the guard
     // (`Connected::read_only`), which wraps it in a service that refuses before it sends.
     client: kube::Client,
@@ -742,6 +752,37 @@ impl Connected {
     #[must_use]
     pub fn server_version(&self) -> &ServerVersion {
         &self.version
+    }
+
+    /// True when [`Connected::discover_openshift`] found an OpenShift API group (`config.openshift.io` or
+    /// `security.openshift.io`). False when it did not, when the group list could not be read, and before
+    /// it was asked: a fix text then stays the `kubectl` one, which works on OpenShift too.
+    #[must_use]
+    pub fn is_openshift(&self) -> bool {
+        self.openshift.get().copied().unwrap_or(false)
+    }
+
+    /// Asks the server's group list once (`GET /apis`, logged on the run's own probe) and keeps the answer
+    /// for [`Connected::is_openshift`]. The family asks it only when the plan holds a check that words
+    /// its fix for OpenShift (`k8s.rbac`), so other runs send nothing more. A second call sends nothing.
+    pub async fn discover_openshift(&self, probe: &Probe) {
+        if self.openshift.get().is_some() {
+            return;
+        }
+        let groups = ReadOnlyClient::new_run(
+            &self.client,
+            probe,
+            self.facts.proxy.proxy(),
+            self.facts.line.kubeconfig_impersonates(),
+        )
+        .api_groups()
+        .await;
+        let found = groups.is_ok_and(|list| {
+            list.groups
+                .iter()
+                .any(|group| is_openshift_group(&group.name))
+        });
+        let _ = self.openshift.set(found);
     }
 
     /// How long `GET /version` took from send to a parsed answer. A credential plugin's time is not in
@@ -1446,7 +1487,7 @@ fn plugin_file(command: &str) -> Option<String> {
 /// (`.cmd`, `.exe`). A name that is found nowhere stays bare, so the entry never claims a path rdy did
 /// not see.
 ///
-/// The text is not escaped: escape it before it is shown. [`find_plugin`] has the path itself.
+/// The text is not escaped: escape it before it is shown. `find_plugin` has the path itself.
 #[must_use]
 pub fn resolve_plugin(
     command: &str,

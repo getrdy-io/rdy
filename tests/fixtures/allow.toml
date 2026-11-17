@@ -98,3 +98,8 @@ rule = "ip"
 path = "tests/fixtures/checks/host.time_sync/named-server-metadata/net.json"
 value = "169.254.169.123"
 reason = "The resolver answer that host.time_sync must refuse (the Amazon time address behind a name); no test sends a packet to it"
+
+[[allow]]
+rule = "host"
+value = "metadata.name"
+reason = "The key of the field selector the k8s.nodes autoscaler read sends (fieldSelector=metadata.name=cluster-autoscaler); `.name` is a real top-level domain, and this is not a host any test contacts"

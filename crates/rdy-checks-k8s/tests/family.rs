@@ -19,8 +19,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rdy_checks_k8s::K8sFamily;
-use rdy_checks_k8s::client::Env;
-use rdy_engine::check::CheckInfo;
+use rdy_checks_k8s::client::{Env, ImpersonateAs, ImpersonationError};
+use rdy_engine::check::{CheckInfo, Need, Os};
 use rdy_engine::family::Family;
 use rdy_engine::testing::{Replay, TestRun};
 use rdy_spec::result::{ActionKind, Need as WireNeed};
@@ -473,4 +473,154 @@ async fn plugin_waits_inner() -> std::path::PathBuf {
     // The temp dir goes with `dir`, so the pid file path is returned as text first.
     std::mem::forget(dir);
     pid_file
+}
+
+// ---- OpenShift and impersonation on the family's cluster (M1-113) ------------------------------------
+
+const APIS_OPENSHIFT: &str = r#"{"kind":"APIGroupList","apiVersion":"v1","groups":[{"name":"security.openshift.io","versions":[{"groupVersion":"security.openshift.io/v1","version":"v1"}],"preferredVersion":{"groupVersion":"security.openshift.io/v1","version":"v1"}}]}"#;
+const APIS_PLAIN: &str = r#"{"kind":"APIGroupList","apiVersion":"v1","groups":[{"name":"storage.k8s.io","versions":[{"groupVersion":"storage.k8s.io/v1","version":"v1"}],"preferredVersion":{"groupVersion":"storage.k8s.io/v1","version":"v1"}}]}"#;
+
+/// A server that answers `GET /version`, and `GET /apis` with `apis` (404 when `None`). The first line of
+/// every request is kept in the list it returns.
+async fn serve_routes(apis: Option<&'static str>) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&lines);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let kept = Arc::clone(&kept);
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let text = String::from_utf8_lossy(&head).into_owned();
+                let first = text.lines().next().unwrap_or_default().to_owned();
+                kept.lock().expect("lines").push(first.clone());
+                let (status, body) = if first.starts_with("GET /version ") {
+                    (200, VERSION_JSON)
+                } else if first.starts_with("GET /apis ") {
+                    apis.map_or((404, "{}"), |body| (200, body))
+                } else {
+                    (404, "{}")
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    (addr, lines)
+}
+
+/// The infos of a plan that holds the checks named, from the family's own list.
+fn plan(ids: &[&str]) -> Vec<&'static CheckInfo> {
+    K8sFamily::new()
+        .checks()
+        .iter()
+        .copied()
+        .filter(|info| ids.contains(&info.id))
+        .collect()
+}
+
+/// Probes a family over a server and returns it, with the run that logged.
+async fn probed(dir: &Path, addr: SocketAddr, exec: &str, ids: &[&str]) -> (K8sFamily, TestRun) {
+    let path = write(dir, &kubeconfig(&format!("http://{addr}"), "", exec));
+    let run = TestRun::new(Replay::new());
+    let announce = |_: &str| {};
+    let infos = plan(ids);
+    let family = K8sFamily::with_env(Env::empty());
+    let ctx = run.family_probe(&infos, &announce).with_kubeconfig(&path);
+    let caps = family.probe(ctx).await.expect("the probe ends");
+    assert!(kube_context(&caps).available);
+    (family, run)
+}
+
+#[tokio::test]
+async fn a_plan_with_k8s_rbac_asks_the_group_list_once_and_the_cluster_says_openshift() {
+    let (addr, lines) = serve_routes(Some(APIS_OPENSHIFT)).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (family, run) = probed(dir.path(), addr, "", &["k8s.version", "k8s.rbac"]).await;
+
+    let cluster = family.cluster();
+    assert!(cluster.is_openshift());
+    // The answer is kept: asking again sends nothing.
+    assert!(cluster.is_openshift());
+    assert_eq!(
+        lines.lock().expect("lines").clone(),
+        ["GET /version HTTP/1.1", "GET /apis HTTP/1.1"]
+    );
+    // Both requests are the run's own: no check id.
+    let log: Vec<_> = run
+        .action_log()
+        .actions
+        .into_iter()
+        .filter(|entry| entry.kind == ActionKind::Kube)
+        .collect();
+    assert_eq!(log.len(), 2, "{log:?}");
+    assert!(log.iter().all(|entry| entry.check.is_none()), "{log:?}");
+}
+
+#[tokio::test]
+async fn a_cluster_without_an_openshift_group_or_with_no_group_list_is_not_openshift() {
+    for apis in [Some(APIS_PLAIN), None] {
+        let (addr, _) = serve_routes(apis).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (family, _) = probed(dir.path(), addr, "", &["k8s.rbac"]).await;
+        assert!(!family.cluster().is_openshift(), "{apis:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_plan_without_k8s_rbac_sends_no_group_list_and_says_no() {
+    let (addr, lines) = serve_routes(Some(APIS_OPENSHIFT)).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (family, _) = probed(dir.path(), addr, "", &["k8s.version", "k8s.access"]).await;
+    assert!(!family.cluster().is_openshift());
+    assert_eq!(
+        lines.lock().expect("lines").clone(),
+        ["GET /version HTTP/1.1"]
+    );
+}
+
+#[tokio::test]
+async fn a_spec_as_builds_a_client_from_the_family_cluster_unless_the_kubeconfig_impersonates() {
+    let user =
+        || ImpersonateAs::new("system:serviceaccount:acme-system:installer").expect("a user");
+
+    // Before the probe: nothing to impersonate on.
+    let idle = K8sFamily::with_env(Env::empty());
+    let run = TestRun::new(Replay::new());
+    let ctx = run.context("k8s.rbac", Os::Linux, [Need::KubeContext]);
+    assert!(matches!(
+        idle.cluster().read_only_as(ctx.probe(), user()),
+        Err(ImpersonationError::NotConnected)
+    ));
+
+    let (addr, _) = serve_routes(None).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (family, run) = probed(dir.path(), addr, "", &["k8s.rbac"]).await;
+    let ctx = run.context("k8s.rbac", Os::Linux, [Need::KubeContext]);
+    assert!(family.cluster().read_only_as(ctx.probe(), user()).is_ok());
+
+    // A kubeconfig that already impersonates cannot also take a spec `as:`.
+    let (addr, _) = serve_routes(None).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (family, run) = probed(dir.path(), addr, "    as: someone\n", &["k8s.rbac"]).await;
+    let ctx = run.context("k8s.rbac", Os::Linux, [Need::KubeContext]);
+    assert!(matches!(
+        family.cluster().read_only_as(ctx.probe(), user()),
+        Err(ImpersonationError::Conflict)
+    ));
 }

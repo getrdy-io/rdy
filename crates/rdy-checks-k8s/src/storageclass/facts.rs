@@ -78,11 +78,11 @@ pub(super) enum Read<T> {
     Unreadable(u16),
 }
 
-/// A page of a list, and whether the server had more.
+/// What was read of a list, and whether it was cut.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Page<T> {
     pub(super) items: Vec<T>,
-    /// A `continue` token came back: the list is longer than the page.
+    /// The list was cut at the cap of the paging helper, or the server failed part way.
     pub(super) more: bool,
 }
 

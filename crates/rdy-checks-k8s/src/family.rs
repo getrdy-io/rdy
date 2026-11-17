@@ -50,9 +50,10 @@ mod tests;
 /// The ids of this crate that the family does not build yet. The planner skips each as `not_in_build`.
 /// Their checks exist. M1-175 gives them a spec entry (the target namespace of the k8s block of the spec for
 /// three of them), adds the arm to [`K8sFamily::build`] and takes the id off this list.
-static NOT_BUILT: [&str; 4] = [
+static NOT_BUILT: [&str; 5] = [
     "k8s.admission",
     "k8s.namespace",
+    "k8s.nodes",
     "k8s.rbac",
     "k8s.storageclass",
 ];
@@ -82,6 +83,15 @@ impl K8sFamily {
         Self {
             holder: Arc::new(Holder::new(None)),
         }
+    }
+
+    /// The cluster as the checks of this family see it: the answer of the run's attempt, read when a check
+    /// asks. Before the probe has run, and when it did not reach the cluster, it holds no connection (a
+    /// client from it refuses every request, and `read_only_as` says it is not connected). Every call
+    /// returns a handle to the same answer.
+    #[must_use]
+    pub fn cluster(&self) -> Arc<dyn Cluster> {
+        Arc::clone(&self.holder) as Arc<dyn Cluster>
     }
 
     /// A family that reads `env` and not the process. Tests use it, so they never change the process.
@@ -222,6 +232,11 @@ impl Holder {
         });
         match attempt {
             Ok(connected) => {
+                // A check that words its fix for OpenShift (k8s.rbac) needs to know. One group list, asked
+                // only when the plan holds that check, on the run's own probe.
+                if ctx.checks.iter().any(|info| info.id == "k8s.rbac") {
+                    connected.discover_openshift(&ctx.probe).await;
+                }
                 let mut cap = Capability::new(Need::KubeContext.wire(), true);
                 cap.detail = Some(format!("{}", connected.line()));
                 self.settle(Dialed::reached(connected));
@@ -294,6 +309,13 @@ impl Cluster for Holder {
             // No connection: there is nothing to impersonate on. A check that needs the cluster never runs here.
             None => Err(ImpersonationError::NotConnected),
         }
+    }
+
+    fn is_openshift(&self) -> bool {
+        self.dialed
+            .get()
+            .and_then(Dialed::connected)
+            .is_some_and(|connected| connected.is_openshift())
     }
 
     /// Sorts an error with what the connection knows: the server, the credential plugin, whether a proxy

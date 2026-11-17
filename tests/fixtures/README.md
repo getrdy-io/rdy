@@ -73,8 +73,17 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 (1.27), `route-missing` (1.29 with the review route answering 404), `discovery-denied`, `review-error`,
 `review-silent`, `many-groups`, `hostile-names` (it also lists twenty `/api` versions, one with escape bytes), and
 `none`, which has no `api/` and `kube = false` because the attempt never reached a cluster).
-`checks/k8s.storageclass/` holds 30 clusters, all `generated` by `scripts/gen-k8s-storageclass-fixtures.py`
-(`--check` fails on drift and on a file the script did not write).
+`checks/k8s.storageclass/` holds 31 clusters, all `generated` by `scripts/gen-k8s-storageclass-fixtures.py`
+(`--check` fails on drift and on a file the script did not write). A cut list is a first page with a
+`continue` token and a recorded 503 for the second page (`capped`, `csinode-capped`); `paged` holds a default
+class on page two.
+`checks/k8s.nodes/` holds 27 clusters, all `generated` by `scripts/gen-k8s-nodes-fixtures.py` (`--check` fails on
+drift and on a file the script did not write): `healthy` (8 vCPU nodes at 7910m), `quantities`, `small`,
+`one-small`, `pods-limit`, `pods-limit-other`, `no-allocatable`, `excluded` (NotReady, cordoned, Windows,
+Fargate, virtual, a tainted GPU pool and a control plane), `prefer-no-schedule`, `arch`, `selector`,
+`single-zone`, `no-zones`, `pressure`, the `scaler-*` cases (Karpenter group, a cluster-autoscaler deployment,
+none, unreadable, Auto Mode and Karpenter node labels, the `gk3-` prefix, a node too small), `forbidden`,
+`empty`, `paged`, `capped` and `hostile`.
 `checks/k8s.rbac/` holds 18 clusters (`all-allowed`, `two-denied`, `escalate-denied`, `escalate-allowed`,
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,

@@ -35,7 +35,9 @@
 //!   exist, where the point is that the answer is not a 403). The same role, asked through the
 //!   server's own access review, may not write, read Secrets, mint tokens, exec, impersonate or bind.
 //!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
-//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding.
+//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding. The
+//!   same review's `nonResourceRules` hold only the `get` of the URLs of the default ClusterRoles
+//!   `system:discovery` and `system:public-info-viewer` (`NON_RESOURCE_DEFAULTS`).
 //!   The guard's refusals need no cluster and are tested without one.
 //!
 //! Not covered here, and carried:
@@ -441,6 +443,86 @@ const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
     ("watch", "certificates.k8s.io", "clustertrustbundles", ""),
 ];
 
+/// The URLs the Kubernetes project lets every signed-in user `get` outside the role file: the rules of the
+/// ClusterRoles `system:discovery` and `system:public-info-viewer`, bound to the group
+/// `system:authenticated`. They are discovery, health and version documents, and hold no secret. The role
+/// file has no `nonResourceURLs` rule of its own, so any other URL, any other verb and any wildcard verb
+/// is a grant the role file did not make.
+const NON_RESOURCE_DEFAULTS: &[&str] = &[
+    "/api",
+    "/api/*",
+    "/apis",
+    "/apis/*",
+    "/healthz",
+    "/healthz/*",
+    "/livez",
+    "/livez/*",
+    "/readyz",
+    "/readyz/*",
+    "/version",
+    "/version/",
+    "/openapi",
+    "/openapi/*",
+];
+
+/// What the server grants the identity on non-resource URLs in `namespace`, one entry per verb and URL.
+fn non_resource_grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<(String, String)> {
+    let status = answer
+        .status
+        .as_ref()
+        .expect("the server fills the status of a rules review");
+    let mut out = Vec::new();
+    for rule in &status.non_resource_rules {
+        let urls = rule.non_resource_urls.clone().unwrap_or_default();
+        assert!(
+            !urls.is_empty(),
+            "{namespace}: a non-resource rule with no URL: {rule:?}"
+        );
+        for verb in &rule.verbs {
+            for url in &urls {
+                out.push((verb.clone(), url.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The grants of `grants` that are not a `get` of a URL of [`NON_RESOURCE_DEFAULTS`].
+fn unexpected_non_resource(namespace: &str, grants: &[(String, String)]) -> Vec<String> {
+    grants
+        .iter()
+        .filter(|(verb, url)| verb != "get" || !NON_RESOURCE_DEFAULTS.contains(&url.as_str()))
+        .map(|(verb, url)| format!("{namespace}: {verb} {url}"))
+        .collect()
+}
+
+#[test]
+fn only_a_get_of_a_default_url_is_an_expected_non_resource_grant() {
+    let grant = |verb: &str, url: &str| (verb.to_owned(), url.to_owned());
+    // What a stock server reports for a signed-in service account.
+    let stock: Vec<_> = NON_RESOURCE_DEFAULTS
+        .iter()
+        .map(|url| grant("get", url))
+        .collect();
+    assert!(unexpected_non_resource("default", &stock).is_empty());
+    // Another verb, another URL, a wildcard URL or a wildcard verb are each a surprise.
+    let surprises = [
+        grant("post", "/healthz"),
+        grant("get", "/metrics"),
+        grant("get", "*"),
+        grant("get", "/logs/*"),
+        grant("*", "/version"),
+        grant("get", "/apis/*/extra"),
+    ];
+    for surprise in surprises {
+        assert_eq!(
+            unexpected_non_resource("kube-system", std::slice::from_ref(&surprise)),
+            [format!("kube-system: {} {}", surprise.0, surprise.1)],
+            "{surprise:?}"
+        );
+    }
+}
+
 /// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
 /// The server may merge rules, so the answer is expanded before it is compared.
 fn grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<Grant> {
@@ -674,6 +756,17 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     assert!(
         unexpected.is_empty(),
         "the server grants the rdy-readonly identity more than the role file lists: {unexpected:#?}"
+    );
+    //    The same for URLs. The role file grants none, so every non-resource rule the server reports is a
+    //    default the project gives every signed-in user (`NON_RESOURCE_DEFAULTS`), and a `get` only.
+    let mut unexpected_urls = Vec::new();
+    for (namespace, answer) in &rules_answers {
+        let urls = non_resource_grants(namespace, answer);
+        unexpected_urls.extend(unexpected_non_resource(namespace, &urls));
+    }
+    assert!(
+        unexpected_urls.is_empty(),
+        "the server grants the rdy-readonly identity non-resource URLs beyond the discovery and public-info-viewer defaults: {unexpected_urls:#?}"
     );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
