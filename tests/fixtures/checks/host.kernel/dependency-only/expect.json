@@ -1,0 +1,28 @@
+{
+  "entry": {
+    "id": "host.kernel",
+    "modules": [
+      "llc_extra"
+    ]
+  },
+  "result": {
+    "expected": {
+      "modules": [
+        "llc_extra"
+      ]
+    },
+    "fix": "Install the package that ships the module: try `sudo dnf install kernel-modules-extra`, then reboot if `uname -r` shows an older kernel than the one installed.",
+    "level": "fail",
+    "message": "Module `llc_extra` is not available for kernel `5.14.0-362.el9.x86_64`: not loaded, not built in and not installed.",
+    "notes": [],
+    "observed": {
+      "base": "5.14.0",
+      "build": "362",
+      "modules": {
+        "llc_extra": "absent"
+      },
+      "release": "5.14.0-362.el9.x86_64"
+    },
+    "partial": null
+  }
+}

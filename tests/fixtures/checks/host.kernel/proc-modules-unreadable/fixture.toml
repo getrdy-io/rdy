@@ -1,0 +1,12 @@
+schema = 1
+name = "proc-modules-unreadable"
+summary = "/proc/modules cannot be read, so a module missing from modules.dep is unknown and not absent"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false
