@@ -77,10 +77,10 @@ Report written to ./rdy-report-acme-quickstart-<time>/
   rdy-report-acme-quickstart-<time>.json
   spec.yaml
 WARNING: UNSIGNED SPEC
-NOT READY: 1 required check was not run
+NOT READY
 ```
 
-The `net.egress` check needs the network. With no network, it is skipped, and the verdict is `NOT READY`, because a required check did not run. With a network, the command looks up the two host names in the spec. They do not resolve, so the check blocks, and the last line is `NOT READY`. Either way, the verdict is the expected first result.
+The `net.egress` check needs the network. With no network, it is skipped. With a network, the command looks up the two host names in the spec. They do not resolve, so the check blocks. In both cases the last line is `NOT READY` for this example. On some machines the line also gives the reason, such as `NOT READY: 1 required check was not run`.
 
 The report folder is `./rdy-report-acme-quickstart-<time>/` in the folder you ran from. On Windows, the default folder is `%USERPROFILE%\rdy-reports`, and the report folder goes inside it. Use `--out-dir` to choose another folder.
 
@@ -124,7 +124,7 @@ The top-level keys of the report come in this order. Each value is shown as `...
     ...
   ],
   "verdict": "not_ready",
-  "verdict_reason": "required_check_not_run",
+  "verdict_reason": ...,
   "exit_code": 2,
   "summary": {
     ...
