@@ -57,6 +57,14 @@ where
                 page = page.continue_token(token);
             }
             match api.list(&page).await {
+                // A server that is overloaded part way through keeps what was read: the answer is partial,
+                // not an error (429 and 5xx on the second page or later).
+                Err(kube::Error::Api(status))
+                    if token.is_some() && (status.code == 429 || status.code >= 500) =>
+                {
+                    partial = true;
+                    break Ok(());
+                }
                 Ok(list) => {
                     items.extend(list.items);
                     let next = list.metadata.continue_.filter(|next| !next.is_empty());

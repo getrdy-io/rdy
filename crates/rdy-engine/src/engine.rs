@@ -520,7 +520,6 @@ struct Probed<'a> {
     families: Vec<&'a dyn Family>,
 }
 
-
 /// Where a spec entry's result comes from.
 enum Slot {
     /// The plan skipped it.

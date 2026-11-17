@@ -70,6 +70,7 @@ pub(crate) mod list;
 #[cfg(test)]
 pub(crate) mod mock;
 mod proxy;
+mod secret_layer;
 mod text;
 
 #[cfg(test)]
@@ -89,6 +90,7 @@ pub use guard::{
 };
 pub use impersonate::ImpersonationError;
 pub use proxy::{ProxyRule, ProxyUse};
+pub use secret_layer::SecretHook;
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
@@ -603,7 +605,26 @@ impl Loaded {
         probe: &Probe,
         announce: impl FnOnce(&ClusterLine),
     ) -> Result<Connected, KubeError> {
+        self.connect_with(probe, announce, None).await
+    }
+
+    /// Like [`Loaded::connect`], and with a `hook` the `Authorization` value of every request is added to
+    /// the run's known-secret set before the request is sent, a token from a credential plugin included.
+    /// When the set refuses a value the request is not sent and the hook's flag is set.
+    ///
+    /// # Errors
+    ///
+    /// A [`KubeError`]. It never holds plugin output or credentials.
+    pub async fn connect_with(
+        self,
+        probe: &Probe,
+        announce: impl FnOnce(&ClusterLine),
+        hook: Option<SecretHook>,
+    ) -> Result<Connected, KubeError> {
         announce(&self.facts.line);
+        // Give the caller a turn before the plugin starts or a socket opens. The line is written by the
+        // caller between two polls of this future; it must not depend on the shape of the runtime.
+        YieldOnce(false).await;
         let Self {
             facts,
             files,
@@ -622,7 +643,8 @@ impl Loaded {
         let plugin = facts.line.plugin.clone();
         let (proxied, ca_set) = (facts.proxy.is_proxied(), facts.ca_set);
         let built =
-            rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config))).await;
+            rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config, hook)))
+                .await;
         let client = match built {
             Ok(Ok(client)) => client,
             Ok(Err(error)) => {
@@ -1081,6 +1103,7 @@ fn from_kubeconfig(
     secrets.extend(resolved.secrets);
     config.proxy_url = resolved.uri;
     harden_plugin(&mut config, env, kubeconfig_proxy.as_deref());
+    pin_plugin_path(&mut config, env);
 
     let line = ClusterLine {
         context: escape(&context_name),
@@ -1321,8 +1344,54 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
 ///
 /// The client is not guarded: the guard needs a probe, and a probe belongs to a check. It stays inside
 /// [`Connected`], and [`ReadOnlyClient`] is the only way to send with it.
-fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
-    Ok(ClientBuilder::try_from(config)?.build())
+///
+/// With a `hook` and a credential, kube's auth layer is put outside a layer that registers the header (see
+/// `secret_layer`). The config the inner stack gets has no credential of its own, so the header is added
+/// once, by the outer auth layer.
+fn build_client(config: Config, hook: Option<SecretHook>) -> Result<kube::Client, kube::Error> {
+    use kube::client::ConfigExt;
+    let Some(hook) = hook else {
+        return Ok(ClientBuilder::try_from(config)?.build());
+    };
+    // The plugin runs here, on the blocking pool, as it always did.
+    let Some(auth) = config.auth_layer()? else {
+        return Ok(ClientBuilder::try_from(config)?.build());
+    };
+    let mut bare = config;
+    bare.auth_info.token = None;
+    bare.auth_info.token_file = None;
+    bare.auth_info.username = None;
+    bare.auth_info.password = None;
+    bare.auth_info.exec = None;
+    bare.auth_info.auth_provider = None;
+    // The inner client is a whole kube client without a credential. Kube's auth layer goes outside a layer
+    // that registers the header, and the result is the client everything else uses.
+    let inner = ClientBuilder::try_from(bare)?.build();
+    let stack = secret_layer::Stack { auth, hook };
+    Ok(kube::Client::new(
+        tower_layer::Layer::layer(&stack, guard::RawService(inner)),
+        "",
+    ))
+}
+
+/// A future that is pending once and then ready.
+struct YieldOnce(bool);
+
+impl std::future::Future for YieldOnce {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    }
 }
 
 /// The wall clock in Unix seconds. A clock before 1970 reads as 0, which makes every token look valid.
@@ -1405,12 +1474,56 @@ pub fn resolve_plugin(
         }
         for extension in &extensions {
             let candidate = dir.join(format!("{command}{extension}"));
-            if fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+            if fs::metadata(&candidate).is_ok_and(|meta| meta.is_file() && is_executable(&meta)) {
                 return escape(&candidate.display().to_string());
             }
         }
     }
     command.to_owned()
+}
+
+/// Whether a file can be started. On Unix it needs an execute bit, as `execvp` does; other systems start
+/// by extension, which the search already applied.
+fn is_executable(meta: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        true
+    }
+}
+
+/// Gives kube the file the search found, so what runs is what the `exec` entry names. kube starts a bare
+/// name with `std::process::Command`, which on Windows adds only `.exe`: a `.cmd` or `.bat` plugin that
+/// `kubectl` finds through `PATHEXT` would not start. The plugin's own `env` may set `PATH`, and then that
+/// value is the one that is searched, as it is the one the plugin process will see.
+fn pin_plugin_path(config: &mut Config, env: &Env) {
+    let Some(exec) = config.auth_info.exec.as_mut() else {
+        return;
+    };
+    let Some(command) = exec.command.clone() else {
+        return;
+    };
+    let own_path = exec
+        .env
+        .iter()
+        .flatten()
+        .find(|entry| {
+            entry.get("name").is_some_and(|name| {
+                name.eq_ignore_ascii_case("PATH") && cfg!(windows) || name == "PATH"
+            })
+        })
+        .and_then(|entry| entry.get("value"))
+        .map(OsString::from);
+    let path = own_path.as_deref().or(env.path.as_deref());
+    let found = resolve_plugin(&command, path, env.pathext.as_deref());
+    if found != command && Path::new(&found).is_absolute() {
+        exec.command = Some(found);
+    }
 }
 
 /// The exec plugin's command and arguments for the action log.

@@ -762,3 +762,13 @@ async fn the_check_declares_what_the_registry_and_the_planner_read() {
             .any(|registered| registered.id == "k8s.version")
     );
 }
+
+#[tokio::test]
+async fn a_review_the_authorizer_could_not_decide_leaves_the_list_to_say() {
+    // `allowed: false` with an evaluation error and no `denied` is not a no: the list is tried.
+    let rig = rig("nodes-review-undecided");
+    let finding = rig.finding(json!({"min": "1.28"})).await;
+    assert_eq!(finding.observed["nodes_read"], 2);
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
+    rig.audit();
+}

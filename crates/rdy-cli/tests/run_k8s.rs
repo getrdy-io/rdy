@@ -260,3 +260,104 @@ async fn a_reachable_cluster_prints_its_line_first_fills_the_identity_and_leaks_
         assert!(!shown.contains(TOKEN_CANARY), "the token reached {name}");
     }
 }
+
+#[tokio::test]
+async fn with_no_kubeconfig_anywhere_k8s_access_blocks_with_the_hint_to_set_one() {
+    // No flag at all, and the family reads an empty environment: no KUBECONFIG, no home, no pod.
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = spec(dir.path(), K8S_CHECKS);
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("no out dir: {e}"));
+    let ran = call(&run_args(
+        spec.to_str().unwrap_or_default(),
+        out.to_str().unwrap_or_default(),
+        &[],
+    ))
+    .await;
+
+    let report = json(&ran);
+    let version = check(&report, "k8s.version");
+    assert_eq!(version["skip_kind"], "missing_need");
+    assert!(
+        version["fix"]
+            .as_str()
+            .is_some_and(|fix| fix.contains("kubeconfig")),
+        "{version}"
+    );
+    let access = check(&report, "k8s.access");
+    assert_eq!(access["status"], "block");
+    assert!(
+        access["fix"]
+            .as_str()
+            .is_some_and(|fix| fix.contains("kubeconfig")),
+        "{access}"
+    );
+    assert_eq!(ran.code, 2);
+}
+
+#[tokio::test]
+async fn a_credential_the_known_secret_set_refuses_is_exit_70_and_no_check_runs() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = spec(dir.path(), K8S_CHECKS);
+    let huge = "x".repeat(70 * 1024);
+    let path = dir.path().join("kubeconfig");
+    std::fs::write(
+        &path,
+        format!(
+            "apiVersion: v1\nkind: Config\ncurrent-context: ctx\nclusters:\n- name: cl\n  cluster:\n    server: http://127.0.0.1:9\ncontexts:\n- name: ctx\n  context:\n    cluster: cl\n    user: usr\nusers:\n- name: usr\n  user:\n    token: {huge}\n"
+        ),
+    )
+    .unwrap_or_else(|e| panic!("cannot write the kubeconfig: {e}"));
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("no out dir: {e}"));
+    let ran = call(&run_args(
+        spec.to_str().unwrap_or_default(),
+        out.to_str().unwrap_or_default(),
+        &["--kubeconfig", path.to_str().unwrap_or_default()],
+    ))
+    .await;
+
+    assert_eq!(ran.code, 70, "{}", ran.stderr);
+    assert!(ran.stderr.contains("credential"), "{}", ran.stderr);
+    assert!(!ran.stderr.contains("xxxxxxxx"), "the value is never shown");
+    assert!(!ran.stderr.contains("Cluster:"), "the line is not printed");
+}
+
+#[tokio::test]
+async fn a_kubeconfig_that_does_not_parse_leaks_none_of_its_text_anywhere() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = spec(dir.path(), K8S_CHECKS);
+    let path = dir.path().join("kubeconfig");
+    std::fs::write(
+        &path,
+        "apiVersion: v1\nkind: Config\ntoken: PARSE-ERROR-CANARY-0001 [unclosed\n  : :\n",
+    )
+    .unwrap_or_else(|e| panic!("cannot write the kubeconfig: {e}"));
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("no out dir: {e}"));
+    let ran = call(&run_args(
+        spec.to_str().unwrap_or_default(),
+        out.to_str().unwrap_or_default(),
+        &["--kubeconfig", path.to_str().unwrap_or_default()],
+    ))
+    .await;
+
+    // stderr, stdout and every file of the report folder.
+    let mut all = format!("{}{}", ran.stderr, ran.stdout);
+    let mut stack = vec![out];
+    while let Some(folder) = stack.pop() {
+        for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                all.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+    }
+    assert!(
+        !all.contains("PARSE-ERROR-CANARY"),
+        "the kubeconfig text leaked"
+    );
+    assert_eq!(check(&json(&ran), "k8s.access")["status"], "block");
+}

@@ -365,7 +365,18 @@ async fn may_list_nodes(client: &ReadOnlyClient) -> Option<bool> {
         .create(&PostParams::default(), &review)
         .await
         .ok()?;
-    done.status.map(|status| status.allowed)
+    let status = done.status?;
+    // `allowed: false` with `denied: true` is a definite no. With an evaluation error and no denial the
+    // authorizer could not decide (a webhook that failed), so the list itself is left to say (K1).
+    let undecided = status.denied != Some(true)
+        && status
+            .evaluation_error
+            .as_deref()
+            .is_some_and(|error| !error.is_empty());
+    if !status.allowed && undecided {
+        return None;
+    }
+    Some(status.allowed)
 }
 
 /// `GET /apis`: the group names and their versions.

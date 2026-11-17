@@ -167,8 +167,9 @@ elevation does not change what is read (ADR 0027). M2-105 revisits it.
 | `cloud_credentials` (M3) | the provider chain resolves | cloud family | assume a role without consent |
 
 Rules:
-- Plan, then probe, then run. All probes run concurrently before the first check, each under its own
-  timeout, and their results go into `capabilities` with a hint.
+- Plan, then probe, then run. The needs the engine knows are probed first. Then each family's `probe` runs
+  (one family after another in M1; only `k8s` has one), each under the engine's own timer, and their results go
+  into `capabilities` with a hint.
 - With `--no-network`, `kube_context` is unavailable and no kube client is built.
 - **As built in M1-107.** The hook is `Family::probe(FamilyProbe) -> Result<Vec<Capability>, FamilyFatal>` (default:
   nothing), with `Family::probe_timed_out()` and `Family::kube_identity(&[CheckResult])` beside it. `Engine::execute`
@@ -176,6 +177,8 @@ Rules:
   and sends no request. The engine holds the 10 s limit (`FAMILY_PROBE_LIMIT`) with a tokio timer, so a plugin that
   waits for a login is abandoned on the blocking pool and never holds a worker; the runtime shuts down without waiting
   for it. A `FamilyFatal` (a kubeconfig or proxy secret the known-secret set refused) runs no check and exits 70.
+  The kube client's request timeout is the longest a check may take (60 s), not the 10 s of the probe: the
+  one client serves every check, and each check's own timer ends its requests (ADR 0031 decision 7).
   The run's `read` entries (the kubeconfig files) and the one `exec` entry (`form: delegated`, the file found on
   `PATH` for a bare name) come from `Probe::record_run_read` and `Probe::record_run_exec`. The cluster line goes to
   stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.

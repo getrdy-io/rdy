@@ -23,20 +23,22 @@
 //! check built here holds the same `Arc` as the family, so the checks can be built at plan time, before
 //! the attempt, and read the answer after it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use rdy_engine::check::{BoxFuture, CheckInfo, Need};
+use rdy_engine::check::{BoxFuture, CheckInfo, MAX_TIMEOUT, Need};
 use rdy_engine::family::{
     BuildError, Built, FAMILY_PROBE_LIMIT, Family, FamilyFatal, FamilyProbe, HostSet,
 };
+use rdy_engine::probe::Probe;
 use rdy_spec::check::CheckParams;
-use rdy_spec::result::{Capability, CheckResult, KubeIdentity};
+use rdy_spec::result::{ActionOutcome, Capability, CheckResult, KubeIdentity};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::access::{AccessCheck, Dial, DialOutcome, Dialed};
 use crate::client::{
     ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions,
-    ReadOnlyClient, ServerVersion, from_kube_error, load,
+    ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
 use crate::registry;
@@ -46,8 +48,8 @@ use crate::version::VersionCheck;
 mod tests;
 
 /// The ids of this crate that the family does not build yet. The planner skips each as `not_in_build`.
-/// Their checks exist, and the tickets that give them a spec entry (the target namespace of the k8s block of
-/// the spec for three of them) add the arm to [`K8sFamily::build`] and take the id off this list.
+/// Their checks exist. M1-175 gives them a spec entry (the target namespace of the k8s block of the spec for
+/// three of them), adds the arm to [`K8sFamily::build`] and takes the id off this list.
 static NOT_BUILT: [&str; 4] = [
     "k8s.admission",
     "k8s.namespace",
@@ -105,6 +107,8 @@ pub(crate) struct Holder {
     dialed: OnceLock<Dialed>,
     /// The facts of the config, set as soon as it loaded, so a timeout can still report them.
     facts: Mutex<Option<ConnectionFacts>>,
+    /// The credential plugin and the run probe, kept until the `exec` entry is written with its real end.
+    plugin: Mutex<Option<(Probe, String, Vec<String>)>>,
 }
 
 impl std::fmt::Debug for Holder {
@@ -121,6 +125,7 @@ impl Holder {
             env,
             dialed: OnceLock::new(),
             facts: Mutex::new(None),
+            plugin: Mutex::new(None),
         }
     }
 
@@ -141,6 +146,18 @@ impl Holder {
             .clone()
     }
 
+    /// Writes the `exec` entry of the plugin with how it ended. Once: the entry is taken.
+    fn record_plugin(&self, outcome: ActionOutcome) {
+        let taken = self
+            .plugin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some((probe, command, args)) = taken {
+            let _ = probe.record_run_exec(&command, &args, outcome);
+        }
+    }
+
     /// The probe: one attempt to reach the cluster, in the order of the module text.
     async fn attempt(&self, ctx: FamilyProbe<'_>) -> Result<Vec<Capability>, FamilyFatal> {
         if !ctx.network {
@@ -150,7 +167,9 @@ impl Holder {
                 "run rdy again without --no-network to check the cluster".to_owned(),
             )]);
         }
-        let mut options = KubeOptions::new(FAMILY_PROBE_LIMIT);
+        // The probe has its own limit, held by the engine. The client's timeouts are the longest a check may
+        // take, because the one client serves every check of the run (ADR 0031 decision 7).
+        let mut options = KubeOptions::new(MAX_TIMEOUT);
         if let Some(path) = ctx.kubeconfig {
             options = options.kubeconfig(path);
         }
@@ -165,31 +184,43 @@ impl Holder {
         let facts = loaded.facts();
         self.remember(facts.clone());
 
-        // The files the client reads and the plugin it runs are in the action log (SEC-22, 02).
+        // Every secret first, before anything is written or printed: a value the set refuses ends the run
+        // (exit 70). Short ones included: a refused value is a credential rdy could not promise to hide.
+        for secret in loaded.known_secrets() {
+            if !ctx.secrets.add(&secret) {
+                return Err(secret_refused());
+            }
+        }
+        // The files the client reads are in the action log (SEC-22, 02). The plugin's entry is written
+        // after the attempt, with the way it really ended.
         for path in loaded.files() {
             let _ = ctx.probe.record_run_read(path);
         }
         if let Some(plugin) = loaded.plugin_exec() {
-            let _ = ctx.probe.record_run_exec(plugin.command(), plugin.args());
+            *self.plugin.lock().unwrap_or_else(PoisonError::into_inner) = Some((
+                ctx.probe.clone(),
+                plugin.command().to_owned(),
+                plugin.args().to_vec(),
+            ));
         }
-        // Every secret before the line: a value the set refuses ends the run (exit 70). A value under the
-        // set's minimum is not a secret it can hide without hiding common words, and is not asked.
-        for secret in loaded.known_secrets() {
-            if secret.len() >= rdy_engine::redact::KNOWN_SECRET_MIN_LEN
-                && !ctx.hub.add_known_secret(&secret)
-            {
-                return Err(FamilyFatal::new(
-                    "rdy cannot promise to keep a credential of the kubeconfig or of the proxy out of its output",
-                    "use credentials of 6 bytes to 64 KiB, or a kubeconfig that holds fewer secrets, then run rdy again",
-                ));
-            }
-        }
+        let refused = Arc::new(AtomicBool::new(false));
+        let hook = SecretHook::new(ctx.secrets.clone(), Arc::clone(&refused));
 
         let announce = ctx.announce;
-        match loaded
-            .connect(&ctx.probe, |line| announce(&line.to_string()))
-            .await
-        {
+        let attempt = loaded
+            .connect_with(&ctx.probe, |line| announce(&line.to_string()), Some(hook))
+            .await;
+        // A bearer token (a plugin's included) that the set refused was never sent.
+        if refused.load(Ordering::SeqCst) {
+            self.record_plugin(ActionOutcome::Failed);
+            return Err(secret_refused());
+        }
+        self.record_plugin(if attempt.is_ok() {
+            ActionOutcome::Ok
+        } else {
+            ActionOutcome::Failed
+        });
+        match attempt {
             Ok(connected) => {
                 let mut cap = Capability::new(Need::KubeContext.wire(), true);
                 cap.detail = Some(format!("{}", connected.line()));
@@ -206,6 +237,14 @@ impl Holder {
         self.settle(Dialed::failed(facts, error));
         vec![cap]
     }
+}
+
+/// The run ends: the known-secret set refused a credential.
+fn secret_refused() -> FamilyFatal {
+    FamilyFatal::new(
+        "rdy cannot promise to keep a credential of the kubeconfig, of its plugin or of the proxy out of its output",
+        "use credentials of 6 bytes to 64 KiB, or a kubeconfig that holds fewer secrets, then run rdy again",
+    )
 }
 
 /// The `kube_context` capability of an attempt that did not reach the cluster.
@@ -252,8 +291,8 @@ impl Cluster for Holder {
     ) -> Result<ReadOnlyClient, ImpersonationError> {
         match self.dialed.get().and_then(Dialed::connected) {
             Some(connected) => connected.read_only_as(probe, user),
-            // No connection: the user cannot be used. A check that needs the cluster never runs here.
-            None => Err(ImpersonationError::Conflict),
+            // No connection: there is nothing to impersonate on. A check that needs the cluster never runs here.
+            None => Err(ImpersonationError::NotConnected),
         }
     }
 
@@ -293,10 +332,31 @@ impl Family for K8sFamily {
         Box::pin(self.holder.attempt(ctx))
     }
 
-    fn probe_timed_out(&self) {
+    fn probe_timed_out(&self) -> Vec<Capability> {
         // The future was dropped: the plugin, if any, is abandoned. What the config said is known.
-        self.holder
-            .settle(Dialed::timed_out(self.holder.remembered()));
+        let facts = self.holder.remembered();
+        let plugin = facts
+            .as_ref()
+            .and_then(|facts| facts.line().plugin())
+            .map(str::to_owned);
+        self.holder.record_plugin(ActionOutcome::Timeout);
+        self.holder.settle(Dialed::timed_out(facts));
+        let hint = match plugin {
+            Some(name) => format!(
+                "the credential plugin {name} may be waiting for a login, and rdy cannot stop it: finish the login or end the {name} process, then run rdy again"
+            ),
+            None => {
+                "the cluster did not answer in time: check that it is reachable, then run rdy again"
+                    .to_owned()
+            }
+        };
+        vec![unavailable(
+            format!(
+                "the cluster did not answer in {} seconds",
+                FAMILY_PROBE_LIMIT.as_secs()
+            ),
+            hint,
+        )]
     }
 
     fn kube_identity(&self, results: &[CheckResult]) -> Option<KubeIdentity> {

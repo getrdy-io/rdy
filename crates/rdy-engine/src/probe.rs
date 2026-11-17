@@ -1357,13 +1357,18 @@ impl Probe {
 
     /// Records a program that a library will run for the run, with `program` as the resolved path and
     /// `argv` as the arguments (both pass the redactor with the rest of the log). One `exec` entry with
-    /// `check: null`, outcome `ok` and `form` `delegated`: rdy does not start the process and does not
+    /// `check: null`, the `outcome` you give (the real end of the plugin) and `form` `delegated`: rdy does not start the process and does not
     /// see its output (the kube credential plugin, 02 "The action log"). A check's probe is refused.
     ///
     /// # Errors
     ///
     /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
-    pub fn record_run_exec(&self, program: &str, argv: &[String]) -> Result<(), ProbeError> {
+    pub fn record_run_exec(
+        &self,
+        program: &str,
+        argv: &[String],
+        outcome: ActionOutcome,
+    ) -> Result<(), ProbeError> {
         // The program as the log shows it: a path under the home directory is `~/...` (S8).
         let shown = self.hub.as_ref().map_or_else(
             || program.to_owned(),
@@ -1384,7 +1389,7 @@ impl Probe {
             "note",
             "run by the kube client, output not captured, may run again on token refresh",
         );
-        entry.finish(ActionOutcome::Ok);
+        entry.finish(outcome);
         Ok(())
     }
 

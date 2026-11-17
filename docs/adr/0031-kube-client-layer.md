@@ -90,7 +90,7 @@ kubeconfig read needed a settled path.
    captured by kube and dropped, so plugin text cannot reach rdy's stderr past the redactor (INV-15) and no
    login waits for nobody (`rdy --json` in CI, over ssh with no tty, or in a pipe). Proved in a child
    process whose kubeconfig sets no `interactiveMode`.
-9. **System roots are the bundled web roots, always.** The `webpki-roots` feature makes kube use the
+9. **System roots are the bundled web roots, unless the facade has roots (amended in M1-107).** The `webpki-roots` feature makes kube use the
    bundled Mozilla roots whenever the kubeconfig has no CA, so `rustls-platform-verifier` is never
    reached and no AIA or OCSP fetch happens outside the INV-11 peer set (ADR 0014 decision 3). The
    crate is still in the dependency tree (kube builds it behind `rustls-tls`) and is unreachable. A
@@ -144,6 +144,14 @@ kubeconfig read needed a settled path.
 - Carried to M1-107 (correction-12): `.cmd` plugin tests for Windows, and resolving a bare plugin command
   name against `PATH` for the `exec` action-log entry. Built in M1-107: `Env` carries `PATH` and `PATHEXT`,
   `PluginExec::command` is the file found there, and the entry is `exec` with `form: delegated`.
+- Built in M1-107 (S1, C1): a layer under kube's auth layer registers the `Authorization` value of every
+  request as a known secret before the request is sent, so the token of an exec plugin is covered (an EKS
+  `k8s-aws-v1.` and a Google `ya29.` token also have redaction shapes). A refused value sends nothing and ends
+  the run with exit 70. kube 4.2.0 runs a plugin again on a token refresh, inside `spawn_blocking` (`auth/mod.rs`
+  `to_header`), so the new token passes the same layer. The client's timeouts are the longest check timeout,
+  because the one client serves every check (decision 7). A bare plugin name is resolved to a file (the plugin's
+  own `env` `PATH` first, an execute bit on Unix, `PATHEXT` on Windows) and kube is given that full path, so the
+  `exec` entry names the binary that runs.
 - Built in M1-107: with no CA in the kubeconfig the client takes its roots from the facade's `SystemRoots`
   (decision 9 follow-up). When the facade has none (an empty or unreadable store, an OS with no source yet) kube
   stays on its bundled `webpki-roots`, so neither `rustls-platform-verifier` nor `rustls-native-certs` is reached.
