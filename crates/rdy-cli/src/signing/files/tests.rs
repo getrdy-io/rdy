@@ -356,3 +356,19 @@ fn is_disk_file_is_false_for_a_pipe_handle_and_for_nul() {
         .expect("open the pipe");
     assert!(!is_disk_file(&client));
 }
+
+/// Windows has no path stat in `read_public`, so a folder is refused from its open handle as "not a
+/// regular file", not as "permission denied".
+#[cfg(windows)]
+#[test]
+fn a_folder_is_refused_as_not_a_regular_file_on_windows() {
+    let d = dir();
+    assert!(matches!(
+        read_public(d.path(), 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+    assert!(matches!(
+        read_public_prefix(d.path(), 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}

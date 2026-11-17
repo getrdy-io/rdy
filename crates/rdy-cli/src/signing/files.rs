@@ -213,8 +213,12 @@ fn open_public(path: &Path) -> io::Result<File> {
 
     const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
     const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    // Without `FILE_FLAG_BACKUP_SEMANTICS` Windows refuses to open a folder at all ("permission denied").
+    // With it the open works and the handle check says "not a regular file", which is the true answer.
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     OpenOptions::new()
         .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
         .open(path)
 }
