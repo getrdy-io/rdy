@@ -4,6 +4,6 @@ Network checks send traffic from this machine. Each check lists what it needs. A
 
 The Remediation text is the general fix for the check. A finding can carry a more specific fix of its own. When it does, rdy prints that fix instead.
 
-A CA pin is at best a warning until M2-135 ships. A middlebox that this machine trusts can add its own certificate authority to the chain. A pinned CA then passes even though the traffic is inspected. To check the server certificate itself, pin the leaf certificate with `pin_sha256`. To fail the check when a middlebox is found, set `forbid_interception` to `true`.
+A CA pin is at best a warning until M2-135 ships. A middlebox this machine trusts can append the pinned CA to its chain. Pin the leaf, or set `forbid_interception` to block.
 
 The Reads line lists the paths each check reads. It is one list for every operating system. rdy does not yet list the reads for each system on its own.
