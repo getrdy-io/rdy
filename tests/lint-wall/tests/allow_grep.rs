@@ -208,6 +208,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
         "embeds examples/specs/acme-platform.yaml for a test",
     ),
     (
+        "crates/rdy-checks-net/src/tls_intercept/tests.rs",
+        &["../../../../examples/specs/acme-platform.yaml"],
+        "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
         "crates/rdy-checks-net/src/mtu/tests.rs",
         &["../../../../tests/fixtures/checks/net.mtu/"],
         "embeds the expect.json goldens of tests/fixtures/checks/net.mtu, because a check crate test may not read files",
