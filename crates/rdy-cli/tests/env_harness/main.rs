@@ -160,15 +160,10 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
+/// Empty since M1-174, and again since M1-179 deleted the host.time_sync row: every implemented check has its cases, each with a reviewed `expect.json`. A
 /// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
 /// forces the row out when they land.
-const PENDING: &[Pending] = &[Pending {
-    check: "host.time_sync",
-    classes: &[Class::Timeout],
-    owner: "M1-179",
-    why: "M1-179 makes the harness accept a hang the check survived (a delay or blackhole at least the check timeout in the case files, and an expect.json that holds a finding) as the Timeout class. By design (correction-37) no hang ends host.time_sync in a Timeout: each step is cut to the budget left, so a hung timedatectl or chronyc gives a bounded finding. The hung-chronyc, hung-timedatectl and silent-server-and-hung-tools cases prove that",
-}];
+const PENDING: &[Pending] = &[];
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {
@@ -267,6 +262,10 @@ struct Case {
     partial: bool,
     root: bool,
     hang: Option<&'static str>,
+    /// Whether the scheduler ended the check (`timed_out_ms`). Off for a hang the check survived.
+    ends: bool,
+    /// A note in `result.notes`.
+    note: Option<&'static str>,
 }
 
 impl Case {
@@ -278,6 +277,8 @@ impl Case {
             partial: false,
             root: false,
             hang: None,
+            ends: true,
+            note: None,
         }
     }
 
@@ -297,15 +298,18 @@ impl Case {
         } else {
             "null"
         };
-        let timed_out = if self.hang.is_some() {
+        let timed_out = if self.hang.is_some() && self.ends {
             r#", "timed_out_ms": 5000"#
         } else {
             ""
         };
+        let notes = self
+            .note
+            .map_or_else(String::new, |n| format!(", \"notes\": [\"{n}\"]"));
         std::fs::write(
             dir.join("expect.json"),
             format!(
-                "{{\"entry\": {{\"id\": \"{}\"}}, \"result\": {{\"level\": \"{}\", \"partial\": {partial}{timed_out}}}}}\n",
+                "{{\"entry\": {{\"id\": \"{}\"}}, \"result\": {{\"level\": \"{}\", \"partial\": {partial}{timed_out}{notes}}}}}\n",
                 self.check, self.level
             ),
         )?;
@@ -496,6 +500,61 @@ fn a_delay_at_the_check_timeout_and_a_blackhole_in_net_json_are_hangs() -> TestR
         )?)
     })?;
     assert!(found.is_empty(), "{found:#?}");
+    Ok(())
+}
+
+/// A tree whose `plant.full` hung case is the survived form: a hang in its files, no `timed_out_ms`, and
+/// `note` as its only note.
+fn survived_findings(note: Option<&'static str>) -> TestResult<Vec<String>> {
+    let mut cases = plain_cases();
+    for mut case in full_cases() {
+        if case.name == "hung" {
+            case.ends = false;
+            case.note = note;
+        }
+        cases.push(case);
+    }
+    let tree = plant_tree(&cases)?;
+    Ok(findings(&plant_rows(STUBBED), tree.path(), &[])?)
+}
+
+#[test]
+fn a_hang_the_check_survived_counts_when_a_note_names_it() -> TestResult {
+    for note in [
+        "chronyc gave no answer: it timed out.",
+        "`192.0.2.10`: no reply within 3 s.",
+    ] {
+        let found = survived_findings(Some(note))?;
+        assert!(found.is_empty(), "{note}: {found:#?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_hang_with_neither_timed_out_ms_nor_a_note_that_names_it_is_a_finding() -> TestResult {
+    // No note at all, and a note about something else.
+    for note in [None, Some("Offset not measured.")] {
+        let found = survived_findings(note)?;
+        assert_eq!(found.len(), 1, "{note:?}: {found:#?}");
+        assert!(found.iter().all(|f| f.contains("a Timeout case")));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_note_that_names_a_hang_does_not_count_without_a_hang_in_the_files() -> TestResult {
+    let mut cases = plain_cases();
+    for mut case in full_cases() {
+        if case.name == "hung" {
+            case.hang = None;
+            case.note = Some("chronyc gave no answer: it timed out.");
+        }
+        cases.push(case);
+    }
+    let tree = plant_tree(&cases)?;
+    let found = findings(&plant_rows(STUBBED), tree.path(), &[])?;
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found.iter().all(|f| f.contains("a Timeout case")));
     Ok(())
 }
 

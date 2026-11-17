@@ -614,7 +614,7 @@ with no `spec` is a base that other environments build on, and is skipped. Not b
 | passing | always | `result.level` is `pass` |
 | non-passing | always | `result.level` is `warn` or `fail` |
 | no-privilege partial | the check has a `Root` want | `caps.root = false` and `result.partial` set |
-| Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `blackhole` or a `delay_ms` of at least the check's timeout in the case |
+| Timeout | the check declares a command, a peer or a `statfs` prefix | a `blackhole` or a `delay_ms` of at least the check's timeout in the case, and `result.timed_out_ms` or a `result.notes` entry that names the hang |
 
 An `expect.json` has two keys, `entry` and `result`, with sorted keys, two-space indent and a final newline:
 
@@ -639,13 +639,17 @@ of `result` and ignores the rest:
 | `result.level` | `"pass"`, `"warn"` or `"fail"` | The finding's level. Decides the passing and non-passing classes. A timeout case has no `level`. |
 | `result.partial` | object or `null` | Set (not `null`) when the check ran with less than it asked for. Counts only in a case with `caps.root = false`. |
 | `result.timed_out_ms` | number | Present only when the scheduler ended the check at its deadline, in milliseconds. Counts only when the case also holds a hang. |
+| `result.notes` | array of text | A note that holds `timed out` or `no reply within` names a hang the check cut itself. It counts as the Timeout class, with a hang in the case, when `timed_out_ms` is absent. |
 
 A hang is a `blackhole`, or a `delay_ms` at or above the check's default timeout, in one of the case's
-`native`, `commands` or `net` files. A shorter delay lets the check finish, so it does not count.
+`native`, `commands`, `api` or `net.json` files. A shorter delay lets the check finish, so it does not count.
+A hang with neither `timed_out_ms` nor a note that names it fails the rule. `host.time_sync` is the first
+check that cuts a hung source itself: its `hung-chronyc` case has no `timed_out_ms` and a note that says
+chronyc timed out.
 
 A missing class that `PENDING` (in `main.rs`) does not list is a failure. Each `PENDING` row names the
 check, the classes and the ticket that owes them. A row for a class that is no longer missing is a failure
-too. `PENDING` has been empty since M1-174. A new family adds its row in
+too. `PENDING` has been empty since M1-174 (and again since M1-179). A new family adds its row in
 `crates/rdy-cli/tests/env_harness/families.rs`.
 
 **Known gaps.** Two cases bless behaviour that check-author found wrong against 03:

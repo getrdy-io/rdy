@@ -9,7 +9,10 @@
 //! | `Pass` | always | a case whose `expect.json` has `result.level` `pass` |
 //! | `NonPass` | always | a case whose `result.level` is `warn` or `fail` |
 //! | `Partial` | the check has a `Root` want | a case with `caps.root = false` and `result.partial` set |
-//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case with `result.timed_out_ms` whose `native`, `commands`, `api` or `net.json` files hold a `blackhole` or a `delay_ms` of at least the check's timeout |
+//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case whose `native`, `commands`, `api` or `net.json` files hold a `blackhole` or a `delay_ms` of at least the check's timeout, and whose `expect.json` has `result.timed_out_ms` (the scheduler ended the check) or a `result.notes` entry that names the hang (the check cut the source itself and still gave its verdict) |
+//!
+//! A note names the hang when it holds `timed out` or `no reply within` (`HANG_NOTES`). A hang with neither
+//! `timed_out_ms` nor such a note proves nothing about how the check ended, so it does not count.
 //!
 //! A case counts only through its `expect.json`, the reviewed result. A case that loads but has no
 //! `expect.json` proves nothing about what the check says, so it is not counted. The shape of the `result`
@@ -52,7 +55,7 @@ impl fmt::Display for Class {
                 "a no-privilege partial case (caps.root false, result.partial set)"
             }
             Self::Timeout => {
-                "a Timeout case (result.timed_out_ms, and a blackhole or a delay_ms at the check's timeout in its files)"
+                "a Timeout case (a blackhole or a delay_ms at the check's timeout in its files, and result.timed_out_ms or a result.notes entry that names the hang)"
             }
         })
     }
@@ -69,6 +72,9 @@ pub struct Pending {
     /// Why they are not there.
     pub why: &'static str,
 }
+
+/// What a note says when the check cut a hung source itself. A note holding one of these names the hang.
+const HANG_NOTES: [&str; 2] = ["timed out", "no reply within"];
 
 /// The time the engine gives `info` before it ends the check: its own default, or 10 s, and never more
 /// than 60 s (`CheckInfo::default_timeout`).
@@ -242,13 +248,26 @@ fn classes_of(
         if !fixture.manifest().caps.root && result.get("partial").is_some_and(|p| !p.is_null()) {
             have.insert(Class::Partial);
         }
-        if result.get("timed_out_ms").is_some_and(Value::is_number)
+        if (result.get("timed_out_ms").is_some_and(Value::is_number) || names_the_hang(result))
             && holds_a_hang(&case_dir, timeout_ms)?
         {
             have.insert(Class::Timeout);
         }
     }
     Ok(have)
+}
+
+/// Whether a `result.notes` entry names a hang the check survived.
+fn names_the_hang(result: &Value) -> bool {
+    result
+        .get("notes")
+        .and_then(Value::as_array)
+        .is_some_and(|notes| {
+            notes
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|note| HANG_NOTES.iter().any(|marker| note.contains(marker)))
+        })
 }
 
 /// Whether the case in `dir` scripts a hang: a `delay_ms` of at least `timeout_ms` in a `native`,
