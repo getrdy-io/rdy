@@ -14,7 +14,7 @@
     "level": "fail",
     "message": "1 of 1 names do not resolve: `slow.acme.test` (timed out)",
     "notes": [
-      "getent is stopped after 5 s. This machine's resolver is set to wait 3 s per nameserver, 3 attempts, 2 nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about 18 s."
+      "`slow.acme.test` timed out: getent is stopped after 5 s. This machine's resolver is set to wait 3 s per nameserver, 3 attempts, 2 nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about 18 s."
     ],
     "observed": {
       "names": [

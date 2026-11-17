@@ -7,12 +7,17 @@ use rdy_engine::check::{Finding, Os, Partial};
 use rdy_spec::check::Cidr;
 use serde_json::{Value, json};
 
-use super::NOT_INSTALLED;
+use rdy_engine::probe::is_unusable_peer;
+
 use super::parse::{self, Resolver};
+use super::{NOT_INSTALLED, PER_NAME};
 use crate::text::code;
 
 /// The most names the message spells out before it says "and N more".
 const NAMED: usize = 5;
+
+/// The per-name budget in seconds, for the text.
+const PER_NAME_SECS: u64 = PER_NAME.as_secs();
 
 /// The most distinct fixes the finding carries.
 const FIXES: usize = 3;
@@ -240,7 +245,11 @@ pub(super) fn judge(
         }
         match &l.answer {
             Answer::Found(addrs) => {
-                if let Some(why) = outside(rule, addrs) {
+                // Both paths give one verdict: an answer in a range rdy will not contact blocks, whether
+                // getent or the facade resolver gave it. The addresses stay in the evidence.
+                if refused(addrs) {
+                    broken.push((l, Problem::Refused));
+                } else if let Some(why) = outside(rule, addrs) {
                     misplaced.push((l, why));
                 }
                 if l.took > max_latency {
@@ -333,16 +342,8 @@ pub(super) fn judge(
     if !fixes.is_empty() {
         finding = finding.with_fix(fixes.join(" "));
     }
-    if broken.iter().any(|(_, p)| *p == Problem::Timeout)
-        && let Some(r) = resolver
-    {
-        notes.push(format!(
-            "getent is stopped after 5 s. This machine's resolver is set to wait {} s per nameserver, {} attempts, {} nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about {} s.",
-            r.timeout,
-            r.attempts,
-            r.nameservers.max(1),
-            r.worst_case()
-        ));
+    for (_, text) in timeout_notes(&broken, resolver) {
+        notes.push(text);
     }
     for warn in slow {
         finding = finding.with_note(warn);
@@ -359,6 +360,47 @@ pub(super) fn judge(
         ));
     }
     finding
+}
+
+/// Whether any answer is in a range rdy will not contact (the facade's own address rule).
+fn refused(addrs: &[IpAddr]) -> bool {
+    addrs.iter().any(|ip| is_unusable_peer(*ip))
+}
+
+/// Per-source timeout notes. Each starts with the names that timed out, so a reader and the harness
+/// both see which names. A `getent` timeout carries the resolver's own wait. Other sources say the
+/// lookup used its time budget: [`PER_NAME_SECS`] for one name, or what the check had left.
+fn timeout_notes(
+    broken: &[(&Looked, Problem)],
+    resolver: Option<Resolver>,
+) -> Vec<(Source, String)> {
+    let mut out = Vec::new();
+    for source in [Source::Getent, Source::System, Source::Fallback] {
+        let names: Vec<String> = broken
+            .iter()
+            .filter(|(l, p)| *p == Problem::Timeout && l.source == source)
+            .map(|(l, _)| code(&l.name))
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        let lead = format!("{} timed out", listed(&names));
+        let text = match (source, resolver) {
+            (Source::Getent, Some(r)) => format!(
+                "{lead}: getent is stopped after 5 s. This machine's resolver is set to wait {} s per nameserver, {} attempts, {} nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about {} s.",
+                r.timeout,
+                r.attempts,
+                r.nameservers.max(1),
+                r.worst_case()
+            ),
+            (Source::Getent, None) => format!("{lead}: getent is stopped after 5 s."),
+            _ => format!(
+                "{lead}: the lookup used its time budget ({PER_NAME_SECS} s for one name, or the time the check had left)."
+            ),
+        };
+        out.push((source, text));
+    }
+    out
 }
 
 /// The one note for a Linux machine whose `getent` did not answer.
@@ -392,7 +434,11 @@ fn name_json(l: &Looked) -> Value {
     match &l.answer {
         Answer::Found(addrs) => {
             let v6 = addrs.iter().filter(|a| a.is_ipv6()).count();
-            out["result"] = json!("found");
+            out["result"] = json!(if refused(addrs) {
+                "refused_by_policy"
+            } else {
+                "found"
+            });
             out["ipv4"] = json!(addrs.len() - v6);
             out["ipv6"] = json!(v6);
             out["addresses"] = json!(

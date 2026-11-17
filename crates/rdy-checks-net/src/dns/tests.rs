@@ -642,15 +642,20 @@ macro_rules! expect {
 
 /// Every case of `tests/fixtures/checks/net.dns/`, with the check run by the real scheduler on a paused
 /// clock and given its host set, as `rdy run` gives it. A new directory is a new line here.
-const CASES: [(&str, &str); 9] = [
+const CASES: [(&str, &str); 14] = [
     expect!("aaaa-only"),
     expect!("found-dual-stack"),
     expect!("getent-broken"),
+    expect!("getent-empty"),
     expect!("getent-missing"),
     expect!("getent-missing-link-local"),
+    expect!("getent-refused-forms"),
+    expect!("getent-signal"),
     expect!("mixed"),
     expect!("not-found"),
     expect!("offline"),
+    expect!("resolv-link-systemd"),
+    expect!("resolv-link-undeclared"),
     expect!("timeout"),
 ];
 
@@ -668,7 +673,13 @@ fn entry_of(case: &str) -> Value {
     golden["entry"].clone()
 }
 
-fn run_case(case: &str) -> (Value, rdy_engine::sched::End) {
+fn run_case(
+    case: &str,
+) -> (
+    Value,
+    rdy_engine::sched::End,
+    rdy_engine::probe::ActionLogOutput,
+) {
     let entry = entry_of(case);
     let spec: CheckSpec = serde_json::from_value(entry.clone()).expect("a check entry");
     let check = check_of(&spec);
@@ -687,14 +698,21 @@ fn run_case(case: &str) -> (Value, rdy_engine::sched::End) {
         .build()
         .expect("a runtime");
     let mut ran = runtime.block_on(scheduler.run(vec![planned]));
-    assert_within_manifest("net.dns", &INFO, &test_run.action_log());
-    (entry, ran.remove(0).end)
+    let log = test_run.action_log();
+    // The one refusal a case may hold: `/etc/resolv.conf` links to a file the check does not declare, and
+    // the check shrugs it off (it only loses the evidence of a timeout). Anything else is a violation.
+    let violations: Vec<String> = rdy_engine::testing::manifest_violations(&INFO, &log)
+        .into_iter()
+        .filter(|v| !(case == "resolv-link-undeclared" && v.contains("read /etc/resolv.conf")))
+        .collect();
+    assert!(violations.is_empty(), "{case}: {violations:?}");
+    (entry, ran.remove(0).end, log)
 }
 
 #[test]
 fn every_case_matches_its_expect_json() {
     for (case, _) in CASES {
-        let (entry, end) = run_case(case);
+        let (entry, end, _) = run_case(case);
         rdy_engine::testing::golden::assert_golden(
             expect_path(case),
             rdy_engine::testing::expect_bytes(&entry, &end),
@@ -708,4 +726,93 @@ fn the_case_list_is_every_directory_of_the_fixtures() {
     on_disk.sort();
     let listed: Vec<&str> = CASES.iter().map(|(name, _)| *name).collect();
     assert_eq!(on_disk, listed);
+}
+
+#[test]
+fn no_case_connects_anywhere() {
+    // The host set carries port 443 as a placeholder, so nothing but exec, lookup and read may appear.
+    for (case, _) in CASES {
+        let (_, _, log) = run_case(case);
+        for action in &log.actions {
+            assert!(
+                action.kind == ActionKind::Exec
+                    || action.kind == ActionKind::Lookup
+                    || action.kind == ActionKind::Read,
+                "{case}: {:?} is not exec, lookup or read",
+                action.kind
+            );
+        }
+    }
+}
+
+fn result_of(case: &str) -> Value {
+    let (entry, end, _) = run_case(case);
+    let bytes = rdy_engine::testing::expect_bytes(&entry, &end);
+    serde_json::from_str::<Value>(&bytes).expect("json")["result"].clone()
+}
+
+#[test]
+fn getent_answers_in_refused_ranges_block_in_every_form_and_stay_visible() {
+    let result = result_of("getent-refused-forms");
+    assert_eq!(result["level"], "fail");
+    for (at, shown) in [
+        (0, "169.254.169.123"),
+        (1, "169.254.169.123"),
+        (2, "64:ff9b::a9fe:a97b"),
+    ] {
+        let n = &result["observed"]["names"][at];
+        assert_eq!(n["result"], "refused_by_policy", "{n}");
+        assert_eq!(n["source"], "getent");
+        assert_eq!(n["addresses"], json!([shown]));
+    }
+}
+
+#[test]
+fn a_getent_ended_by_a_signal_or_printing_nothing_falls_back_with_its_reason() {
+    let signal = result_of("getent-signal");
+    assert_eq!(signal["level"], "pass");
+    assert_eq!(
+        signal["observed"]["names"][0]["fallback"],
+        "getent was ended by a signal"
+    );
+    let empty = result_of("getent-empty");
+    assert_eq!(empty["level"], "pass");
+    assert_eq!(
+        empty["observed"]["names"][0]["fallback"],
+        "getent printed no address"
+    );
+    assert_eq!(empty["observed"]["names"][0]["source"], "rdy_resolver");
+}
+
+#[test]
+fn a_resolv_conf_link_to_a_declared_file_gives_evidence_and_to_another_gives_none() {
+    let declared = result_of("resolv-link-systemd");
+    assert_eq!(declared["observed"]["resolver"]["worst_case_s"], 18);
+    let other = result_of("resolv-link-undeclared");
+    assert_eq!(other["level"], "fail", "no error, still a timeout finding");
+    assert!(other["observed"].get("resolver").is_none(), "{other}");
+}
+
+#[test]
+fn a_timeout_note_names_the_name_and_matches_the_source() {
+    let getent = result_of("timeout");
+    let note = getent["notes"][0].as_str().expect("a note");
+    assert!(
+        note.starts_with("`slow.acme.test` timed out: getent is stopped after 5 s"),
+        "{note}"
+    );
+    // A timeout from the fallback or the budget does not blame getent.
+    let rules = [rule("a.acme.test", &[], None)];
+    for source in [Source::Fallback, Source::System] {
+        let at = [Looked {
+            source,
+            answer: Answer::Timeout,
+            ..Looked::new("a.acme.test")
+        }];
+        let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+        let note = &finding.notes[0];
+        assert!(note.starts_with("`a.acme.test` timed out: "), "{note}");
+        assert!(!note.contains("getent"), "{note}");
+        assert!(note.contains("9 s"), "{note}");
+    }
 }

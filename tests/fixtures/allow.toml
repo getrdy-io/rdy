@@ -104,3 +104,33 @@ rule = "ip"
 path = "tests/fixtures/checks/net.dns/getent-missing-link-local/net.json"
 value = "169.254.169.123"
 reason = "The resolver answer that net.dns must refuse (the Amazon time address behind a name); nothing connects to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/net.dns/getent-refused-forms/commands/getent-a.json"
+value = "169.254.169.123"
+reason = "A getent answer in the metadata address (plain, IPv4-mapped or NAT64) that net.dns must refuse; nothing connects to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/net.dns/getent-refused-forms/commands/getent-b.json"
+value = "169.254.169.123"
+reason = "A getent answer in the metadata address (plain, IPv4-mapped or NAT64) that net.dns must refuse; nothing connects to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/net.dns/getent-refused-forms/expect.json"
+value = "169.254.169.123"
+reason = "A getent answer in the metadata address (plain, IPv4-mapped or NAT64) that net.dns must refuse; nothing connects to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/net.dns/getent-refused-forms/commands/getent-c.json"
+value = "64:ff9b::a9fe:a97b"
+reason = "A getent answer in the metadata address (plain, IPv4-mapped or NAT64) that net.dns must refuse; nothing connects to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/net.dns/getent-refused-forms/expect.json"
+value = "64:ff9b::a9fe:a97b"
+reason = "A getent answer in the metadata address (plain, IPv4-mapped or NAT64) that net.dns must refuse; nothing connects to it"

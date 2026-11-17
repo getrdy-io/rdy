@@ -88,6 +88,7 @@ pub use proxy::{
     ProxyUrlError,
 };
 
+pub use addr::is_unusable_peer;
 pub use attempt::AttemptOutcome;
 pub use trust::{NoRoots, TrustFailure};
 
