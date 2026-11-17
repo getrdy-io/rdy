@@ -208,10 +208,7 @@ fn build_refuses_an_id_the_family_does_not_have() {
 #[test]
 fn these_ids_are_still_stubs_and_the_planner_skips_them() {
     // Delete an id here in the ticket that writes its real check.
-    assert_eq!(
-        HostFamily::stub_ids(),
-        ["host.time_sync", "host.cgroups"]
-    );
+    assert_eq!(HostFamily::stub_ids(), ["host.time_sync", "host.cgroups"]);
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
