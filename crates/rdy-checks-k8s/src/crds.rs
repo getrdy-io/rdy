@@ -25,7 +25,7 @@
 //! - An operator whose version, read from the image tag of its container (else the version label), is below
 //!   `min_version` blocks. A pre-release sorts below its release.
 //! - Anything the identity may not read, or the check ran out of time for, is not evaluated, never a block:
-//!   a Deployment it may not get (grant `get deployments.apps in <namespace>`), the discovery documents
+//!   a Deployment it may not get (grant `get deployments.apps/<name> in <namespace>`), the discovery documents
 //!   (grant `get /apis`), a version that no tag or label gives.
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -629,6 +629,14 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             Some("default"),
             Some("coredns"),
         ),
+        // resourceNames holds inside the namespace of the Role: another Deployment is refused.
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("kube-system"),
+            Some("other"),
+        ),
         ("delete", "apps", "deployments", Some("default"), None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
