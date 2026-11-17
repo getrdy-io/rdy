@@ -97,9 +97,7 @@ by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a fi
 `checks/net.egress/` holds six scripted `net.json` cases (M1-095): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused` and `nxdomain`. They have no `expect.json` yet: the tests register the `web` server in code (a `serve` entry needs one), which
 `assert_cases` cannot do, so the check's own tests assert the results (the completeness rule for `net` comes with M1-117).
-`checks/net.tls_intercept/` holds one scripted case (M1-099), `refused`: a closed port, so no chain is had and the host is not tested. The
-class cases need chains generated at test time, which a static file cannot hold, so the check's own tests run them against loopback
-servers, and M1-100 adds the generated-chain rig and the `expect.json` files (PENDING row in the env harness).
+`checks/net.tls_intercept/` holds 16 cases (M1-100), each with a reviewed `expect.json`: the generated-chain cases `public`, `machine-only`, `machine-only-forbidden`, `unknown-ca`, `expired-pinned-clock`, `expired-inside-window`, `empty-os-store`, `env-store-canary-user`, `issuer-match`, `issuer-mismatch`, `pin-match`, `pin-ca-only`, `pin-mismatch`, `pin-root-not-sent` and `handshake-never-completes` (an in-memory peer that never reads or answers the ClientHello, run on a paused clock so the 5 s handshake limit costs nothing), and the scripted `refused`. A generated case names its chain in `chain.json` and holds no certificate: the env harness (`crates/rdy-cli/tests/env_harness/chains.rs`) builds a root, an issuing CA and a leaf with rcgen at test time, serves them from a loopback server and points the case's host at it. `chain` is `public`, `machine_only`, `unknown_ca`, `expired` (the last needs a pinned `clock`: after the leaf's notAfter it is `clock_or_expiry`, inside the window it is `machine_only`) or `silent`; `os_store: "empty"`, `sources` (where the OS roots were read from, with an optional `env`) and `home` are optional. An `expect.json` `entry` may list `<leaf>`, `<issuing>`, `<root>` or `<other>` in `pin_sha256`, which the rig swaps for that certificate's SHA-256, and the golden writes every 64 digit hash as `<sha256>`. `env-store-canary-user` holds a canary user name in its sources and a test proves it is in no golden. The `Timeout` class is still owed by M1-179 (PENDING row).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
@@ -160,6 +158,7 @@ envs/all-pass/
   env.json           environment variables the process sees
   golden/            report.json, report.html, terminal.txt
   expect.json        (check cases) the reviewed expected result
+  chain.json         (net.tls_intercept cases) the certificate chain the env harness generates, see below
 ```
 
 The file tree is the machine: a path it does not hold is not found, as on a machine without that file, so a

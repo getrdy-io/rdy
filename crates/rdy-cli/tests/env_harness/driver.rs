@@ -228,7 +228,7 @@ fn auxv() -> Vec<u8> {
 }
 
 /// A pinned clock such as `2026-11-02T09:00:00Z` (or with milliseconds) as a `SystemTime`.
-fn pinned_time(clock: &str) -> Result<SystemTime, String> {
+pub fn pinned_time(clock: &str) -> Result<SystemTime, String> {
     let bad = || format!("the pinned clock {clock:?} is not like 2026-11-02T09:00:00Z");
     let text = clock.strip_suffix('Z').ok_or_else(bad)?;
     let (date, time) = text.split_once('T').ok_or_else(bad)?;
