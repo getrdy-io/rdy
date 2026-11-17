@@ -134,40 +134,52 @@ printf '%s\n' '{{ json_sha256 }} {{ json.len() }}' >>"$tmp/repo/crates/rdy-engin
 expect "template: json.len() counts as a second use" 1 "exactly once"
 fresh
 printf '%s\n' '<p>{{ json ~ json }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: {{ json ~ json }} counts 2 in one tag" 1 "found 2 use(s) of json"
+expect "template: {{ json ~ json }} counts 2 in one tag" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '{% let a = json %}{{ json }}' >"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: {% let a = json %}{{ json }} counts 2, one per tag" 1 "found 2 use(s) of json"
+expect "template: {% let a = json %}{{ json }} counts 2, one per tag" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{{ json ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: the allowed line plus {{ json ~ json }} counts 3" 1 "found 3 use(s) of json"
+expect "template: the allowed line plus {{ json ~ json }} counts 3" 1 "found 3 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{{ jsonjson }} {{ a_json }} {{ json_a ~ json }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: json inside a longer word does not count, a bare json does" 1 "found 1 use(s) of json"
+expect "template: json inside a longer word does not count, a bare json does" 1 "found 1 use(s) of the word json"
 fresh
 printf '%s\n' '{% let (s, a) = ("%}", json) %}<p title="{{ a }}">' >"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a %} inside a string does not end the tag, json after it counts 1" 1 "found 1 use(s) of json"
+expect "template: a %} inside a string does not end the tag, json after it counts 1" 1 "found 1 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{{ "}}" ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a }} inside a string does not end the tag, so the allowed line plus this counts 2" 1 "found 2 use(s) of json"
+expect "template: a }} inside a string does not end the tag, so the allowed line plus this counts 2" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' "<p>{{ 'a}}' ~ json }}</p>" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a }} inside single quotes does not end the tag either" 1 "found 2 use(s) of json"
+expect "template: a }} inside single quotes does not end the tag either" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{{ "a\"}}" ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: an escaped quote does not end the string" 1 "found 2 use(s) of json"
+expect "template: an escaped quote does not end the string" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{{ "json" }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: the word json inside a string is not a use" 0 "ok:"
+expect "template: the word json inside a string still counts, by design" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' "{# {{ ' #}{% let a = json %}{# ' }} #}<p title=\"{{ a }}\">" >"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a quote in a comment does not hide a json after it, counts 1" 1 "found 1 use(s) of json"
+expect "template: a quote in a comment does not hide a json after it, counts 1" 1 "found 1 use(s) of the word json"
 fresh
 printf '%s\n' "{% raw %}{{ '{% endraw %}{% let a = json %}{% raw %}' }}{% endraw %}{{ a }}" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: a raw block that hides a json fails" 1 "raw block"
 fresh
 printf '%s\n' '{# {{ " #}<p title={{ json }}>{# " #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a double quote in a comment does not hide a json, the allowed line plus this counts 2" 1 "found 2 use(s) of json"
+expect "template: a double quote in a comment does not hide a json, the allowed line plus this counts 2" 1 "found 2 use(s) of the word json"
+fresh
+printf '%s\n' "{{ stringify!('a) }}{% let a = json %}{{ stringify!('b) }}<p title=\"{{ a }}\">" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: stringify! with lifetimes does not hide a json" 1 "found 2 use(s) of the word json"
+fresh
+printf '%s\n' '{{ stringify!(r#"x"y"#) }}{% let a = json %}{{ stringify!(r#"x"y"#) }}<p title="{{ a }}">' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: stringify! with a raw string does not hide a json" 1 "found 2 use(s) of the word json"
+fresh
+printf '%s\n' '{{ stringify!(/* " */) }}{% let a = json %}{{ stringify!(/* " */) }}<p title="{{ a }}">' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: stringify! with a block comment does not hide a json" 1 "found 2 use(s) of the word json"
+fresh
+printf '%s\n' '{{ stringify!(r"\") }}{% let a = json %}{{ stringify!(r"\") }}<p title="{{ a }}">' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: stringify! with a raw string ending in a backslash does not hide a json" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '{% raw %}{{ "{% endraw %}<p title={{ json }}>{% raw %}" }}{% endraw %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: a raw block with a quote that hides a json fails" 1 "raw block"
@@ -179,10 +191,10 @@ printf '%s\n' '<p>{{ rawness }} {{ x.raw_y }}</p>' >>"$tmp/repo/crates/rdy-engin
 expect "template: names that only start with raw pass" 0 "ok:"
 fresh
 printf '%s\n' '{# a {# b #}{{ json }} #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a comment inside a comment fails" 1 "inside a comment"
+expect "template: a comment inside a comment counts every json" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '{# never ends {{ json }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
-expect "template: a comment that never ends fails" 1 "never ends"
+expect "template: a comment that never ends counts every json" 1 "found 2 use(s) of the word json"
 fresh
 printf '%s\n' '<p>{# a comment #}{{ name }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: a plain comment passes" 0 "ok:"

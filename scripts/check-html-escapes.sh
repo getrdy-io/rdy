@@ -138,64 +138,30 @@ tscan() {
   tscan "a path inside a template can name askama::filters::Safe" "[{]([{]([^}]|[}][^}])*|%([^%]|%[^}])*)::"
 } >"$tmp/hits"
 
-# The embedded result is printed raw, so it may be named in a tag exactly once, and only as the text of the
-# data block. `{{ json }}` in an attribute, a second use, or a use with a filter fails.
+# The embedded result is printed raw, so the word `json` may appear in a template on one line only: the
+# allowed line below, which names it exactly once as the text of the data block.
 #
-# count_json reads one template (newlines already joined) on stdin and prints how many times the word `json`
-# is used inside tags. It counts per whole tag, `{{ ... }}` or `{% ... %}`, so `{{ json ~ json }}` and
-# `{% let a = json %}{{ json }}` each count 2 (PR #19 review, M1-141). A use is the whole word `json`, so
-# `json_sha256` and `x.json_len` do not count and `x.json` does. It reads each tag a character at a time and
-# skips "..." and '...' literals (with backslash escapes), so a `}}` or `%}` inside a string does not end
-# the tag early and a word inside a string is not a use: `{{ "}}" ~ json }}` counts 1 and
-# `{% let (s, a) = ("%}", json) %}<p title="{{ a }}">` counts 1 (PR #89 security review S2). An unterminated
-# tag or string runs to the end of the file. awk runs under LC_ALL=C, and the sum is taken in END.
-# `{# ... #}` comments are skipped before tags are looked for, so a quote in a comment cannot start a
-# string that hides a later use. A comment inside a comment, or one that never ends, is a failure, and so is
-# any `{% raw %}` block (the templates have none): both fail closed, because the scan cannot tell what
-# askama makes of them. It prints the count, a space and the number of such comments.
+# count_json is a plain word count BY DESIGN (PR #89 security and code reviews). It reads one template on
+# stdin and prints how many times the whole word `json` appears anywhere in it: in tags, in strings, in
+# comments, in text, in attributes. It does not try to read askama syntax. Every parser written for this
+# lost to some corner of askama (macro arguments with lifetimes, raw strings, `/* */` comments, `{# #}`
+# comments, raw blocks), and a use that the parser misses is a raw print of untrusted text. So a use cannot
+# hide: the word anywhere but the allowed line fails the check, even where it is harmless. That is the safe
+# direction. If a template needs the word for another reason, rename the thing or allow that exact line
+# here and say so in review. `json_sha256` and `x.json_len` do not count (the word must stand alone), so
+# `{{ json ~ json }}` and `{% let a = json %}{{ json }}` each count 2. The count is made over the template
+# without the allowed line, and the allowed line adds its one `json` in the tag. awk runs under LC_ALL=C.
+# A `{% raw %}` block fails too, though the plain count makes it dead weight: it is cheap and clear.
 count_json() {
   LC_ALL=C awk '
-    BEGIN { RS = "\001"; total = 0; bad = 0 }
+    BEGIN { RS = "\001"; total = 0 }
     {
-      s = $0
-      len = length(s)
-      i = 1
-      while (i <= len) {
-        two = substr(s, i, 2)
-        if (two == "{#") {
-          # A comment holds no tags. A comment inside a comment, or one that never ends, is not read:
-          # it is reported, because the scan cannot tell what askama makes of it.
-          rest = substr(s, i + 2)
-          end = index(rest, "#}")
-          if (end == 0) { bad++; break }
-          if (index(substr(rest, 1, end - 1), "{#") > 0) bad++
-          i += 2 + end + 1
-          continue
-        }
-        if (two != "{{" && two != "{%") { i++; continue }
-        closer = (two == "{{") ? "}}" : "%}"
-        i += 2
-        quote = ""
-        word = ""
-        while (i <= len) {
-          c = substr(s, i, 1)
-          if (quote != "") {
-            if (c == "\\") i++
-            else if (c == quote) quote = ""
-            i++
-            continue
-          }
-          if (c ~ /[A-Za-z0-9_]/) { word = word c; i++; continue }
-          if (word == "json") total++
-          word = ""
-          if (c == "\"" || c == "\047") { quote = c; i++; continue }
-          if (substr(s, i, 2) == closer) { i += 2; break }
-          i++
-        }
-        if (word == "json") total++
+      s = " " $0 " "
+      for (i = 2; i <= length(s) - 4; i++) {
+        if (substr(s, i, 4) == "json" && substr(s, i - 1, 1) !~ /[A-Za-z0-9_]/ && substr(s, i + 4, 1) !~ /[A-Za-z0-9_]/) total++
       }
     }
-    END { print total + 0, bad + 0 }
+    END { print total + 0 }
   '
 }
 JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
@@ -205,13 +171,10 @@ first_template=""
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -n "$first_template" ] || first_template=$file
-  counted=$(tr '\n\r\t' '   ' <"$file" | count_json)
-  n=${counted%% *}
-  n=${n:-0}
-  bad=${counted#* }
-  if [ "${bad:-0}" -gt 0 ] 2>/dev/null; then
-    printf '%s\t%s\t%s\t%s\n' "$file" 0 "a {# comment #} inside a comment, or one that never ends, cannot be read safely" "(comment)" >>"$tmp/hits"
-  fi
+  # Every `json` outside the allowed line, then the allowed line's own one.
+  other=$(grep -Fxv -- "$JSON_LINE" "$file" | tr '\n\r\t' '   ' | count_json)
+  copies=$(grep -Fxc -- "$JSON_LINE" "$file")
+  n=$(( ${other:-0} + ${copies:-0} ))
   if tr '\n\r\t' '   ' <"$file" | grep -Eq '[{]%[-+~]?[[:space:]]*raw([^A-Za-z0-9_]|$)'; then
     printf '%s\t%s\t%s\t%s\n' "$file" 0 "a raw block hides template text from this scan, and the templates do not use one" "{% raw %}" >>"$tmp/hits"
   fi
@@ -221,7 +184,7 @@ while IFS= read -r file; do
   fi
 done <"$tmp/templates"
 if [ "$json_uses" -ne 1 ] || [ "$json_line_found" -ne 1 ]; then
-  printf '%s\t%s\t%s\t%s\n' "${first_template:-$root/crates}" 0 "the embedded result must be named in a template exactly once, on the line: $JSON_LINE" "found $json_uses use(s) of json in tags and $json_line_found copy(ies) of that line" >>"$tmp/hits"
+  printf '%s\t%s\t%s\t%s\n' "${first_template:-$root/crates}" 0 "the embedded result must be named in a template exactly once, on the line: $JSON_LINE" "found $json_uses use(s) of the word json and $json_line_found copy(ies) of that line" >>"$tmp/hits"
 fi
 
 # Rust sources.
