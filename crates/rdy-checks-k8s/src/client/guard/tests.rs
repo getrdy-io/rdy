@@ -239,6 +239,9 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
             format!("{prefix}/namespaces/{}/{}", name(only), entry.resource)
         }
         Access::Get(only) => format!("{prefix}/{}/{}", entry.resource, name(only)),
+        Access::GetIn { namespace, name } => {
+            format!("{prefix}/namespaces/{namespace}/{}/{name}", entry.resource)
+        }
     }
 }
 
@@ -247,7 +250,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            if matches!(access, Access::Get(_))
+            if matches!(access, Access::Get(_) | Access::GetIn { .. })
                 || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
@@ -272,6 +275,10 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             Access::List,
             Access::ListInNamespace(Only::Any),
             Access::Get(Only::Any),
+            Access::GetIn {
+                namespace: "x",
+                name: "x",
+            },
         ];
         for access in all {
             let listed = entry
@@ -283,6 +290,34 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
         }
+    }
+}
+
+#[test]
+fn a_get_in_one_namespace_names_both_the_namespace_and_the_object() {
+    // k8s.dns: the DNS service and the Corefile ConfigMap are read by name in one namespace each.
+    for path in [
+        "/api/v1/namespaces/kube-system/services/kube-dns",
+        "/api/v1/namespaces/openshift-dns/services/dns-default",
+        "/api/v1/namespaces/kube-system/configmaps/coredns",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for path in [
+        // Another name, another namespace, the pair of another entry, a list, and a subresource.
+        "/api/v1/namespaces/kube-system/services/other",
+        "/api/v1/namespaces/default/services/kube-dns",
+        "/api/v1/namespaces/kube-system/services/dns-default",
+        "/api/v1/namespaces/openshift-dns/configmaps/coredns",
+        "/api/v1/namespaces/kube-system/configmaps/kube-dns",
+        "/api/v1/namespaces/kube-system/configmaps",
+        "/api/v1/configmaps",
+        "/api/v1/services",
+        "/api/v1/namespaces/kube-system/services",
+        "/api/v1/namespaces/kube-system/configmaps/coredns/status",
+        "/api/v1/namespaces/kube-system/services/kube-dns/proxy",
+    ] {
+        assert!(judge_get(path).is_err(), "{path}");
     }
 }
 

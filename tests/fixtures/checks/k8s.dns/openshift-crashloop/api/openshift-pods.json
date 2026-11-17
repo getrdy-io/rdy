@@ -1,0 +1,63 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "fieldSelector=status.phase!=Succeeded,status.phase!=Failed&labelSelector=dns.operator.openshift.io/daemonset-dns=default&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "dns-default-0",
+          "namespace": "openshift-dns",
+          "labels": {
+            "dns.operator.openshift.io/daemonset-dns": "default"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "coredns",
+              "env": [
+                {
+                  "name": "ACME_TOKEN",
+                  "value": "ENV-VALUE-MUST-NOT-APPEAR"
+                }
+              ]
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "dns",
+              "ready": false,
+              "restartCount": 5,
+              "state": {
+                "waiting": {
+                  "reason": "CrashLoopBackOff"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "exitCode": 1,
+                  "reason": "Error",
+                  "finishedAt": "2026-11-17T11:58:00Z"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

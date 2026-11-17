@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/openshift-dns/services/dns-default"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "dns-default",
+      "namespace": "openshift-dns"
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "k8s-app": "kube-dns"
+      },
+      "ports": [
+        {
+          "name": "p53",
+          "port": 53,
+          "protocol": "UDP"
+        }
+      ],
+      "clusterIP": "172.30.0.10",
+      "clusterIPs": [
+        "172.30.0.10"
+      ]
+    }
+  }
+}

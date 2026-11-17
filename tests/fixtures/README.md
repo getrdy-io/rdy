@@ -95,7 +95,18 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
-`terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
+`terminating` case without a quota list proves the check does not list one.
+`checks/k8s.dns/` holds 36 clusters, `generated` by `scripts/gen-k8s-dns-fixtures.py` (`--check` fails on drift
+and on a file the script did not write): CoreDNS in `kube-system` (`kubeadm-ok`,
+`kubeadm-restarts-recent-but-running`, `not-ready`, `scaled-to-zero`, `default-replicas`, `nodelocal`, `label-noise`),
+crash loops (`loop-crashloop`, `loop-without-loop-plugin`, `crashloop-explicit-upstream`, `crashloop-old`, `crashloop-no-finish-time`,
+`crashloop-oom`, `loop-corefile-forbidden`, `healthy-corefile-forbidden`), the Corefile (`domain-other`,
+`corefile-no-zone`, `corefile-no-key`), the Service (`service-headless`, `service-missing`, `service-forbidden`,
+`service-no-port`), nothing readable (`no-dns`, `workload-gone-service-there`, `all-forbidden`,
+`openshift-namespace-forbidden`, `cut`, `hostile`) and the three distributions (`rke2`, `rke2-loop`, `openshift`,
+`openshift-partial`, `openshift-service-missing`, `openshift-crashloop`, `gke`, `gke-crashloop`). The shapes follow what each
+distribution documents and are unconfirmed against a live cluster. Times count from a pinned clock
+(2026-11-17T12:00:00Z). `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
 of `rdy_cli::run`) and a `golden/terminal.txt` (its stderr, M1-086).
 `redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).

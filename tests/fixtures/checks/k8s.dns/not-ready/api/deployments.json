@@ -1,0 +1,64 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/deployments",
+    "query": "labelSelector=k8s-app=kube-dns&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DeploymentList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+          "name": "coredns",
+          "namespace": "kube-system",
+          "labels": {
+            "k8s-app": "kube-dns"
+          }
+        },
+        "spec": {
+          "selector": {
+            "matchLabels": {
+              "k8s-app": "kube-dns"
+            }
+          },
+          "template": {
+            "metadata": {
+              "labels": {
+                "k8s-app": "kube-dns"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "name": "coredns",
+                  "image": "registry.acme.example/dns/coredns:1.0",
+                  "env": [
+                    {
+                      "name": "ACME_TOKEN",
+                      "value": "ENV-VALUE-MUST-NOT-APPEAR"
+                    }
+                  ],
+                  "args": [
+                    "-conf",
+                    "/etc/coredns/Corefile"
+                  ]
+                }
+              ]
+            }
+          },
+          "replicas": 2
+        },
+        "status": {
+          "replicas": 2
+        }
+      }
+    ]
+  }
+}

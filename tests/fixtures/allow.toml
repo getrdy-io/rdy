@@ -86,3 +86,13 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of a Corefile names (k8s.dns fixtures); a reserved zone, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of a Corefile names (k8s.dns fixtures); a reserved zone, not a host a test contacts"

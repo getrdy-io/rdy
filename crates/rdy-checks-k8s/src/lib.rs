@@ -10,7 +10,8 @@
 //! that failed), `k8s.storageclass` ([`StorageClassCheck`], M1-110), `k8s.rbac` ([`RbacCheck`], M1-111,
 //! which can test as the spec's `as:` user) and `k8s.admission` ([`AdmissionCheck`], M1-114, the Pod
 //! Security, policy engine and SCC half) and `k8s.namespace` ([`NamespaceCheck`], M1-161, existence,
-//! terminating, quota and limit range) are built, and the others follow.
+//! terminating, quota and limit range) and `k8s.dns` ([`DnsCheck`], M1-162, the cluster DNS workload,
+//! Service, Corefile and restart evidence) are built, and the others follow.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -44,6 +45,12 @@ pub mod client;
     clippy::disallowed_macros
 )]
 mod cluster;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod dns;
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -84,6 +91,7 @@ mod version;
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
 pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
+pub use dns::DnsCheck;
 pub use namespace::NamespaceCheck;
 pub use rbac::RbacCheck;
 pub use storageclass::StorageClassCheck;

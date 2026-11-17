@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/configmaps/coredns"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "coredns",
+      "namespace": "kube-system"
+    },
+    "data": {
+      "Corefile": ".:53 {\n    kubernetes cluster.local in-addr.arpa ip6.arpa\n    forward . /etc/resolv.conf\n}\n",
+      "extra.override": "key = KEY-MUST-NOT-APPEAR"
+    }
+  }
+}

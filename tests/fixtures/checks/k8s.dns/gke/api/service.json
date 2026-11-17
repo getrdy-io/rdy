@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/services/kube-dns"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "kube-dns",
+      "namespace": "kube-system"
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "k8s-app": "kube-dns"
+      },
+      "ports": [
+        {
+          "name": "p53",
+          "port": 53,
+          "protocol": "UDP"
+        }
+      ],
+      "clusterIP": "10.120.0.10",
+      "clusterIPs": [
+        "10.120.0.10"
+      ]
+    }
+  }
+}

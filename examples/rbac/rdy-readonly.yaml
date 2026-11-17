@@ -55,7 +55,8 @@ rules:
     verbs: ["get"]
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
   # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
-  # k8s.namespace: the quotas and limit ranges of the target namespace.
+  # k8s.namespace: the quotas and limit ranges of the target namespace. k8s.dns: the container states of
+  # the cluster DNS pods (one list with a label selector; the rest of each pod is dropped).
   - apiGroups: [""]
     resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
     verbs: ["list"]
@@ -95,30 +96,42 @@ subjects:
     name: rdy-readonly
     namespace: rdy-system
 ---
-# OPTIONAL: this Role and RoleBinding (the last two documents). k8s.nodes looks for the
-# cluster-autoscaler deployment in kube-system only, and a Role keeps that to one namespace. Without
-# them, k8s.nodes reports "autoscaler not detected" and a node shortfall is not softened. Delete the
-# last two documents if your platform manages kube-system and refuses the apply (GKE Autopilot's
-# managed namespace) or runs the autoscaler elsewhere (OpenShift: openshift-machine-api).
+# OPTIONAL: this Role and RoleBinding (the last two documents). They are limited to kube-system:
+# - k8s.nodes looks for the cluster-autoscaler deployment there. Without the Role, k8s.nodes reports
+#   "autoscaler not detected" and a node shortfall is not softened.
+# - k8s.dns lists the DNS deployments and daemon sets there, and reads the Service kube-dns and the
+#   ConfigMap coredns by name (nothing else of kube-system; the ConfigMap read is for its Corefile key
+#   only). Without the Role, k8s.dns reports what it could not read and asks for these grants.
+# Delete the last two documents if your platform manages kube-system and refuses the apply (GKE
+# Autopilot's managed namespace). On OpenShift the DNS runs in openshift-dns: apply
+# rdy-readonly-openshift-dns.yaml as well.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: rdy-readonly-deployments
+  name: rdy-readonly-kube-system
   namespace: kube-system
 rules:
   - apiGroups: ["apps"]
-    resources: ["deployments"]
+    resources: ["deployments", "daemonsets"]
     verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["kube-dns"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["coredns"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: rdy-readonly-deployments
+  name: rdy-readonly-kube-system
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: rdy-readonly-deployments
+  name: rdy-readonly-kube-system
 subjects:
   - kind: ServiceAccount
     name: rdy-readonly
