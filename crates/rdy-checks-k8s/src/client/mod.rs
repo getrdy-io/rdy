@@ -1446,7 +1446,7 @@ fn plugin_file(command: &str) -> Option<String> {
 /// (`.cmd`, `.exe`). A name that is found nowhere stays bare, so the entry never claims a path rdy did
 /// not see.
 ///
-/// The text is not escaped: escape it before it is shown. [`find_plugin`] has the path itself.
+/// The text is not escaped: escape it before it is shown. `find_plugin` has the path itself.
 #[must_use]
 pub fn resolve_plugin(
     command: &str,
