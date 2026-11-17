@@ -1,0 +1,33 @@
+{
+  "entry": {
+    "distro_min": {
+      "rhel": "4.18.0-305"
+    },
+    "id": "host.kernel",
+    "min": "5.4"
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "distro": "rhel",
+        "source": "distro_min",
+        "version": "4.18.0-305"
+      },
+      "distro_min": {
+        "rhel": "4.18.0-305"
+      },
+      "min": "5.4"
+    },
+    "fix": "Install a newer kernel with `sudo dnf upgrade kernel`, reboot into it and confirm with `uname -r`.",
+    "level": "fail",
+    "message": "Kernel `4.18.0-193.el8.x86_64` is older than the minimum of 4.18.0-305 on `rhel`.",
+    "notes": [],
+    "observed": {
+      "base": "4.18.0",
+      "build": "193",
+      "distro": "rhel",
+      "release": "4.18.0-193.el8.x86_64"
+    },
+    "partial": null
+  }
+}
