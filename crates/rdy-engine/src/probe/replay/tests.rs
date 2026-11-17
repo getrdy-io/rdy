@@ -1442,6 +1442,7 @@ async fn a_fixture_name_at_a_link_local_address_is_refused_by_the_probe() {
         Arc::new(fixture.into_replay()),
         Redactor::new(TagKey::fixed([3; 32])),
     );
+    hub.set_network(true);
     let probe = hub.check_probe(TIME.id, Os::Linux, Some(&TIME));
     let server = rdy_spec::Target::parse("meta.acme.example:123").expect("target");
     probe.permit_hosts(HostSet::new([server.clone()]));

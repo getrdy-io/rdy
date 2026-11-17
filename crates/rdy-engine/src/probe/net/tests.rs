@@ -79,7 +79,9 @@ pub(super) fn direct_only() -> &'static CheckInfo {
 }
 
 pub(super) fn hub_over(backend: impl Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 pub(super) fn target(text: &str) -> Target {
@@ -1252,7 +1254,9 @@ pub(super) fn live_hub() -> ProbeHub {
 }
 
 fn hub_over_arc(backend: Arc<dyn Backend>) -> ProbeHub {
-    ProbeHub::new(backend, Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(backend, Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 #[tokio::test]
