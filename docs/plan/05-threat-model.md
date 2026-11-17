@@ -188,6 +188,8 @@ STRIDE table: Appendix B.
 
 ### Residual risks
 
+- `read_public` checks the path with `stat` and refuses a device or a named pipe. The open does not block, and the compare of type, device and inode refuses what was swapped in. But a device swapped in between the `stat` and the open is still opened before the compare refuses it. Every spec read uses it (M1-183). Who can swap: anyone who can write to a folder in the path. Under `sudo`, that is enough to point a root run at a device: `sudo rdy run ~alice/spec.yaml` lets alice swap the file. Opening some devices has side effects, and a driver's own open or close can block, which the non-blocking flag does not prevent. On Linux the window can be closed: open with `O_PATH` (rustix `OFlags::PATH`, safe), `fstat` the handle, and reopen `/proc/self/fd/N` only for a regular file. A Linux `O_PATH` follow-up is filed (a correction adds the ticket). Windows asks `GetFileType` on the open handle and opens at identification level, so a pipe server cannot impersonate the caller.
+- The one-second bound of INV-02 covers pipes and devices only. A regular file on a hung NFS or FUSE mount blocks the `stat` or the read, and `rdy` has no timeout for that in M1.
 - Key distribution is manual in M1. Pinning the wrong key trusts the wrong vendor.
 - No revocation in v1 (ADR 0002). A leaked key stays trusted until removed by hand.
 - From M2, the portal is in the trust chain. The bounded sentence is what limits a compromised portal.
@@ -283,7 +285,7 @@ Each is a statement that CI tests. The ticket in the test column carries it.
 | Id | Invariant | Test |
 |---|---|---|
 | INV-01 | No spec byte reaches the YAML parser before verification succeeds, except under `--allow-unsigned` or `rdy spec lint`. | Parser spy: a tampered spec is never parsed (M1-120). |
-| INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files, a FIFO and `/dev/zero` each exit 64 within 1 s. |
+| INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files exit 64. A FIFO at the path, a FIFO swapped in after the stat (test hook) and `/dev/zero` each exit 64 within 1 s for `rdy run`, `rdy verify` and `rdy spec sign` (M1-183). |
 | INV-03 | A spec verifies only if its key id is pinned for the trusted-comment product and `metadata.product` matches. | Unpinned id gives "unknown key"; a key pinned for A fails on B; a comment and metadata mismatch fails. |
 | INV-04 | With euid 0, only the system store is read, and it is refused unless root-owned, not group or world writable, and not a symlink. | Run under `sudo` in CI with `HOME` and `XDG_CONFIG_HOME` set to a user dir holding a pin; the pin is ignored. A `strace -f` of the load shows no call that mentions that home, and a control run with a user layout does (`root_trust_strace.rs`, SEC-60 M1-122). Bad owner, mode and symlink cases exit 64 (M1-121). |
 | INV-05 | `--allow-unsigned` is read from argv only. `RDY_ALLOW_UNSIGNED=1` and an `allow_unsigned` config key have no effect. An unsigned run says `signature: unsigned` in JSON and HTML. A present but failing signature exits 64 with or without the flag. | Integration tests and golden output (M1-126, SEC-59 M1-130). |

@@ -1868,6 +1868,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width",
+ "winapi-util",
  "zeroize",
 ]
 
