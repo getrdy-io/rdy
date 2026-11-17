@@ -21,7 +21,7 @@ use rdy_spec::result::{Capability, CheckResult, KubeIdentity};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::check::{BoxFuture, Check, CheckInfo};
-use crate::probe::{Probe, ProbeHub};
+use crate::probe::{Probe, SecretSink};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -144,8 +144,9 @@ pub const FAMILY_PROBE_LIMIT: Duration = Duration::from_secs(10);
 pub struct FamilyProbe<'a> {
     /// The run's own probe (`check: null`).
     pub probe: Probe,
-    /// The run's hub, for the known-secret set. Register every secret before anything is printed.
-    pub hub: &'a ProbeHub,
+    /// Adds to the run's known-secret set and does nothing else. Register every secret before anything is
+    /// printed, and treat a refusal as fatal.
+    pub secrets: SecretSink,
     /// The checks of this family that will run, so a family can tell that its work is wanted. A spec that
     /// holds none of them never reaches the hook.
     pub checks: &'a [&'static CheckInfo],
@@ -166,13 +167,13 @@ impl<'a> FamilyProbe<'a> {
     #[must_use]
     pub fn new(
         probe: Probe,
-        hub: &'a ProbeHub,
+        secrets: SecretSink,
         checks: &'a [&'static CheckInfo],
         announce: &'a (dyn Fn(&str) + Send + Sync),
     ) -> Self {
         Self {
             probe,
-            hub,
+            secrets,
             checks,
             network: true,
             kubeconfig: None,
@@ -262,8 +263,11 @@ pub trait Family: Send + Sync + 'static {
     }
 
     /// Called when [`Family::probe`] did not end inside [`FAMILY_PROBE_LIMIT`]. The future was dropped,
-    /// so whatever the probe was going to record, this records. The default does nothing.
-    fn probe_timed_out(&self) {}
+    /// so whatever the probe was going to record, this records, and the capabilities it returns replace
+    /// the ones the probe never gave. The default does nothing.
+    fn probe_timed_out(&self) -> Vec<Capability> {
+        Vec::new()
+    }
 
     /// The Kubernetes identity of the run, from the results of the run (the `k8s.access` result says
     /// whether the server verified the user). `None` when this family has none. Called once, after

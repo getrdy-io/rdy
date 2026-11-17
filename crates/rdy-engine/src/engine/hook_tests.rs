@@ -79,8 +79,11 @@ impl Family for ProbingFamily {
         })
     }
 
-    fn probe_timed_out(&self) {
+    fn probe_timed_out(&self) -> Vec<Capability> {
         self.timed_out.fetch_add(1, Ordering::SeqCst);
+        let mut cap = Capability::new(Need::KubeContext.wire(), false);
+        cap.hint = Some("finish the plugin login first".to_owned());
+        vec![cap]
     }
 
     fn kube_identity(&self, _: &[CheckResult]) -> Option<KubeIdentity> {

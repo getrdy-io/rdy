@@ -259,6 +259,8 @@ const MATCHES: &[(&str, &str, Claim)] = &[
         Claim::Forms(&["text"]),
     ),
     ("jwt", "eyJ...", Claim::Forms(&["text"])),
+    ("jwt", "k8s-aws-v1.<token>", Claim::Forms(&["text"])),
+    ("jwt", "ya29.<token>", Claim::Forms(&["text"])),
     ("secret_by_key", "pass", Claim::Forms(&["stem_pass"])),
     ("secret_by_key", "secret", Claim::Forms(&["stem_secret"])),
     ("secret_by_key", "token", Claim::Forms(&["stem_token"])),

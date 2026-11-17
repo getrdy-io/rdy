@@ -790,6 +790,13 @@ impl ProbeHub {
         self.probe(Some(key.to_owned()), os, info)
     }
 
+    /// A handle that can only add to the known-secret set. A family's probe gets this and not the hub, so
+    /// it cannot change the network option or the proxy of the run (M1-107).
+    #[must_use]
+    pub fn secret_sink(&self) -> SecretSink {
+        SecretSink(self.clone())
+    }
+
     /// Adds a secret to the run-scoped known-secret set (ADR 0015 decision 3). Every string the log, the
     /// report and the CLI redact from now on has the exact value removed. The kubeconfig token and
     /// client key data and the proxy password come in through here. Returns `false` if the value was
@@ -1194,6 +1201,26 @@ impl fmt::Debug for Probe {
     }
 }
 
+/// The one thing a family's probe may do to the run's hub: add a known secret. It is a clone of the hub
+/// that offers a single method, so the network option, the proxy and the log stay out of reach.
+#[derive(Clone)]
+pub struct SecretSink(ProbeHub);
+
+impl SecretSink {
+    /// Adds `secret` to the run's known-secret set. `false` when the set refused it (too short, too long or
+    /// no room): the caller treats that as fatal. Never log the value.
+    #[must_use]
+    pub fn add(&self, secret: &str) -> bool {
+        self.0.add_known_secret(secret)
+    }
+}
+
+impl fmt::Debug for SecretSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretSink(..)")
+    }
+}
+
 /// A call that passed the handle checks and the read denylist.
 struct Gate<'a> {
     hub: &'a ProbeHub,
@@ -1337,8 +1364,13 @@ impl Probe {
     ///
     /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
     pub fn record_run_exec(&self, program: &str, argv: &[String]) -> Result<(), ProbeError> {
+        // The program as the log shows it: a path under the home directory is `~/...` (S8).
+        let shown = self.hub.as_ref().map_or_else(
+            || program.to_owned(),
+            |hub| hub.log.display_path(Path::new(program)),
+        );
         let mut fields = Map::new();
-        fields.insert("program".to_owned(), program.into());
+        fields.insert("program".to_owned(), shown.into());
         fields.insert(
             "argv".to_owned(),
             Value::Array(argv.iter().cloned().map(Value::String).collect()),

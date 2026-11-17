@@ -250,7 +250,7 @@ impl TestRun {
     ) -> crate::family::FamilyProbe<'a> {
         crate::family::FamilyProbe::new(
             self.hub.run_probe_for(Os::Linux),
-            &self.hub,
+            self.hub.secret_sink(),
             checks,
             announce,
         )

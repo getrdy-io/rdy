@@ -492,7 +492,7 @@ impl Engine {
             };
             let ctx = FamilyProbe {
                 probe: self.hub.run_probe(),
-                hub: &self.hub,
+                secrets: self.hub.secret_sink(),
                 checks: &checks,
                 network: options.network,
                 kubeconfig: options.kubeconfig.as_deref(),
@@ -504,13 +504,7 @@ impl Engine {
                 Ok(Ok(capabilities)) => probed.capabilities.extend(capabilities),
                 Ok(Err(fatal)) => return (probed, Some(fatal)),
                 Err(_) => {
-                    family.probe_timed_out();
-                    if checks.iter().any(|info| {
-                        info.needs.contains(&Need::KubeContext)
-                            || info.wants.iter().any(|w| w.need == Need::KubeContext)
-                    }) {
-                        probed.capabilities.push(timed_out_capability());
-                    }
+                    probed.capabilities.extend(family.probe_timed_out());
                 }
             }
         }
@@ -526,19 +520,6 @@ struct Probed<'a> {
     families: Vec<&'a dyn Family>,
 }
 
-/// The `kube_context` capability of a probe that did not end in time.
-fn timed_out_capability() -> Capability {
-    let mut cap = Capability::new(Need::KubeContext.wire(), false);
-    cap.detail = Some(format!(
-        "the cluster did not answer in {} seconds",
-        FAMILY_PROBE_LIMIT.as_secs()
-    ));
-    cap.hint = Some(
-        "a credential plugin may be waiting for a login: log in with it first, then run rdy again"
-            .to_owned(),
-    );
-    cap
-}
 
 /// Where a spec entry's result comes from.
 enum Slot {
