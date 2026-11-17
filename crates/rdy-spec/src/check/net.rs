@@ -231,6 +231,13 @@ impl TlsHost {
         self.target.host()
     }
 
+    /// The host and the port to use (the written one, or 443) as a [`Target`]. This is what a check
+    /// hands to the probe.
+    #[must_use]
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
     /// The port as written, or `None` when the spec has none and [`TlsHost::DEFAULT_PORT`] applies.
     #[must_use]
     pub fn port(&self) -> Option<u16> {

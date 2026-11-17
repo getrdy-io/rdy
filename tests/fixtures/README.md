@@ -97,6 +97,9 @@ by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a fi
 `checks/net.egress/` holds six scripted `net.json` cases (M1-095): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused` and `nxdomain`. They have no `expect.json` yet: the tests register the `web` server in code (a `serve` entry needs one), which
 `assert_cases` cannot do, so the check's own tests assert the results (the completeness rule for `net` comes with M1-117).
+`checks/net.tls_intercept/` holds one scripted case (M1-099), `refused`: a closed port, so no chain is had and the host is not tested. The
+class cases need chains generated at test time, which a static file cannot hold, so the check's own tests run them against loopback
+servers, and M1-100 adds the generated-chain rig and the `expect.json` files (PENDING row in the env harness).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
@@ -113,6 +116,7 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
+| `exit-codes/<row>.stderr.txt` | The stderr of the built `rdy` for an exit-code row that needs no fixture backend: `bad-flag`, `missing-file`, `too-many-hosts` and `unwritable-out-dir` (M1-087). The report folder stamp is `<stamp>`, `\` is `/`. Compared by `tests/exit_code_goldens.rs`, plain and with `--json` | `UPDATE_GOLDENS=1`, then read the diff |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |

@@ -116,6 +116,20 @@ impl TestRun {
         self
     }
 
+    /// Pins the clock that every TLS verdict of this run sees, as time since the Unix epoch. See
+    /// `ProbeHub::pin_clock`. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn pin_clock(&self, since_epoch: std::time::Duration) {
+        self.hub.pin_clock(since_epoch);
+    }
+
+    /// Makes the bundled public roots hold `root_der` for this run (`ProbeHub::trust_as_public`), so a
+    /// generated CA can play a public one. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn trust_as_public(&self, root_der: &[u8]) {
+        self.hub.trust_as_public(root_der);
+    }
+
     /// A run over the machine of a loaded fixture (08 section 2).
     #[must_use]
     pub fn for_fixture(fixture: &Fixture) -> Self {
