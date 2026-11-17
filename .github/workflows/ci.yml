@@ -24,11 +24,11 @@ on:
 
 permissions: {}
 
-# A PR run is replaced by the next push to the same PR. A merge_group run is never cancelled: its
-# github.ref is the unique gh-readonly-queue ref, so entries do not share a group, and cancelling one
-# would eject it from the queue.
+# A PR run is replaced by the next push to the same PR. A merge_group run is never cancelled, and its
+# group is the entry's head SHA. The gh-readonly-queue ref is not unique when a PR is removed and
+# queued again on the same main commit, and cancelling a queue run would eject the entry.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -249,7 +249,7 @@ jobs:
         run: sh scripts/test-check-org-settings.sh
       # On push to main and on merge_group the job passes without checking. Squash and rebase merges
       # rewrite commits, and the PR already passed this check before it merged or was queued.
-      # The queue's temporary commits have no PR base and head to compare, and need none.
+      # The queue's commits are written by GitHub, so the PR's own commits are what this check covers.
       - name: Every commit has a Signed-off-by line
         if: github.event_name == 'pull_request'
         env:

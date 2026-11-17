@@ -21,6 +21,26 @@
     {"type": "deletion", "ruleset_id": 1},
     {"type": "required_linear_history", "ruleset_id": 1}
   ],
+  "main-rules-queue-squash": [
+    {"type": "pull_request", "ruleset_id": 1, "parameters": {"required_approving_review_count": 0}},
+    {"type": "required_status_checks", "ruleset_id": 1,
+     "parameters": {"required_status_checks": [{"context": "ci-ok", "integration_id": 15368}],
+                    "strict_required_status_checks_policy": false}},
+    {"type": "non_fast_forward", "ruleset_id": 1},
+    {"type": "deletion", "ruleset_id": 1},
+    {"type": "required_linear_history", "ruleset_id": 1},
+    {"type": "merge_queue", "ruleset_id": 1, "parameters": {"merge_method": "SQUASH", "max_entries_to_build": 2}}
+  ],
+  "main-rules-queue-merge": [
+    {"type": "pull_request", "ruleset_id": 1, "parameters": {"required_approving_review_count": 0}},
+    {"type": "required_status_checks", "ruleset_id": 1,
+     "parameters": {"required_status_checks": [{"context": "ci-ok", "integration_id": 15368}],
+                    "strict_required_status_checks_policy": false}},
+    {"type": "non_fast_forward", "ruleset_id": 1},
+    {"type": "deletion", "ruleset_id": 1},
+    {"type": "required_linear_history", "ruleset_id": 1},
+    {"type": "merge_queue", "ruleset_id": 1, "parameters": {"merge_method": "MERGE", "max_entries_to_build": 2}}
+  ],
   "main-rules-pr-only": [
     {"type": "pull_request", "ruleset_id": 1, "parameters": {"required_approving_review_count": 0}}
   ],
