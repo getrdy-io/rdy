@@ -313,7 +313,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `note: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file, and a `.html` written before it is removed again (best effort). A `.html` without a `.json` beside it is not a result: exit 70 is the authority. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `note: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
@@ -450,7 +450,7 @@ reads the newest `rdy-report-*` folder, or just runs again.
 fills, the write blocks the run. The watchdog then ends the run with exit 70 and a partial report, the same
 end as a stalled `--json` pipe.
 
-A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
+A kill between the `.html` and the `.json` can leave a `.html` with no `.json` beside it. That page is not a result, and the exit code (70) is the authority. A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
 host was not read before the run stopped, not that the machine is called that (the report has the arch of the
 build and nothing else of the host). The report also has no `capabilities` and no action log.
 
