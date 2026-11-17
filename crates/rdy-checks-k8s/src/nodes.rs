@@ -7,8 +7,15 @@
 //!   are kept;
 //! - only when the one thing wrong is a count of nodes that is too small: whether a node autoscaler
 //!   exists. The node labels and names are looked at first (they cost nothing), then `GET /apis` for the
-//!   groups `karpenter.sh` and `karpenter.k8s.aws`, then the `Deployment` list of `kube-system` for the
-//!   name `cluster-autoscaler`.
+//!   groups `karpenter.sh`, `karpenter.k8s.aws` and `autoscaling.openshift.io`, then the `Deployment`
+//!   list of `kube-system`, where a name or an `app.kubernetes.io/name` label that contains
+//!   `cluster-autoscaler` counts (the Helm chart names vary). The list is filtered here and not by a
+//!   selector, so no selector has to cover every spelling. A group in `/apis` says the autoscaler is
+//!   installed, not that it can add the nodes the product needs: the warning says "not verified".
+//!
+//! Not read: the `cluster-autoscaler-status` ConfigMap that GKE Standard and AKS keep in `kube-system`.
+//!   The guard allows no `ConfigMap` read, and adding one needs the Appendix B table, the example role and
+//!   a security review. GKE node auto-provisioning is seen by its `nap-` node pools instead.
 //!
 //! Nothing is created. The rules are in [`judge`]. How this build differs from 03:
 //!
@@ -51,8 +58,15 @@ use judge::{Assessment, Scaler};
 /// Below this much time left, the optional reads are skipped.
 const MIN_LEFT: Duration = Duration::from_millis(500);
 
-/// The API groups that Karpenter serves.
-const KARPENTER_GROUPS: [&str; 2] = ["karpenter.sh", "karpenter.k8s.aws"];
+/// The API groups that say a node autoscaler is installed, and what to call it.
+const SCALER_GROUPS: [(&str, &str); 3] = [
+    ("karpenter.sh", "Karpenter"),
+    ("karpenter.k8s.aws", "Karpenter"),
+    (
+        "autoscaling.openshift.io",
+        "the OpenShift machine autoscaler",
+    ),
+];
 
 /// The static facts about `k8s.nodes` (03 section 4).
 pub(crate) static INFO: CheckInfo = CheckInfo {
@@ -191,7 +205,7 @@ impl NodesCheck {
             }
         };
         let found = Assessment::new(&self.params, &nodes);
-        let scaler = if found.only_a_count_is_short(&self.params) {
+        let scaler = if found.only_a_count_is_short() {
             Some(self.find_scaler(&client, &mapper, ctx, &nodes).await?)
         } else {
             None
@@ -217,12 +231,14 @@ impl NodesCheck {
             return Ok(Scaler::Unknown(unknown.join("; ")));
         }
         match sort(mapper, client.api_groups().await, |list| {
-            list.groups
-                .into_iter()
-                .map(|group| group.name)
-                .find(|name| KARPENTER_GROUPS.contains(&name.as_str()))
+            list.groups.into_iter().find_map(|group| {
+                SCALER_GROUPS
+                    .iter()
+                    .find(|(name, _)| *name == group.name)
+                    .map(|(_, what)| *what)
+            })
         })? {
-            Read::Ok(Some(_)) => return Ok(Scaler::Found("Karpenter".to_owned())),
+            Read::Ok(Some(what)) => return Ok(Scaler::Found(what.to_owned())),
             Read::Ok(None) => {}
             other => unknown.push(format!("the group list: {}", other.why_discovery())),
         }
@@ -232,10 +248,17 @@ impl NodesCheck {
             return Ok(Scaler::Unknown(unknown.join("; ")));
         }
         let deployments = client.namespaced::<Deployment>("kube-system");
-        let params = ListParams::default().fields("metadata.name=cluster-autoscaler");
-        match sort(mapper, list_all(&deployments, &params).await, |listed| {
-            listed.items.len()
-        })? {
+        match sort(
+            mapper,
+            list_all(&deployments, &ListParams::default()).await,
+            |listed| {
+                listed
+                    .items
+                    .iter()
+                    .filter(|deployment| is_autoscaler(deployment))
+                    .count()
+            },
+        )? {
             Read::Ok(n) if n > 0 => return Ok(Scaler::Found("cluster-autoscaler".to_owned())),
             Read::Ok(_) | Read::Missing => {}
             Read::Forbidden => {
@@ -261,4 +284,21 @@ impl<T> Read<T> {
             other => other.why(),
         }
     }
+}
+
+/// True for a Deployment of the Kubernetes cluster autoscaler: its name or its `app.kubernetes.io/name`
+/// label contains `cluster-autoscaler`.
+fn is_autoscaler(deployment: &Deployment) -> bool {
+    let named = deployment
+        .metadata
+        .name
+        .as_deref()
+        .is_some_and(|name| name.contains("cluster-autoscaler"));
+    let labeled = deployment
+        .metadata
+        .labels
+        .as_ref()
+        .and_then(|labels| labels.get("app.kubernetes.io/name"))
+        .is_some_and(|value| value.contains("cluster-autoscaler"));
+    named || labeled
 }

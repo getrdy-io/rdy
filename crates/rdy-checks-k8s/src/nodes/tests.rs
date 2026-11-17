@@ -599,7 +599,10 @@ async fn a_list_cut_by_a_failing_server_is_partial() {
     let finding = rig.finding(json!({"min_ready": 2})).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     assert_eq!(finding.observed["list_cut"], true);
-    assert!(partial_note(&finding).contains("only the first 5000 nodes were read"));
+    assert!(
+        partial_note(&finding)
+            .contains("the node list was cut after 2 nodes, the rest are not evaluated")
+    );
     rig.audit();
 }
 
@@ -631,13 +634,136 @@ async fn hostile_names_are_escaped_and_never_reach_a_command() {
     // `--all` is not a name: the command holds the placeholder.
     assert!(fix.contains("`kubectl uncordon <node>`"), "{fix}");
     assert!(!fix.contains("--all"), "{fix}");
-    // Text that is not a quantity is "not reported", never a pass.
+    // Text that is not a quantity is "not reported", never a pass: the node's allocatable is empty.
+    let garbage = finding.observed["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["name"] == "acme-garbage")
+        .expect("the garbage node is counted");
+    for resource in ["cpu", "memory", "ephemeral", "pods"] {
+        assert!(garbage[resource]["allocatable"].is_null(), "{garbage}");
+    }
+    let texts: Vec<&str> = std::iter::once(finding.message.as_str())
+        .chain(finding.notes.iter().map(String::as_str))
+        .collect();
     assert!(
-        finding.message.contains("not reported") || finding.message.contains("Only"),
+        texts.iter().any(|text| text.contains("CPU not reported")),
+        "{texts:?}"
+    );
+    rig.audit();
+}
+
+// ---- review fixes (M1-113 fix round) ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_cut_list_makes_a_count_or_zone_shortfall_a_warning_with_a_partial() {
+    let rig = rig("capped");
+    let count = rig.finding(json!({"min_ready": 3})).await;
+    assert_eq!(count.level, Level::Warn, "{count:?}");
+    assert!(
+        count
+            .message
+            .ends_with("The node list was cut, so more nodes may exist"),
+        "{}",
+        count.message
+    );
+    assert!(partial_note(&count).contains("cut after 2 nodes"));
+    let zones = rig.finding(json!({"min_ready": 2, "min_zones": 3})).await;
+    assert_eq!(zones.level, Level::Warn, "{zones:?}");
+    rig.audit();
+}
+
+#[tokio::test]
+async fn lifecycle_taints_do_not_exclude_a_node_and_the_condition_is_judged_on_its_own() {
+    // `pressure` carries the real memory-pressure and disk-pressure taints: the node counts and warns.
+    let rig = rig("pressure");
+    let finding = rig.finding(json!({"min_ready": 3})).await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert_eq!(finding.observed["counted"], 3);
+    rig.audit();
+    // `excluded` has the unreachable taints on a node whose Ready is Unknown: it is `not Ready`, not tainted.
+    let rig = self::rig("excluded");
+    let finding = rig.finding(json!({"min_ready": 3})).await;
+    assert_eq!(finding.observed["excluded"]["not_ready"], 1);
+    assert_eq!(finding.observed["excluded"]["tainted"], 2);
+}
+
+#[tokio::test]
+async fn with_no_node_counted_it_fails_unless_an_autoscaler_is_evident() {
+    let managed = rig("zero-auto-mode");
+    let finding = managed.finding(json!({"per_node": {"cpu": 7}})).await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert!(
+        finding.message.contains("EKS Auto Mode is installed"),
         "{}",
         finding.message
     );
+    // A spec that asks nothing about size or count still needs a node.
+    let zones = managed.finding(json!({"min_zones": 1})).await;
+    assert_eq!(zones.level, Level::Warn, "{zones:?}");
+    managed.audit();
+
+    let plain = rig("zero-plain");
+    let finding = plain.finding(json!({"min_zones": 1})).await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.message, "No node can run the product (1 cordoned)");
+    plain.audit();
+}
+
+#[tokio::test]
+async fn a_zone_label_of_zero_is_no_zone() {
+    let rig = rig("aks-no-zone");
+    let finding = rig.finding(json!({"min_ready": 3, "min_zones": 2})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(partial_note(&finding).contains("min_zones was not evaluated"));
     rig.audit();
+}
+
+#[tokio::test]
+async fn more_autoscalers_are_found_by_node_pool_group_and_helm_label() {
+    for (case, what, paths) in [
+        ("scaler-nap", "GKE node auto-provisioning", vec![NODES]),
+        (
+            "scaler-openshift",
+            "the OpenShift machine autoscaler",
+            vec![NODES, GROUPS],
+        ),
+        (
+            "scaler-helm",
+            "cluster-autoscaler",
+            vec![NODES, GROUPS, DEPLOYMENTS],
+        ),
+    ] {
+        let rig = rig(case);
+        let finding = rig.finding(json!({"min_ready": 3})).await;
+        assert_eq!(finding.level, Level::Warn, "{case}: {finding:?}");
+        assert_eq!(finding.observed["autoscaler"], what, "{case}");
+        assert_eq!(rig.paths(), paths, "{case}");
+        rig.audit();
+    }
+}
+
+#[tokio::test]
+async fn per_node_is_only_a_hint_where_new_nodes_are_sized_to_pending_pods() {
+    let rig = rig("scaler-auto-mode");
+    let finding = rig
+        .finding(json!({"min_ready": 1, "per_node": {"cpu": 7}}))
+        .await;
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|note| note.starts_with("per_node is only a hint here: EKS Auto Mode")),
+        "{:?}",
+        finding.notes
+    );
+    // No hint, no note.
+    let plain = self::rig("healthy");
+    let finding = plain
+        .finding(json!({"min_ready": 3, "per_node": {"cpu": 7}}))
+        .await;
+    assert!(finding.notes.is_empty(), "{:?}", finding.notes);
 }
 
 // ---- the engine ----------------------------------------------------------------------------------------------------

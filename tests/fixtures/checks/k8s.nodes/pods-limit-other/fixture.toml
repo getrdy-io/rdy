@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-nodes-pods-limit-other"
-summary = "Three nodes outside AWS that allow 30 pods each"
+summary = "Three self-managed nodes outside AWS that allow 30 pods each"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

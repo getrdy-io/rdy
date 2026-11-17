@@ -2,7 +2,7 @@
   "request": {
     "method": "GET",
     "path": "/apis/apps/v1/namespaces/kube-system/deployments",
-    "query": "fieldSelector=metadata.name=cluster-autoscaler&limit=500"
+    "query": "limit=500"
   },
   "status": 403,
   "body": {

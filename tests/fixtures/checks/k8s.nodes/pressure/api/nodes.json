@@ -134,7 +134,18 @@
             "topology.kubernetes.io/zone": "us-east-1c"
           }
         },
-        "spec": {},
+        "spec": {
+          "taints": [
+            {
+              "key": "node.kubernetes.io/memory-pressure",
+              "effect": "NoSchedule"
+            },
+            {
+              "key": "node.kubernetes.io/disk-pressure",
+              "effect": "NoSchedule"
+            }
+          ]
+        },
         "status": {
           "capacity": {
             "cpu": "8",

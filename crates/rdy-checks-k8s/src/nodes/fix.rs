@@ -3,7 +3,7 @@
 //!
 //! A node name goes into a command only through `command_arg`, so a hostile name cannot become a flag.
 
-use super::facts::{Excluded, command_arg};
+use super::facts::{Excluded, Platform, command_arg};
 
 /// The fix for too few counted nodes. `first` holds the first node of each reason a node does not count.
 pub(super) fn add_nodes(first: &[(Excluded, &str)]) -> String {
@@ -35,17 +35,30 @@ pub(super) fn scale_up() -> String {
 
 /// The fix for counted nodes whose allocatable CPU, memory or storage is below the need.
 pub(super) fn bigger_nodes() -> String {
-    "Add a node group with larger nodes (EKS: `eksctl create nodegroup --cluster <cluster> --nodes 3 --node-type m6i.2xlarge`) or lower the product's requests. Compare allocatable with `kubectl describe node <node>`: allocatable is less than the machine size.".to_owned()
+    "Add a node group with larger nodes (EKS: `eksctl create nodegroup --cluster <cluster> --nodes 3 --node-type m6i.2xlarge`) or narrow the nodes counted with `selector` in the spec, or lower the product's requests. Compare allocatable with `kubectl describe node <node>`: allocatable is less than the machine size.".to_owned()
 }
 
-/// The fix for a pod-count limit that is below the need.
-pub(super) fn pod_limit(cloud: Option<&str>, node: &str) -> String {
-    match cloud {
-        Some("aws") => format!(
-            "The pod limit comes from the instance type with the VPC CNI. Use a larger instance type, or turn on prefix delegation with `kubectl set env daemonset aws-node -n kube-system ENABLE_PREFIX_DELEGATION=true` and replace the nodes. Check a node with `kubectl describe node {node}`."
+/// The fix for a pod-count limit that is below the need, in the words of the platform the node runs on.
+pub(super) fn pod_limit(platform: Platform, node: &str) -> String {
+    let check = format!("Check a node with `kubectl describe node {node}`.");
+    match platform {
+        Platform::Eks => format!(
+            "The pod limit comes from the instance type with the VPC CNI. Use a larger instance type, or turn on prefix delegation with `kubectl set env daemonset aws-node -n kube-system ENABLE_PREFIX_DELEGATION=true` and replace the nodes. {check}"
         ),
-        _ => format!(
-            "Raise `maxPods` in the kubelet configuration of the node pool, or use larger nodes. Check a node with `kubectl describe node {node}`."
+        Platform::EksAuto => format!(
+            "EKS Auto Mode chooses the nodes. Ask for a larger instance size in the requirements of the NodePool. {check}"
+        ),
+        Platform::Gke => format!(
+            "GKE fixes the pods per node when a node pool is made. Make a new pool with `gcloud container node-pools create <pool> --cluster <cluster> --max-pods-per-node 110`, then move the load. {check}"
+        ),
+        Platform::Aks => format!(
+            "AKS fixes the pods per node when a node pool is made. Add a pool with `az aks nodepool add --resource-group <group> --cluster-name <cluster> --name <pool> --max-pods 110`, then move the load. {check}"
+        ),
+        Platform::OpenShift => format!(
+            "Raise `maxPods` in a KubeletConfig for the machine config pool of these nodes. `oc get machineconfigpool` lists the pools. {check}"
+        ),
+        Platform::Other => format!(
+            "Raise `maxPods` in the kubelet configuration of the node pool, or use larger nodes. {check}"
         ),
     }
 }

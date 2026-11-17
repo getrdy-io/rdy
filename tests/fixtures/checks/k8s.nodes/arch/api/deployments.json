@@ -2,7 +2,7 @@
   "request": {
     "method": "GET",
     "path": "/apis/apps/v1/namespaces/kube-system/deployments",
-    "query": "fieldSelector=metadata.name=cluster-autoscaler&limit=500"
+    "query": "limit=500"
   },
   "status": 200,
   "body": {
@@ -11,6 +11,16 @@
     "metadata": {
       "resourceVersion": "1000"
     },
-    "items": []
+    "items": [
+      {
+        "metadata": {
+          "name": "coredns",
+          "namespace": "kube-system",
+          "labels": {
+            "k8s-app": "kube-dns"
+          }
+        }
+      }
+    ]
   }
 }

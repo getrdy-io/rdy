@@ -57,8 +57,8 @@
             "kernelVersion": "5.10.0",
             "osImage": "Acme Linux",
             "containerRuntimeVersion": "containerd://acme-1",
-            "kubeletVersion": "v1.29.4-eks-abc1234",
-            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "kubeletVersion": "v1.29.4",
+            "kubeProxyVersion": "v1.29.4",
             "operatingSystem": "linux",
             "architecture": "amd64"
           },
@@ -115,8 +115,8 @@
             "kernelVersion": "5.10.0",
             "osImage": "Acme Linux",
             "containerRuntimeVersion": "containerd://acme-1",
-            "kubeletVersion": "v1.29.4-eks-abc1234",
-            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "kubeletVersion": "v1.29.4",
+            "kubeProxyVersion": "v1.29.4",
             "operatingSystem": "linux",
             "architecture": "amd64"
           },
@@ -173,8 +173,8 @@
             "kernelVersion": "5.10.0",
             "osImage": "Acme Linux",
             "containerRuntimeVersion": "containerd://acme-1",
-            "kubeletVersion": "v1.29.4-eks-abc1234",
-            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "kubeletVersion": "v1.29.4",
+            "kubeProxyVersion": "v1.29.4",
             "operatingSystem": "linux",
             "architecture": "amd64"
           },

@@ -445,7 +445,8 @@ const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
 
 /// The URLs the Kubernetes project lets every signed-in user `get` outside the role file: the rules of the
 /// ClusterRoles `system:discovery` and `system:public-info-viewer`, bound to the group
-/// `system:authenticated`. They are discovery, health and version documents, and hold no secret. The role
+/// `system:authenticated`. `/healthz/*`, `/livez/*`, `/readyz/*` and `/metrics` belong to
+/// `system:monitoring` only, so they are surprises here. They are discovery, health and version documents, and hold no secret. The role
 /// file has no `nonResourceURLs` rule of its own, so any other URL, any other verb and any wildcard verb
 /// is a grant the role file did not make.
 const NON_RESOURCE_DEFAULTS: &[&str] = &[
@@ -454,11 +455,8 @@ const NON_RESOURCE_DEFAULTS: &[&str] = &[
     "/apis",
     "/apis/*",
     "/healthz",
-    "/healthz/*",
     "/livez",
-    "/livez/*",
     "/readyz",
-    "/readyz/*",
     "/version",
     "/version/",
     "/openapi",
@@ -513,6 +511,10 @@ fn only_a_get_of_a_default_url_is_an_expected_non_resource_grant() {
         grant("get", "/logs/*"),
         grant("*", "/version"),
         grant("get", "/apis/*/extra"),
+        grant("get", "/healthz/*"),
+        grant("get", "/livez/*"),
+        grant("get", "/readyz/*"),
+        grant("get", "/metrics"),
     ];
     for surprise in surprises {
         assert_eq!(
