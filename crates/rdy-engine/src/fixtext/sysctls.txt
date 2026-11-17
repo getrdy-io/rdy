@@ -1,4 +1,5 @@
 # Kernel parameters that fix text may name (crates/rdy-engine/src/fixtext.rs).
 # One name per line, sorted by byte, no duplicates. A `{placeholder}` is written as in the fix text.
+fs.nr_open
 net.ipv4.ip_local_reserved_ports
 vm.max_map_count

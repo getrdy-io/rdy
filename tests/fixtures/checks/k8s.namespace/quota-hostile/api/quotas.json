@@ -1,0 +1,59 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/resourcequotas",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ResourceQuotaList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "ResourceQuota",
+        "metadata": {
+          "name": "q\u001b[2J`rm -rf /`\u202exxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "namespace": "acme-system"
+        },
+        "spec": {
+          "hard": {
+            "requests.cpu": "8"
+          }
+        },
+        "status": {
+          "hard": {
+            "requests.cpu": "8"
+          },
+          "used": {
+            "requests.cpu": "6"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "ResourceQuota",
+        "metadata": {
+          "name": "garbled",
+          "namespace": "acme-system"
+        },
+        "spec": {
+          "hard": {
+            "requests.memory": "lots"
+          }
+        },
+        "status": {
+          "hard": {
+            "requests.memory": "lots"
+          },
+          "used": {
+            "requests.memory": "\u001b[2J1Gi"
+          }
+        }
+      }
+    ]
+  }
+}

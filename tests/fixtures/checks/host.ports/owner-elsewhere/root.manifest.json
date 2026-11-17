@@ -1,0 +1,13 @@
+{
+  "symlinks": {
+    "proc/1/fd/0": "/dev/null",
+    "proc/1/fd/1": "/dev/null",
+    "proc/1/fd/2": "/dev/null",
+    "proc/1/fd/3": "socket:[100]",
+    "proc/640/fd/0": "/dev/null",
+    "proc/640/fd/1": "pipe:[3001]",
+    "proc/640/fd/3": "socket:[22000]",
+    "proc/640/fd/4": "socket:[22001]",
+    "proc/self/ns/net": "net:[4026531992]"
+  }
+}

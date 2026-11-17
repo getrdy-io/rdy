@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Check by hand as root: `ss -ltn` for TCP ports and `ss -lun` for UDP ports.",
+    "level": "warn",
+    "message": "rdy could not confirm that 6443/tcp is free: /proc/net/tcp could not be read (permission denied).",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "unverified",
+          "unverified": "/proc/net/tcp could not be read (permission denied)"
+        }
+      ],
+      "udp": []
+    },
+    "partial": {
+      "missing": [],
+      "note": "a socket table could not be read in full."
+    }
+  }
+}

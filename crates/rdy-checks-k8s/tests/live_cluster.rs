@@ -63,7 +63,9 @@ use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
-use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret};
+use k8s_openapi::api::core::v1::{
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret,
+};
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
@@ -398,6 +400,8 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "pods", ""),
     ("list", "", "persistentvolumeclaims", ""),
     ("list", "", "events", ""),
+    ("list", "", "resourcequotas", ""),
+    ("list", "", "limitranges", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -514,6 +518,19 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         &client.namespaced::<Event>("default").list(&events).await,
     );
     assert_served(
+        "resourcequotas",
+        false,
+        &client
+            .namespaced::<ResourceQuota>("default")
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "limitranges",
+        false,
+        &client.namespaced::<LimitRange>("default").list(&all).await,
+    );
+    assert_served(
         "storageclasses",
         false,
         &client.all::<StorageClass>().list(&all).await,
@@ -564,7 +581,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     // 2. The server itself says what the role can and cannot do. These are the allowed
     //    SelfSubjectAccessReview POSTs, so they pass the guard.
     let reviews = client.all::<SelfSubjectAccessReview>();
-    for ask in [
+    let must_allow = [
         ("list", "", "nodes", None, None),
         // The OpenShift rules cannot be exercised on kind (404), so the server's review stands in. A
         // typo in either rule fails here.
@@ -582,13 +599,15 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("version"),
         ),
-    ] {
+    ];
+    let allowed_count = must_allow.len();
+    for ask in must_allow {
         assert!(
             is_allowed(&reviews, ask).await,
             "the role must allow {ask:?}"
         );
     }
-    for ask in [
+    let must_not_allow = [
         ("get", "", "secrets", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
         ("create", "", "pods", Some("default"), None),
@@ -617,7 +636,9 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             None,
         ),
-    ] {
+    ];
+    let denied_count = must_not_allow.len();
+    for ask in must_not_allow {
         assert!(
             !is_allowed(&reviews, ask).await,
             "the role must not allow {ask:?}"
@@ -675,7 +696,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, 12 reads and posts, 16 reviews, two refusals.
+    // 4. One log entry per call: /version, the 12 `assert_served` reads of step 1 (add one here when a
+    //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
+    //    their tables), and two refusals.
     let log = run.action_log().actions;
-    assert_eq!(log.len(), 1 + 12 + 16 + 2, "{log:#?}");
+    let expected = 1 + 12 + rules_answers.len() + allowed_count + denied_count + 2;
+    assert_eq!(log.len(), expected, "{log:#?}");
 }

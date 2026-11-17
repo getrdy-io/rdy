@@ -1,0 +1,29 @@
+{
+  "entry": {
+    "expect": {
+      "net.bridge.bridge-nf-call-iptables": 1
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "net.bridge.bridge-nf-call-iptables": "1"
+      }
+    },
+    "fix": "The `br_netfilter` module provides it. Load it with `modprobe br_netfilter`, and at every boot with `echo br_netfilter | sudo tee /etc/modules-load.d/br_netfilter.conf`.",
+    "level": "fail",
+    "message": "`net.bridge.bridge-nf-call-iptables` does not exist on this machine.",
+    "notes": [],
+    "observed": {
+      "parameters": {
+        "net.bridge.bridge-nf-call-iptables": {
+          "live": null,
+          "persisted": null,
+          "state": "missing"
+        }
+      }
+    },
+    "partial": null
+  }
+}

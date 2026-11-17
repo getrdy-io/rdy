@@ -1,0 +1,12 @@
+schema = 1
+name = "nofile-above-nr-open"
+summary = "The spec asks for more open files than fs.nr_open allows"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

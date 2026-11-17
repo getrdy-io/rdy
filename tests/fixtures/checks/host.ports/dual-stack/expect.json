@@ -1,0 +1,61 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Port 6443/tcp is held by `etcd` (pid 950). Stop it with `systemctl stop etcd.service`, or change the product's port setting.",
+    "level": "fail",
+    "message": "Port 6443/tcp is held by `etcd` (pid 950).",
+    "notes": [
+      "A listener on [::] is counted as holding the IPv4 port too. rdy cannot see whether the socket is IPv6 only."
+    ],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 3,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "[::]",
+              "allowed": false,
+              "family": "ipv6",
+              "owner": {
+                "name": "etcd",
+                "pid": 950,
+                "unit": "etcd.service"
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

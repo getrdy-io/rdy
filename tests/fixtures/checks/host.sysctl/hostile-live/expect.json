@@ -1,0 +1,31 @@
+{
+  "entry": {
+    "expect": {
+      "net.ipv4.tcp_congestion_control": "cubic"
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "net.ipv4.tcp_congestion_control": "cubic"
+      }
+    },
+    "fix": "Persist `net.ipv4.tcp_congestion_control` with `echo 'net.ipv4.tcp_congestion_control = cubic' | sudo tee -a /etc/sysctl.d/99-rdy.conf`. Then run `sysctl --system` to apply the files. `sysctl -p` does not read `sysctl.d`.",
+    "level": "fail",
+    "message": "`net.ipv4.tcp_congestion_control` is bbr\\x1b[2J`touch x`, need cubic.",
+    "notes": [
+      "Read 0 sysctl configuration file(s), in boot order."
+    ],
+    "observed": {
+      "parameters": {
+        "net.ipv4.tcp_congestion_control": {
+          "live": "bbr\\x1b[2J`touch x`",
+          "persisted": null,
+          "state": "wrong_value"
+        }
+      }
+    },
+    "partial": null
+  }
+}

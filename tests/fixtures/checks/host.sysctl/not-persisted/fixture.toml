@@ -1,0 +1,12 @@
+schema = 1
+name = "not-persisted"
+summary = "The live value is right and no sysctl.d file sets it"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

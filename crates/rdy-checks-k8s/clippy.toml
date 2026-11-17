@@ -56,6 +56,12 @@ disallowed-types = [
     { path = "std::thread::Builder", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
     # First-party escapes: the watchdog and the live process count (PC-48).
     { path = "rdy_engine::watchdog::ProcessEffects", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    # askama prints a value without escaping it through these (M1-078). Only the marker on EmbeddedJson in rdy-engine's report/html/view.rs may.
+    { path = "askama::filters::Safe", reason = "prints a value without escaping; only the EmbeddedJson marker in report/html/view.rs may switch escaping off", allow-invalid = true },
+    { path = "askama::filters::Unsafe", reason = "wraps a value for the escaper; use askama's default escaping", allow-invalid = true },
+    { path = "askama::filters::MaybeSafe", reason = "marks filter output as maybe unescaped; escaping stays on", allow-invalid = true },
+    { path = "askama::filters::HtmlSafe", reason = "marks a type as printed without escaping; only EmbeddedJson in report/html/view.rs may impl it (held by scripts/check-html-escapes.sh)", allow-invalid = true },
+    { path = "askama::filters::HtmlSafeOutput", reason = "marks filter output as HTML safe; escaping stays on", allow-invalid = true },
 ]
 
 disallowed-methods = [
@@ -83,6 +89,14 @@ disallowed-methods = [
     { path = "clap::Parser::update_from", reason = "exits 2 on a usage error; use try_update_from and map the error (rdy_cli::run)", allow-invalid = true },
     { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit", allow-invalid = true },
     { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
+    # Colour is decided once, in `rdy_cli::style::use_color`, and anstream is only ever given the choice
+    # `Always` or `Never` (M1-086). These calls read the environment or the stream, or set a global
+    # choice, and so could make a second decision. `AutoStream::always` and `AutoStream::never` are fine.
+    { path = "anstream::AutoStream::auto", reason = "reads NO_COLOR and the stream; colour is decided once in rdy_cli::style::use_color", allow-invalid = true },
+    { path = "anstream::AutoStream::new", reason = "takes a ColorChoice that may be Auto; use AutoStream::always or AutoStream::never after use_color", allow-invalid = true },
+    { path = "anstream::stdout", reason = "chooses colour itself; stdout is data and is never coloured", allow-invalid = true },
+    { path = "anstream::stderr", reason = "chooses colour itself; use AutoStream::always or never after use_color", allow-invalid = true },
+    { path = "colorchoice::ColorChoice::write_global", reason = "sets a process-wide colour choice that anstream would read; colour is decided once in use_color", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
     # Process.
     { path = "std::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
@@ -226,6 +240,10 @@ disallowed-methods = [
     # rustls's `dangerous()` builders: only the TLS facade's recording verifier calls them (M1-092).
     { path = "rustls::ConfigBuilder::dangerous", reason = "builds a client that can skip certificate checks; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
     { path = "rustls::client::ClientConfig::dangerous", reason = "swaps the certificate verifier of a built client; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
+    # askama's functions behind the `safe`, `escape` and `e` filters. `escape("none")` turns escaping off (M1-078).
+    { path = "askama::filters::safe", reason = "prints a value without escaping it", allow-invalid = true },
+    { path = "askama::filters::escape", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
+    { path = "askama::filters::e", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
     # First-party escapes: the kube action-log entry (INV-14).
     { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]
