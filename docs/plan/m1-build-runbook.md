@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-54: M1 183 tickets, 405 h, 340.5 h core; M2 141 tickets, 484.75 h; all milestones 424 tickets,
-1403.25 h, 1338.75 h core.
+correction-55: M1 184 tickets, 406.5 h, 342 h core; M2 141 tickets, 484.75 h; all milestones 425 tickets,
+1404.75 h, 1340.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -266,6 +266,11 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   #80 and M1-107 to merge adds k8s.version and `api/` to `all-pass`. 07 D.7's `nothing_verified` sentence
   covers optional checks not run. New M2-138 to M2-141: the `delegated` outcome, `O_PATH` spec reads, the
   Windows `spec sign` pipe opens, the kind `rdy run` step and paging variant.
+- 55: new core M1-184: a test that the recording handshake refuses a server without the leaf's key, the
+  unknown-CA zero-bytes case, and the "no revocation check" note on net.tls_intercept and net.egress
+  results; M1-138 depends on it. 03 names the real OS roots source and says to pin the leaf or set
+  `forbid_interception` until M2-135. M1-073 moves back to week 14. The real-run proof of a spec `as:`
+  and the OpenShift grant text moves from M1-113 to M1-175.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -279,7 +284,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-184 and M2-142, and the next correction is 55 (49 is in #85).
+- The next ticket ids are M1-185 and M2-142, and the next correction is 56 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -448,6 +453,20 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     Its PR adds "backlog corrected 2026-11-17 (correction-54)" to its progress line.
   - #100 (M1-140): use the new 07 D.7 `nothing_verified` sentence (correction-54) in `view.rs`,
     `html_print.rs` and the golden.
+  - Follow-ups that correction-55 gave ids:
+    - M1-184: the handshake signature test on TLS 1.2 and 1.3, the unknown-CA zero-bytes case, and
+      `REVOCATION_NOTE` once per net.tls_intercept and net.egress result (M1-101 review SF-01, SF-02). A
+      0.1.0 gate. Build it after #74 (M1-096) and #91 (M1-100) merge.
+  - M1-101's PR (correction-55): SF-01's owner is M1-184, not M1-096, and SF-02 is an M1-138 dependency.
+    In the review, its progress line and 05 "TLS", write "from M1-184" for "from M1-096", and drop the
+    facade zero-bytes test from SF-02's fix (it exists in `probe/net/tls/tests.rs`).
+  - #91 (M1-100) and correction-55 both edit 03's net.tls_intercept Thresholds line. The second to merge
+    keeps #91's pin text and appends correction-55's "Until M2-135" sentence.
+  - M1-113 and M1-175 (correction-55): M1-113 implements `Cluster::read_only_as` and
+    `Cluster::is_openshift` with tests through the family holder; M1-175 proves in a run on the kube mock
+    that a spec `as:` reaches k8s.rbac and an OpenShift mock shows the grant text (M1-113 code review).
+  - M1-116 (correction-55): the network page says to pin the leaf or set `forbid_interception` to block
+    until M2-135 (M1-101 review AR-01).
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds

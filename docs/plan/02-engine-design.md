@@ -597,7 +597,7 @@ tests policy.
   clock.
 - System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
   facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
-  store. No revocation check, and the report says so.
+  store. No revocation check, and from M1-184 the report says so.
 - PAC is reported, never fetched, in M1.
 - UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
   in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
