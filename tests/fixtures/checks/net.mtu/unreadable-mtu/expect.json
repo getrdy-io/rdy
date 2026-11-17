@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1400
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1400,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": "Check that /sys is mounted and that the user who runs rdy may read /sys/class/net.",
+    "level": "warn",
+    "message": "The MTU of `eth0`, the default route interface, could not be read, so it was not checked.",
+    "notes": [
+      "The mtu of `eth0` could not be read: permission denied."
+    ],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "eth0",
+      "default_mtu": null,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": null,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

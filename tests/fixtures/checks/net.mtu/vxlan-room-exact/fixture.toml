@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-vxlan-room-exact"
+summary = "eth0 at 1450 leaves exactly 1400 after VXLAN, and the spec asks for 1400"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false
