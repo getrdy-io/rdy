@@ -1,0 +1,8 @@
+kernel/fs/overlayfs/overlay.ko.xz:
+kernel/net/bridge/br_netfilter.ko.xz: kernel/net/bridge/bridge.ko.xz kernel/net/llc/llc.ko.xz kernel/net/netfilter/nf_conntrack.ko.xz
+kernel/net/bridge/bridge.ko.xz: kernel/net/llc/llc.ko.xz
+kernel/net/llc/llc.ko.xz:
+kernel/net/netfilter/nf_conntrack.ko.xz: kernel/net/netfilter/nf_defrag_ipv6.ko.xz
+kernel/net/netfilter/nf_defrag_ipv6.ko.xz:
+kernel/net/netfilter/xt_TCPMSS.ko.xz:
+kernel/net/netfilter/xt_tcpmss.ko.xz:

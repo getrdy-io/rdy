@@ -208,7 +208,7 @@ fn build_refuses_an_id_the_family_does_not_have() {
 #[test]
 fn these_ids_are_still_stubs_and_the_planner_skips_them() {
     // Delete an id here in the ticket that writes its real check.
-    assert_eq!(HostFamily::stub_ids(), ["host.time_sync", "host.kernel"]);
+    assert_eq!(HostFamily::stub_ids(), ["host.time_sync"]);
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
@@ -265,6 +265,46 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_kernel_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.kernel",
+        "min": "5.4",
+        "distro_min": {"rhel": "4.18.0-305"},
+        "modules": ["overlay", "br_netfilter"],
+        "btf": true
+    }))
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.kernel");
+    assert_eq!(built.check.info().summary, "Kernel version and modules");
+    assert!(!HostFamily::stub_ids().contains(&"host.kernel"));
+    // A stub reports an error on Linux. Only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.kernel/pass",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.kernel",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
 }
 
 #[test]
