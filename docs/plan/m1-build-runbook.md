@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-53: M1 183 tickets, 405 h, 340.5 h core; M2 137 tickets, 478 h; all milestones 420 tickets,
-1396.5 h, 1332 h core.
+correction-53: M1 183 tickets, 405 h, 340.5 h core; M2 137 tickets, 478.25 h; all milestones 420 tickets,
+1396.75 h, 1332.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -423,12 +423,14 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - #91 (M1-100) and #70 (M1-179): add "backlog corrected 2026-11-17 (correction-52)" to their progress
     lines. The second to merge deletes the net.tls_intercept `PENDING` row.
   - Follow-ups that correction-53 gave ids:
-    - M1-183: every spec read through `read_public`, and `spec sign` refuses an expired spec (#96 SR-01,
-      SR-02). A 0.1.0 gate.
+    - M1-183: every spec read through `read_public`, and `spec sign` refuses an expired spec (#96 MF-01).
+      A 0.1.0 gate.
     - M2-137: host.container_runtime adds `ProxyUrl::secrets()` to the known-secret set (#92 security F8).
-  - M2-032 (correction-53): the `signed_at` more than 24 h in the future warning (#96 SR-03).
+  - M2-032 (correction-53): the `signed_at` more than 24 h in the future warning (#96 SF-01).
   - M1-134 (correction-53): the sign and verify page and #85's unsigned page say to compare the full
-    fingerprint from `rdy verify --key`, never the short form in the banner (#96 SR-04).
+    fingerprint from `rdy verify --key`, never the short form in the banner (#96 SF-02).
+  - M2-107 (correction-53, +0.25 h): `check_note` also refuses the code points `is_invisible` flags in
+    trust-store notes (#96 N-01).
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,

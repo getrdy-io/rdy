@@ -547,14 +547,15 @@ the corrections log of `11-backlog.md`.
   Correction-49 is PR #85. The spec reader of `rdy run`, `rdy verify` and `rdy spec lint` stats the path,
   then opens it again with a blocking open and never checks the handle, so a FIFO swapped in hangs the
   command before the watchdog arms and a swapped device is opened. `rdy spec sign` opens before it checks,
-  so a FIFO hangs it outright. That breaks 05 INV-02 (SR-01). `spec sign` lints with `lint_checks` only, so
-  an expired spec is signed, then fails the self-check with exit 70 (SR-02). New core M1-183 (2.5 h) reads
+  so a FIFO hangs it outright. That breaks 05 INV-02 (MF-01). `spec sign` lints with `lint_checks` only, so
+  an expired spec is signed, then fails the self-check with exit 70 (MF-01). New core M1-183 (2.5 h) reads
   every spec through `signing::files::read_public`, proves a direct FIFO, a swapped FIFO and `/dev/zero`
-  exit 64 within 1 s for run, verify and sign, refuses an expired spec in `spec sign` with exit 64 before
-  any password prompt, and records in 05 Surface 2 that `read_public` still opens a device swapped in
+  exit 64 within 1 s for run, verify and sign, refuses an expired spec in `spec sign` with exit 64 and
+  `spec_expired` before any password prompt, keeps today's oversize results, and records in 05 Surface 2 that `read_public` still opens a device swapped in
   during the gap. M1-138 depends on it. 01 section 4.2's future `signed_at` warning was never built; it
-  moves to M2-032 (0.5 h more) and 01 says "from M2-032" (SR-03). M1-134's page and M1-133's unsigned page
+  moves to M2-032 (0.5 h more) and 01 says "from M2-032" (SF-01). M1-134's page and M1-133's unsigned page
   say to compare the full fingerprint from `rdy verify --key`, never the 48-bit short form in the banner
-  (SR-04); M1-134 depends on M1-133. New M2-137 (1.5 h) adds the container runtime proxy password to the
-  known-secret set (PR #92 F8, INV-15). M1-133 moves to week 16 and M1-168 to week 17, so no week holds
+  (SF-02); M1-134 depends on M1-133. New M2-137 (1.5 h) adds the container runtime proxy password to the
+  known-secret set (PR #92 F8, INV-15). M2-107 (0.25 h more) also refuses invisible code points in
+  trust-store notes (N-01). M1-133 moves to week 16 and M1-168 to week 17, so no week holds
   more than 15 h. Only 01 prose changed; no test-pinned text changed.
