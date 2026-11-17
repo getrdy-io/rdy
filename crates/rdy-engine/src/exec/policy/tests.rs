@@ -5,6 +5,20 @@ use super::*;
 
 const SECOND: Duration = Duration::from_secs(1);
 
+#[test]
+fn at_most_lowers_a_limit_and_never_raises_one() {
+    let five = Duration::from_secs(5);
+    let three = Duration::from_secs(3);
+    let base = Cmd::new("chronyc", five);
+    assert_eq!(base.clone().at_most(three).time_limit(), three);
+    assert_eq!(base.clone().at_most(five).time_limit(), five);
+    assert_eq!(
+        base.clone().at_most(Duration::from_secs(60)).time_limit(),
+        five
+    );
+    assert_eq!(base.at_most(Duration::ZERO).time_limit(), Duration::ZERO);
+}
+
 fn cmd(program: &'static str) -> Cmd {
     Cmd::new(program, SECOND)
 }

@@ -1,0 +1,12 @@
+schema = 1
+name = "silent-server-and-hung-tools"
+summary = "The time server is silent and both tools hang; the budget runs out and the check still answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false
