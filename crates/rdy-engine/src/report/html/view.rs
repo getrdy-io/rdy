@@ -126,6 +126,8 @@ pub(super) struct CheckView {
     pub found: Vec<Fact>,
     /// What the check wanted (`expected`).
     pub needed: Vec<Fact>,
+    /// Fact lines the page size cap left out of this check (07 D.4). The embedded JSON has them.
+    pub facts_more: usize,
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
     pub partial: Option<PartialView>,
@@ -170,9 +172,6 @@ pub(super) struct View {
     pub user: Option<String>,
     pub run_as: &'static str,
     pub banners: Vec<Banner>,
-    /// The height of the banners in print, in rem: the banners are fixed there, and the body leaves this
-    /// much room at the top. `None` with no banner.
-    pub banner_height: Option<u32>,
     /// `https://getrdy.io/?ref=report&product=<product>`: the only link out, with the product encoded.
     pub product_link: String,
     pub sections: Vec<Section>,
@@ -187,7 +186,42 @@ pub(super) struct View {
     pub json_sha256: String,
 }
 
+/// The Found and Needed lists of every check, in page order: what the size cap starts from.
+pub(super) type FactLists = Vec<(Vec<Fact>, Vec<Fact>)>;
+
 impl View {
+    /// A copy of every check's Found and Needed lists.
+    pub(super) fn fact_lists(&self) -> FactLists {
+        self.sections
+            .iter()
+            .flat_map(|section| &section.checks)
+            .map(|check| (check.found.clone(), check.needed.clone()))
+            .collect()
+    }
+
+    /// Keeps the first `keep` fact lines of `all` (counting Found, then Needed, check by check) and
+    /// counts the rest on the check as left out. This is how the page stays under its size cap when the
+    /// action rows are gone and it is still over (07 D.4).
+    pub(super) fn keep_fact_lines(&mut self, all: &FactLists, keep: usize) {
+        let mut budget = keep;
+        let checks = self
+            .sections
+            .iter_mut()
+            .flat_map(|section| section.checks.iter_mut());
+        for (check, (found, needed)) in checks.zip(all) {
+            let before: usize = found.iter().chain(needed).map(|f| f.lines.len()).sum();
+            check.found = take_lines(found, &mut budget);
+            check.needed = take_lines(needed, &mut budget);
+            let after: usize = check
+                .found
+                .iter()
+                .chain(&check.needed)
+                .map(|f| f.lines.len())
+                .sum();
+            check.facts_more = before - after;
+        }
+    }
+
     /// Builds the page for `report`. The verdict and the counts come from the check results through the
     /// same rule as the terminal, never from the stored `verdict`; the sections come from
     /// [`group_by_bucket`], so the HTML, the terminal and the portal share one order (01 section 5.2).
@@ -233,12 +267,11 @@ impl View {
             } else {
                 "not root"
             },
-            banner_height: banner_height(&banners),
             product_link: product_link(&report.spec.product),
             banners,
             sections: group_by_bucket(&report.checks)
                 .iter()
-                .map(|group| section(report, group))
+                .map(|group| section(report, &on_page, group))
                 .collect(),
             capabilities: report
                 .capabilities
@@ -256,6 +289,23 @@ impl View {
             json_sha256,
         })
     }
+}
+
+/// The first lines of `facts` that fit in `budget`, which is used up as they are taken.
+fn take_lines(facts: &[Fact], budget: &mut usize) -> Vec<Fact> {
+    let mut out = Vec::new();
+    for fact in facts {
+        let take = fact.lines.len().min(*budget);
+        if take == 0 {
+            break;
+        }
+        *budget -= take;
+        out.push(Fact {
+            label: fact.label.clone(),
+            lines: fact.lines[..take].to_vec(),
+        });
+    }
+    out
 }
 
 /// The embedded result, printed raw. It is the one value in the page that skips askama's escaping, and
@@ -298,29 +348,6 @@ fn product_link(product: &str) -> String {
         }
     }
     link
-}
-
-/// How much room the fixed banners need in print, in rem. Each line counts as many lines as it wraps to
-/// at about 90 characters, and each banner adds one rem for its padding and border. It errs high: spare
-/// room at the top of page one is better than a banner over the verdict.
-fn banner_height(banners: &[Banner]) -> Option<u32> {
-    if banners.is_empty() {
-        return None;
-    }
-    let lines = |chars: usize| u32::try_from(chars.div_ceil(90).max(1)).unwrap_or(u32::MAX);
-    Some(
-        banners
-            .iter()
-            .map(|banner| {
-                1 + lines(banner.title.chars().count())
-                    + banner
-                        .lines
-                        .iter()
-                        .map(|line| lines(plain(&line.spans).chars().count()))
-                        .sum::<u32>()
-            })
-            .sum(),
-    )
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).
@@ -417,7 +444,7 @@ pub(super) fn short_fingerprint(fingerprint: &str) -> String {
     format!("{head}...{tail}")
 }
 
-fn section(report: &Report, group: &BucketGroup<'_>) -> Section {
+fn section(report: &Report, on_page: &Report, group: &BucketGroup<'_>) -> Section {
     let (id, title, nav_title) = match group.bucket {
         Bucket::Blocker => ("blocks", "Blocks", "Blocks"),
         Bucket::Warning => (
@@ -445,12 +472,28 @@ fn section(report: &Report, group: &BucketGroup<'_>) -> Section {
         checks: group
             .checks
             .iter()
-            .map(|check| check_view(report, check))
+            .map(|check| check_view(report, on_page, check))
             .collect(),
     }
 }
 
-fn check_view(report: &Report, check: &CheckResult) -> CheckView {
+/// The check of `on_page`, the report the JSON holds, that is `check` of `report`. Found and Needed come
+/// from it, never from `check`: the JSON writer cuts text, nesting and whole maps, and the page must not
+/// show what the embedded JSON dropped (SEC-81).
+fn on_page_check<'a>(
+    on_page: &'a Report,
+    index: usize,
+    check: &CheckResult,
+) -> Option<&'a CheckResult> {
+    on_page
+        .checks
+        .get(index)
+        .filter(|candidate| candidate.key == check.key && candidate.id == check.id)
+}
+
+fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckView {
+    let index = index_of(report, check);
+    let shown = on_page_check(on_page, index, check);
     let (status_word, status_class) = match check.status {
         Status::Pass => ("PASS", "status-pass"),
         Status::Warn => ("WARN", "status-warn"),
@@ -462,7 +505,7 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         _ => ("NOT RUN", "status-skip"),
     };
     CheckView {
-        index: index_of(report, check),
+        index,
         status_word,
         status_class,
         id: check.id.clone(),
@@ -471,8 +514,9 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         not_run_reason: not_run_reason(check),
         fix: fix_view(report, check),
         builtin_fix: check.builtin_fix.clone(),
-        found: facts(check.observed.as_ref()),
-        needed: facts(check.expected.as_ref()),
+        found: facts(shown.and_then(|c| c.observed.as_ref())),
+        needed: facts(shown.and_then(|c| c.expected.as_ref())),
+        facts_more: 0,
         requires: check
             .needs
             .iter()

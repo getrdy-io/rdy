@@ -141,12 +141,10 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     --banner-fg: #8a1c14;
     --banner-bg: #ffffff;
   }
-  body { background: #ffffff; color: #000000; padding-top: var(--banner-height, 1rem); }
-  /* The banners print on every page, fixed at the top. The body leaves exactly their height (the same
-     variable, set on `body`) so they never cover the first lines. */
-  .banners { position: fixed; top: 0; left: 0; right: 0; height: var(--banner-height); background: #ffffff; }
-  .banner { margin: 0 auto; padding: 0.25rem 0.5rem; border-width: 0.125rem; }
-  .banner p { margin: 0; font-size: 0.75rem; line-height: 1.25; }
+  body { background: #ffffff; color: #000000; }
+  /* The banners stay in the flow in print, so they print once, at the top of page one, and cover nothing.
+     A fixed banner that repeats on every page was tried: headless Chrome puts a fixed box with a negative
+     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. */
   .check, tr { break-inside: avoid; }
   #passed, #capabilities { break-before: page; }
 }
@@ -202,8 +200,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="label">Found</p>
 <dl>
 <dt><bdi>Endpoints</bdi></dt>
-<dd><bdi>Connect: 38 ms; Outcome: ok; Target: registry.acme.example:443; Tls: 61 ms</bdi></dd>
-<dd><bdi>Connect: 37 ms; Outcome: proxy_403; Target: license.acme.example:443; Tls: none</bdi></dd>
+<dd><bdi>Connect</bdi>: <bdi>38 ms</bdi>; <bdi>Outcome</bdi>: <bdi>ok</bdi>; <bdi>Target</bdi>: <bdi>registry.acme.example:443</bdi>; <bdi>TLS</bdi>: <bdi>61 ms</bdi></dd>
+<dd><bdi>Connect</bdi>: <bdi>37 ms</bdi>; <bdi>Outcome</bdi>: <bdi>proxy_403</bdi>; <bdi>Target</bdi>: <bdi>license.acme.example:443</bdi>; <bdi>TLS</bdi>: <bdi>none</bdi></dd>
 <dt><bdi>Proxy</bdi></dt>
 <dd><bdi>http://proxy.corp.example:3128</bdi></dd>
 <dt><bdi>Via</bdi></dt>
@@ -253,7 +251,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dd><bdi>60 GiB</bdi></dd>
 <dt><bdi>Free inodes</bdi></dt>
 <dd><bdi>31205120</bdi></dd>
-<dt><bdi>Fstype</bdi></dt>
+<dt><bdi>Filesystem type</bdi></dt>
 <dd><bdi>xfs</bdi></dd>
 <dt><bdi>Mount</bdi></dt>
 <dd><bdi>/</bdi></dd>
@@ -287,8 +285,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dt><bdi>Cores</bdi></dt>
 <dd><bdi>8</bdi></dd>
 <dt><bdi>Labels</bdi></dt>
-<dd><bdi>X: 3, 2, 1</bdi></dd>
-<dd><bdi>Y: 1</bdi></dd>
+<dd><bdi>X</bdi>: <bdi>3</bdi>, <bdi>2</bdi>, <bdi>1</bdi></dd>
+<dd><bdi>Y</bdi>: <bdi>1</bdi></dd>
 <dt><bdi>Zone</bdi></dt>
 <dd><bdi>b</bdi></dd>
 </dl>
@@ -334,7 +332,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dd><bdi>ReadWriteOnce</bdi></dd>
 <dt><bdi>Binding</bdi></dt>
 <dd><bdi>WaitForFirstConsumer</bdi></dd>
-<dt><bdi>Csi driver present</bdi></dt>
+<dt><bdi>CSI driver present</bdi></dt>
 <dd><bdi>yes</bdi></dd>
 <dt><bdi>Default class</bdi></dt>
 <dd><bdi>gp3</bdi></dd>

@@ -89,5 +89,24 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 
 [[allow]]
 rule = "host"
+path = "tests/fixtures/reports/golden/five-sections-exec-plugin.html"
 value = "getrdy.io"
-reason = "The product's own site: the HTML report goldens hold the footer link on purpose (07 D.4); the lint tests a report page, not a host a test contacts"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-7.2.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-hostile-host.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/reports/golden/not-ready-no-blocks.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"

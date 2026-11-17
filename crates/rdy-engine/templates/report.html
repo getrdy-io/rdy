@@ -10,10 +10,7 @@
 {%- include "report.css" %}
 </style>
 </head>
-<body{% if let Some(height) = banner_height %} style="--banner-height: {{ height }}rem"{% endif %}>
-{%- if !banners.is_empty() %}
-<div class="banners">
-{%- endif %}
+<body>
 {%- for banner in banners %}
 <div class="banner">
 <p class="banner-title">{{ banner.title }}</p>
@@ -22,9 +19,6 @@
 {%- endfor %}
 </div>
 {%- endfor %}
-{%- if !banners.is_empty() %}
-</div>
-{%- endif %}
 <header>
 <h1><span class="visually-hidden">Verdict: </span><span class="{{ verdict_class }}">{{ verdict_word }}</span></h1>
 <p>For <bdi>{{ product }}</bdi>{% if let Some(version) = version %} <bdi>{{ version }}</bdi>{% endif %}{% if let Some(serial) = serial %}, revision {{ serial }}{% endif %}, on <bdi>{{ hostname }}</bdi></p>
@@ -74,7 +68,7 @@
 {%- for fact in check.found %}
 <dt><bdi>{{ fact.label }}</bdi></dt>
 {%- for line in fact.lines %}
-<dd><bdi>{{ line }}</bdi></dd>
+<dd>{% for part in line %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</dd>
 {%- endfor %}
 {%- endfor %}
 </dl>
@@ -87,11 +81,14 @@
 {%- for fact in check.needed %}
 <dt><bdi>{{ fact.label }}</bdi></dt>
 {%- for line in fact.lines %}
-<dd><bdi>{{ line }}</bdi></dd>
+<dd>{% for part in line %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</dd>
 {%- endfor %}
 {%- endfor %}
 </dl>
 </div>
+{%- endif %}
+{%- if check.facts_more > 0 %}
+<p class="muted">{{ check.facts_more }} more {% if check.facts_more == 1 %}line is{% else %}lines are{% endif %} in the embedded JSON.</p>
 {%- endif %}
 {%- for need in check.requires %}
 <p>Requires: {% for part in need %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>

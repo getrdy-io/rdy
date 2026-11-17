@@ -42,10 +42,12 @@
 //! 5 MiB: past that, rows of the table are cut and the checks and the JSON never are.
 //!
 //! **Found, Needed and the footer (M1-081).** Each check lists what it saw and what it needed, from
-//! `observed` and `expected`: keys as words, `_bytes` as sizes, `_ms` as milliseconds, `_percent` with a
-//! percent sign, a list one line per item, in key order (sorted by the page, so the order does not depend on a JSON feature). The footer holds the one link out, with
-//! `ref=report` and the percent-encoded product and `rel="noopener noreferrer"`, and the link to the
-//! source. In print the banners are fixed at the top and the body leaves their height.
+//! `observed` and `expected` of the report the JSON holds, so the page never shows what the JSON writer
+//! cut. Keys become words, `_bytes` becomes a size, `_ms` milliseconds and `_percent` a percent, and a
+//! list is one line per item, sorted by key so the order does not depend on a JSON feature. Past the
+//! page cap, and after the action rows, lines are cut and each check says how many. The footer holds the
+//! one link out, with `ref=report` and the percent-encoded product and `rel="noopener noreferrer"`, and
+//! the link to the source. In print the banners stay in the flow, so they print once and cover nothing.
 
 use crate::redact::RedactedReport;
 use crate::report::JsonError;
@@ -93,7 +95,8 @@ pub fn render_html(report: &RedactedReport) -> Result<String, HtmlError> {
 }
 
 /// Renders `view`. Over `max` bytes, the action table is cut to the most rows that fit and the page is
-/// rendered again. The checks and the embedded JSON are never cut (07 D.4).
+/// rendered again. If it is still over, Found and Needed lines are cut to the most that fit. The checks
+/// themselves and the embedded JSON are never cut (07 D.4).
 fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
     let page = view.render().map_err(|_| HtmlError::Render)?;
     if page.len() <= max {
@@ -113,7 +116,30 @@ fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
         }
     }
     view.actions.keep_first(&all, fits);
-    let page = view.render().map_err(|_| HtmlError::Render)?;
+    let mut page = view.render().map_err(|_| HtmlError::Render)?;
+    if page.len() > max {
+        // Still over with no rows left: cut Found and Needed lines, from the last check backwards in
+        // effect, until the page fits. Each check that lost lines says how many (07 D.4).
+        let all = view.fact_lists();
+        let total: usize = all
+            .iter()
+            .flat_map(|(found, needed)| found.iter().chain(needed))
+            .map(|fact| fact.lines.len())
+            .sum();
+        let (mut fits, mut over) = (0, total);
+        while fits < over {
+            let middle = fits + (over - fits).div_ceil(2);
+            view.keep_fact_lines(&all, middle);
+            let size = view.render().map_err(|_| HtmlError::Render)?.len();
+            if size <= max {
+                fits = middle;
+            } else {
+                over = middle - 1;
+            }
+        }
+        view.keep_fact_lines(&all, fits);
+        page = view.render().map_err(|_| HtmlError::Render)?;
+    }
     // With no rows left the page is the checks plus the embedded JSON. The JSON is at most 2 MiB and the
     // checks are at most 256 results with the same bounded text, so this holds for the real cap. A smaller
     // `max` (the tests) can be below that floor.

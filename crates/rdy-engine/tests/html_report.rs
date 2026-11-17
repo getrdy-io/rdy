@@ -425,6 +425,27 @@ fn canaries_never_reach_the_page() -> TestResult {
     for canary in CANARIES {
         assert!(!html.contains(canary), "{canary} reached the page");
     }
+    // The planted `observed` fields are shown, each with a marker where its secret was (M1-081).
+    let head = at(&html, "<span class=\"id\"><bdi>host.cpu</bdi></span>")?;
+    let list = &html[head..head + html[head..].find("</article>").ok_or("no end")?];
+    let found = &list[at(list, "<p class=\"label\">Found</p>")?..];
+    for (name, line) in [
+        ("env", "<bdi>Value</bdi>: <bdi>[REDACTED:secret_by_key:"),
+        // The writer cuts nesting past three levels, so the page shows the cut, as the JSON does.
+        ("kubeconfig", "<bdi>Users</bdi>: <bdi>[truncated]</bdi>"),
+        (
+            "kubeconfig_text",
+            "    token: [REDACTED:kubeconfig_credential:",
+        ),
+        ("stdout", "Authorization: Bearer [REDACTED:auth_header:"),
+        (
+            "cmdline",
+            "<dd><bdi>--token</bdi></dd>\n<dd><bdi>[REDACTED:",
+        ),
+    ] {
+        assert!(found.contains(line), "{name}: {line:?} is not in {found}");
+    }
+    assert!(found.matches("[REDACTED:").count() >= 4, "{found}");
     // The planted fields are still shown, with the secret replaced, so the test is not passing because
     // the page left the fields out.
     assert!(html.contains("web-01 password="));

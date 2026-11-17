@@ -64,7 +64,10 @@ fn bytes_ms_and_percent_print_as_sizes_milliseconds_and_percents() -> TestResult
     assert!(!memory.contains("total_bytes"));
 
     let egress = article(&html, "net.egress")?;
-    assert!(egress.contains("Connect: 38 ms"), "{egress}");
+    assert!(
+        egress.contains("<bdi>Connect</bdi>: <bdi>38 ms</bdi>"),
+        "{egress}"
+    );
     assert!(!egress.contains("connect_ms"));
 
     let cpu = article(&html, "host.cpu")?;
@@ -147,39 +150,22 @@ fn a_hostile_product_cannot_add_a_parameter_or_markup_to_the_link() -> TestResul
     Ok(())
 }
 
+/// The banners stay in the flow in print: no fixed box can cover the first lines of a later page. A
+/// fixed banner was tried and does not print right (see the CSS comment).
 #[test]
-fn print_leaves_room_for_the_fixed_banners() -> TestResult {
-    // An unsigned spec has one banner, an incomplete run adds a second.
+fn the_banners_stay_in_the_flow_in_print() -> TestResult {
     let mut doc = sample()?;
     doc["signature"] = json!({"state": "unsigned"});
     doc["complete"] = json!(false);
     let html = html_of(doc)?;
-
-    let banners = between(&html, "<div class=\"banners\">", "<header>")?;
-    assert_eq!(banners.matches("<div class=\"banner\">").count(), 2);
+    assert_eq!(html.matches("<div class=\"banner\">").count(), 2);
     let style = html.find("<style>").ok_or("no style")?;
     let css = &html[style..html.find("</style>").ok_or("no end of style")?];
     let print = &css[css.find("@media print {").ok_or("no print block")?..];
-    // The banner container is fixed at the top and the body pads by the same variable.
-    assert!(
-        print.contains(".banners { position: fixed; top: 0;"),
-        "{print}"
-    );
-    assert!(print.contains("height: var(--banner-height);"));
-    assert!(print.contains("padding-top: var(--banner-height, 1rem);"));
-    // The variable is set on `body` and holds at least a rem for each line the banners show.
-    let set = html
-        .split("<body style=\"--banner-height: ")
-        .nth(1)
-        .and_then(|rest| rest.split("rem\">").next())
-        .ok_or("the body does not set the banner height")?;
-    let rem: usize = set.parse()?;
-    let lines = banners.matches("<p").count();
-    assert!(rem >= lines + 2, "{rem} rem for {lines} lines");
-
-    // No banner, no fixed container and no variable.
-    let plain = html_of(sample()?)?;
-    assert!(!plain.contains("class=\"banners\"") && !plain.contains("--banner-height: "));
+    assert!(!css.contains("position: fixed"), "{css}");
+    assert!(!css.contains("@page"), "{css}");
+    assert!(!print.contains("padding-top"), "{print}");
+    assert!(!html.contains("--banner-height"));
     Ok(())
 }
 
@@ -212,7 +198,7 @@ fn canaries_planted_in_observed_and_expected_render_as_redacted_text() -> TestRe
         "cmdline": ["psql", "--password", "canary-found-argv-3"],
         "log": "Authorization: Bearer canary-found-hdr-4\nok",
         "note": "token=canary-found-text-5",
-        "kubeconfig": {"users": [{"name": "synthetic", "user": {"token": "canary-found-kube-6"}}]},
+        "kubeconfig": {"token": "canary-found-kube-6"},
         "arch": "x86_64",
     });
     doc["checks"][0]["expected"] = json!({
@@ -241,17 +227,46 @@ fn canaries_planted_in_observed_and_expected_render_as_redacted_text() -> TestRe
     let needed = between(cpu, "<p class=\"label\">Needed</p>", "</dl>")?;
     assert!(found.contains("<dd><bdi>x86_64</bdi></dd>"), "{found}");
     assert!(found.contains("/home/synthetic"), "{found}");
-    assert!(found.contains("<bdi>psql</bdi>"), "{found}");
     assert!(needed.contains("<dd><bdi>8</bdi></dd>"), "{needed}");
-    assert!(found.contains("<dt><bdi>Api password</bdi></dt>\n<dd><bdi>[REDACTED:"));
-    assert!(needed.contains("<dt><bdi>Client secret</bdi></dt>\n<dd><bdi>[REDACTED:"));
-    assert!(needed.contains("<dd><bdi>--token</bdi></dd>\n<dd><bdi>[REDACTED:"));
-    assert!(found.contains("<dd><bdi>--password</bdi></dd>\n<dd><bdi>[REDACTED:"));
+    // Each marker is where its canary was.
+    for (list, line) in [
+        (
+            found,
+            "<dt><bdi>API password</bdi></dt>\n<dd><bdi>[REDACTED:",
+        ),
+        (found, "<bdi>Value</bdi>: <bdi>[REDACTED:"),
+        (found, "<dd><bdi>--password</bdi></dd>\n<dd><bdi>[REDACTED:"),
+        (found, "<bdi>Token</bdi>: <bdi>[REDACTED:"),
+        (
+            found,
+            "<dt><bdi>Log</bdi></dt>\n<dd><bdi>Authorization: Bearer [REDACTED:",
+        ),
+        (found, "<dt><bdi>Note</bdi></dt>\n<dd><bdi>token=[REDACTED:"),
+        (
+            needed,
+            "<dt><bdi>Client secret</bdi></dt>\n<dd><bdi>[REDACTED:",
+        ),
+        (needed, "<dd><bdi>--token</bdi></dd>\n<dd><bdi>[REDACTED:"),
+    ] {
+        assert!(list.contains(line), "{line:?} is not in {list}");
+    }
     // One marker at least for each canary.
-    let markers = found.matches("[REDACTED:").count() + needed.matches("[REDACTED:").count();
+    let all = found.matches("[REDACTED:").count() + needed.matches("[REDACTED:").count();
+    assert!(all >= CANARIES.len(), "{all} markers in {found} {needed}");
+    Ok(())
+}
+
+/// A bidi control in a key or a value stays inside its own `<bdi>` (07 D.7).
+#[test]
+fn a_bidi_control_in_a_key_or_a_value_stays_in_its_own_isolate() -> TestResult {
+    let mut doc = sample()?;
+    doc["checks"][0]["observed"] = json!({"x\u{2069}\u{202e}": "y\u{2069}\u{202e}"});
+    let html = html_of(doc)?;
+    let cpu = article(&html, "host.cpu")?;
     assert!(
-        markers >= CANARIES.len(),
-        "{markers} markers in {found} {needed}"
+        cpu.contains(
+            "<dt><bdi>X\u{2069}\u{202e}</bdi></dt>\n<dd><bdi>y\u{2069}\u{202e}</bdi></dd>"
+        )
     );
     Ok(())
 }
