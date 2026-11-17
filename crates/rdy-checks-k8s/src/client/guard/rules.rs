@@ -134,7 +134,7 @@ pub enum FieldSelector {
 impl FieldSelector {
     /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
     /// `labelSelector` key) meet the requirement.
-    fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+    pub(super) fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
         if let Self::LabelEquals(key) = self {
             // A set expression (`app in (a,key=x)`) can hide a term after a comma: refuse any `(`.
             if labels.is_some_and(|text| text.contains('(')) {

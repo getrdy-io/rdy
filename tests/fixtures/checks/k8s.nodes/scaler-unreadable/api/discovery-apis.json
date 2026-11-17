@@ -1,12 +1,7 @@
 {
   "request": {
     "method": "GET",
-<<<<<<<< HEAD:tests/fixtures/checks/k8s.nodes/scaler-unreadable/api/discovery-apis.json
     "path": "/apis"
-========
-    "path": "/api/v1/namespaces/acme-hooks/services",
-    "query": "fieldSelector=metadata.name=hooks&limit=2"
->>>>>>>> origin/m1/100-tls-intercept-evidence:tests/fixtures/checks/k8s.admission/webhook-services-forbidden/api/service-acme-hooks-hooks.json
   },
   "status": 403,
   "body": {
@@ -14,11 +9,7 @@
     "apiVersion": "v1",
     "metadata": {},
     "status": "Failure",
-<<<<<<<< HEAD:tests/fixtures/checks/k8s.nodes/scaler-unreadable/api/discovery-apis.json
     "message": "forbidden: User \"acme-reader\" cannot get path \"/apis\"",
-========
-    "message": "services is forbidden: User \"acme-reader\" cannot list resource \"services\" at the cluster scope",
->>>>>>>> origin/m1/100-tls-intercept-evidence:tests/fixtures/checks/k8s.admission/webhook-services-forbidden/api/service-acme-hooks-hooks.json
     "reason": "Forbidden",
     "details": {},
     "code": 403

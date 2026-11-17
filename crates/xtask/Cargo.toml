@@ -27,6 +27,8 @@ rdy = { path = "../rdy-cli", version = "0.1.0-alpha.0" }
 # A guard, not a saving: `rdy` turns `runtime` on today, so this changes nothing yet. xtask
 # reads only `CheckInfo` and the registry, and asks for no more of the engine than that.
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", default-features = false }
+# The host family page lists the stub ids of `HostFamily`, so those ids get no section (09 section 6).
+rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0", features = ["schema"] }
 # Writes each example as YAML, and reads it back to check that it says the same thing.
 serde-saphyr = { workspace = true, features = ["serialize", "deserialize"] }
