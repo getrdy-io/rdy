@@ -374,8 +374,8 @@ ADR 0002: a detached minisign signature in `<spec file>.minisig`, or the file na
 
 Exactly this form, no trailing whitespace or CR; anything else is refused (ADR 0002 decision 1). The
 `rdy-spec-v1` prefix is the domain separation: a signature the same key made for something else carries a
-different comment. A `signed_at` more than 24 hours in the future gives a warning, not a refusal. The
-untrusted comment line is never read.
+different comment. From M2-032, a `signed_at` more than 24 hours in the future gives a warning, not a
+refusal; 0.1.x (M1) does not compare `signed_at` with the clock. The untrusted comment line is never read.
 
 ### 4.3 The trust store
 

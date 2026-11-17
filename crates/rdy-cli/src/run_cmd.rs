@@ -32,12 +32,11 @@
 //! folder handle with this module. A signal that wins the claim kills the groups, removes the folder if
 //! it is empty and exits 70 with no report. The run never sees it.
 //!
-//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), `--key` and the full
-//! unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose` (M1-143) and the
+//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095) and the kube flags
+//! (M1-107). `--quiet` and `--verbose` (M1-143) and the
 //! live progress line (M1-142) change the output later; this is the plain run.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime};
 
@@ -54,19 +53,18 @@ use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
     CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
 };
-use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
-use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
+use rdy_spec::{LoadedSpec, VerifiedSpecBytes};
 
 use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
-use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
+use crate::error::{CliError, InternalKind, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::redaction;
 use crate::rig::Rig;
-use crate::signing::files::{FileError, read_public};
+use crate::spec_load::{self, Given};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
 use crate::terminal::{View, banner, render};
-use crate::trust::{self, Layout, Vars};
-use crate::{lint, redaction};
+use crate::trust::{Layout, Vars};
 
 /// How the human output looks: decided once, from `--color`, the environment and the stream.
 #[derive(Debug, Clone, Copy)]
@@ -163,13 +161,6 @@ async fn execute(
     let state = Arc::clone(&rig.state);
     let clock = || hooks.clock.unwrap_or_else(SystemTime::now);
 
-    if args.key.is_some() {
-        // The one-run key and its banner are M1-126. Ignoring the flag would run a spec the user did
-        // not mean to trust, so it stops.
-        return Err(CliError::Internal(InternalKind::NotImplemented {
-            command: "run with a one-run key",
-        }));
-    }
     // A bad `--jobs` is a usage error and comes before the spec is read.
     let jobs = jobs_from(args.jobs)?;
     // From here a signal says "No report was written" (M1-058).
@@ -300,6 +291,15 @@ async fn execute(
     };
     state.claim_or_park();
     let files = match &dir {
+        Some(dir) if hooks.fail_files => Err(report_error(
+            ReportStep::WriteFiles,
+            dir.path(),
+            ReportError::Io {
+                action: "write the report files",
+                path: dir.path().to_path_buf(),
+                source: std::io::ErrorKind::StorageFull.into(),
+            },
+        )),
         Some(dir) => write_files(dir, &loaded, &redacted),
         None => Ok(Vec::new()),
     };
@@ -477,16 +477,19 @@ pub(crate) fn discard_bounded(dir: Option<Arc<OutputDir>>, limit: Duration) {
 
 /// Printed on stderr when the JSON report is already on stdout and the files could not be written.
 /// stdout may say `complete: true`; this line says what the exit code means (PC-50, 07 section 4.1).
+/// It is a `note:` line: the one `error:` and `fix:` pair that follows is the real error.
 pub(crate) const FILES_NOT_WRITTEN_NOTE: &str =
-    "error: report files not written. The JSON on stdout is complete but the exit code is 70.";
+    "note: report files not written. The JSON on stdout is complete but the exit code is 70.";
 
-/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1): the
-/// Report with `complete: false` on stdout with `--json`, the summary on stderr, then the error. The
-/// exit code is 70. If the report cannot be printed either (it is over the cap, or stdout is closed),
-/// stdout gets the error object instead.
+/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1):
+/// the summary on stderr, then the error. The exit code is 70.
 ///
-/// `on_stdout` is true when the document is already on stdout (printed before the files, PC-50): a
-/// plain note then goes to stderr between the summary and the error.
+/// Where the Report goes depends on `json` and `on_stdout`. `execute` calls this with `json` false and
+/// `on_stdout` equal to `--json`, because a `--json` run printed its document (with `complete: true`)
+/// before it wrote the files (PC-50), so nothing more goes to stdout. A call with `json` true prints the
+/// Report with `complete: false` to `stdout` instead, and if that cannot be printed (it is over the cap,
+/// or `stdout` is closed) `stdout` gets the error object. `on_stdout` is true when the document is
+/// already on stdout: a plain `note:` line then goes to stderr between the summary and the error.
 #[allow(clippy::too_many_arguments)]
 fn fail_after_verdict(
     error: &CliError,
@@ -515,59 +518,20 @@ fn fail_after_verdict(
     emit(error, json && !printed, stdout, stderr)
 }
 
-/// Reads the spec and its signature sidecar, then verifies and parses them ([`rdy_spec::load`]).
+/// Reads the spec and its signature sidecar, then verifies and parses them ([`crate::spec_load`]).
 ///
 /// Without a sidecar the policy decides: `--allow-unsigned` loads the spec as unsigned, and no flag is
-/// `spec_unsigned` (exit 64). With a sidecar the trust stores are read and the signature has to verify,
-/// whatever the flag says. A sidecar that cannot be read is an error and never "no signature".
+/// `spec_unsigned` (exit 64). With a sidecar the signature has to verify, whatever the flag says. With
+/// `--key` no trust store is read.
 fn load_spec(args: &RunArgs, name: &str, privilege: &Privilege) -> Result<LoadedSpec, CliError> {
-    let bytes = lint::read_spec(&args.spec, name)?;
-    let sidecar = read_sidecar(args)?;
-    let trust = match &sidecar {
-        Some(_) => {
-            let layout =
-                Layout::from_env(&Vars::from_process(), privilege.euid().unwrap_or(u32::MAX));
-            trust::load(&layout)?
-        }
-        None => TrustStore::new(),
+    let layout = Layout::from_env(&Vars::from_process(), privilege.euid().unwrap_or(u32::MAX));
+    let given = Given {
+        spec: &args.spec,
+        sig: args.sig.as_deref(),
+        key: args.key.as_deref(),
+        allow_unsigned: args.allow_unsigned,
     };
-    let policy = if args.allow_unsigned {
-        Policy::AllowUnsigned
-    } else {
-        Policy::RequireSigned
-    };
-    load(&bytes, sidecar.as_deref(), &trust, policy).map_err(|error| CliError::spec(name, error))
-}
-
-/// The signature sidecar: `--sig`, else `<SPEC>.minisig`. A missing default file means no signature. A
-/// missing `--sig` file, and any other failure to read either, is an error.
-fn read_sidecar(args: &RunArgs) -> Result<Option<Vec<u8>>, CliError> {
-    let (path, explicit) = match &args.sig {
-        Some(path) => (path.clone(), true),
-        None => {
-            let mut name = args.spec.as_os_str().to_owned();
-            name.push(".minisig");
-            (PathBuf::from(name), false)
-        }
-    };
-    // One byte past the limit is enough for the loader to say "too large".
-    match read_public(&path, MAX_SIGNATURE_BYTES + 1) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(FileError::Unreadable {
-            reason: IoReason::NoSuchFile,
-        }) if !explicit => Ok(None),
-        Err(error) => {
-            let reason = match error {
-                FileError::Unreadable { reason } => reason,
-                FileError::NotRegular => IoReason::NotAFile,
-                _ => IoReason::Other,
-            };
-            Err(CliError::SpecUnreadable {
-                path: path.to_string_lossy().into_owned(),
-                reason,
-            })
-        }
-    }
+    spec_load::load_spec(&given, name, &layout)
 }
 
 /// Writes the spec copy and the JSON report into the folder and returns the names of the files, in the
@@ -675,7 +639,7 @@ fn residual_note(os: Os, out_dir_given: bool) -> Option<&'static str> {
 }
 
 /// The rdy build that writes the report.
-fn producer() -> Producer {
+pub(crate) fn producer() -> Producer {
     let known = |text: &str| (!text.is_empty()).then(|| text.to_owned());
     let mut producer = Producer::new(env!("CARGO_PKG_VERSION"), rdy_spec::VERSION, TARGET);
     producer.commit = known(COMMIT);
@@ -683,7 +647,7 @@ fn producer() -> Producer {
 }
 
 /// Which spec ran: the signed metadata and the hash of the exact bytes (threat model R1).
-fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
+pub(crate) fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
     let meta = &loaded.spec().metadata;
     let file_name = path.file_name().map_or_else(
         || "spec.yaml".to_owned(),
