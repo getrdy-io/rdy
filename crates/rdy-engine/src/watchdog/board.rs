@@ -10,17 +10,18 @@
 //! with no results, and every check is then reported as unfinished. A poisoned lock is read through
 //! `into_inner`: results are only ever replaced whole, so a poisoned board is still consistent.
 
-use std::sync::{Mutex, MutexGuard, TryLockError};
+use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
-use rdy_spec::result::{CheckResult, Report};
+use rdy_spec::result::{CheckResult, Host, Report};
 
 use crate::outcome::{run_deadline_result, timeout_result, unfinished_result};
 use crate::redact::{Redactor, RuleCounts};
 use crate::sched::{Observer, Ran};
 
 /// How the board turns an end into a result. It gets the check's index and what the scheduler saw.
-/// M1-057 gives it `map_outcome` for a finished check and `timeout_result` for a timeout.
+/// [`crate::engine::Engine::execute`] builds the board for a run (M1-176) and gives it the same mapping
+/// it uses for the final results, so a partial report reads like the full one.
 pub type MapRan = Box<dyn Fn(usize, &Ran) -> CheckResult + Send + Sync>;
 
 /// How long `snapshot` sleeps between two `try_lock` calls.
@@ -57,7 +58,8 @@ pub struct Board {
     base: Report,
     templates: Vec<CheckResult>,
     redactor: Redactor,
-    map: MapRan,
+    map: OnceLock<MapRan>,
+    host: OnceLock<Host>,
     deadline: Duration,
     inner: Mutex<Inner>,
 }
@@ -88,18 +90,45 @@ impl Board {
         deadline: Duration,
         map: MapRan,
     ) -> Self {
+        let board = Self::pending(base, templates, redactor, deadline);
+        board.set_map(map);
+        board
+    }
+
+    /// A board that has no way to map an end yet. The watchdog can be armed with it as soon as the
+    /// report folder exists; [`Board::set_map`] must be called before the first check ends. Until then
+    /// an end is kept as "not finished".
+    #[must_use]
+    pub fn pending(
+        base: Report,
+        templates: Vec<CheckResult>,
+        redactor: Redactor,
+        deadline: Duration,
+    ) -> Self {
         let slots = templates.iter().map(|_| Slot::Pending).collect();
         Self {
             base,
             templates,
             redactor,
-            map,
+            map: OnceLock::new(),
+            host: OnceLock::new(),
             deadline,
             inner: Mutex::new(Inner {
                 slots,
                 counts: RuleCounts::default(),
             }),
         }
+    }
+
+    /// Sets the way to map an end. True the first time, false after that.
+    pub fn set_map(&self, map: MapRan) -> bool {
+        self.map.set(map).is_ok()
+    }
+
+    /// Sets the host of the partial report, once the run has read it. The base report holds a stand-in
+    /// until then. True the first time, false after that.
+    pub fn set_host(&self, host: Host) -> bool {
+        self.host.set(host).is_ok()
     }
 
     /// Reads the results so far, waiting at most `bound` for the lock.
@@ -132,6 +161,9 @@ impl Board {
     pub fn partial_report(&self, bound: Duration) -> (Report, RuleCounts) {
         let snapshot = self.snapshot(bound);
         let mut report = self.base.clone();
+        if let Some(host) = self.host.get() {
+            report.host = host.clone();
+        }
         report.checks = snapshot.results;
         report.complete = false;
         report.refresh_verdict();
@@ -188,7 +220,22 @@ impl Observer for Board {
         let Some(template) = self.templates.get(index) else {
             return;
         };
-        let result = (self.map)(index, ran);
+        let result = match self.map.get() {
+            Some(map) => map(index, ran),
+            // No way to map yet: the end is kept as "not finished", never as a pass.
+            None => unfinished_result(template),
+        };
+        self.record(index, result);
+    }
+}
+
+impl Board {
+    /// Keeps the finished `result` of slot `index`, redacted. For a result that does not come from the
+    /// scheduler, such as a check the plan skipped. An index past the last slot is ignored.
+    pub fn record(&self, index: usize, result: CheckResult) {
+        let Some(template) = self.templates.get(index) else {
+            return;
+        };
         // Redacted before the lock is taken: a slow redaction must not make the watchdog's `try_lock`
         // fail. Only the counts and the result go in under the lock.
         let mut counts = RuleCounts::default();

@@ -1,0 +1,41 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": "Turn SELinux on: set `SELINUX=enforcing` in `/etc/selinux/config` and reboot. The first boot relabels the disk and can take minutes.",
+    "level": "fail",
+    "message": "SELinux is disabled, and the spec allows enforcing.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "disabled",
+        "state": "disabled"
+      }
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "expect": {
+      "net/ipv4/conf/eth0.100/rp_filter": 1
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "net/ipv4/conf/eth0.100/rp_filter": "1"
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 kernel parameter has the wanted value and is set at boot.",
+    "notes": [
+      "Read 1 sysctl configuration file(s), in boot order."
+    ],
+    "observed": {
+      "parameters": {
+        "net/ipv4/conf/eth0.100/rp_filter": {
+          "live": "1",
+          "persisted": {
+            "file": "/etc/sysctl.d/10-vlan.conf",
+            "value": "1"
+          },
+          "state": "ok"
+        }
+      }
+    },
+    "partial": null
+  }
+}

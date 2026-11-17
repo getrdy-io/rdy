@@ -98,13 +98,15 @@ fn a_usage_error_without_json_prints_nothing_on_stdout() {
     assert_eq!(text(&out.stderr).lines().count(), 2);
 }
 
+// `verify` is not built yet. M1-126 builds it and replaces this test with the next missing command, or
+// deletes it (see also commands_for_later_tickets_exit_70_with_a_fix_line in exit_codes.rs).
 #[test]
 fn a_command_that_is_not_built_yet_prints_an_internal_error_object() {
     let v = error_output_validator();
-    let out = rdy(&["run", "spec.yaml", "--json"]);
+    let out = rdy(&["verify", "spec.yaml", "--json"]);
     assert_eq!(out.status.code(), Some(70));
     let doc = parse(&out.stdout);
-    assert_valid(&v, &doc, "rdy run --json");
+    assert_valid(&v, &doc, "rdy verify --json");
     assert_eq!(doc["error"]["code"], "internal");
     assert!(
         doc["error"]["message"]

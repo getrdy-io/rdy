@@ -690,6 +690,24 @@ pub fn report_timestamp(now: SystemTime) -> String {
     format!("{year:04}{month:02}{date:02}T{hour:02}{minute:02}{second:02}Z")
 }
 
+/// A time as the report records it: UTC with milliseconds, `YYYY-MM-DDTHH:MM:SS.mmmZ` (01 section 5.1,
+/// `run.started_at`). The same bounds as [`report_timestamp`] apply.
+#[must_use]
+pub fn report_time(now: SystemTime) -> String {
+    const LAST_SECOND: u64 = 253_402_300_799;
+    let since = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let secs = since.as_secs().min(LAST_SECOND);
+    let millis = if since.as_secs() > LAST_SECOND {
+        999
+    } else {
+        since.subsec_millis()
+    };
+    let (day, rest) = (secs / 86_400, secs % 86_400);
+    let (year, month, date) = civil_from_days(i64::try_from(day).unwrap_or(0));
+    let (hour, minute, second) = (rest / 3600, rest % 3600 / 60, rest % 60);
+    format!("{year:04}-{month:02}-{date:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
 /// The proleptic Gregorian date of a day count since 1970-01-01.
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;

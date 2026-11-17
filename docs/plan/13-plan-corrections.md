@@ -33,6 +33,9 @@ below.
 | PC-46 | 02 "Scheduling, timeouts and hangs", Watchdog, "One writer" bullet | It says that when the watchdog loses the write race it waits for `Done` and then does nothing. M1-043 adds a backstop: once the state is `Done`, a process that is still alive `loser_wait` (5 s) after the watchdog fires is killed and exits with the code stored by `WriteState::finish`. It covers a print to a blocked stdout after the report is written. | Add the backstop to the bullet. The M2 upload prompt after the result (07 section 5) must disarm or re-bound the watchdog first, or it is killed at deadline plus 15 s. | should-fix | M1-043 review |
 | PC-47 | 09-docs-site.md, section 5, "Examples are stored as JSON" bullet | It says the renderer validates each example against its schema. M1-084 does not validate in the render, because `jsonschema` as a normal dependency of `xtask` fails the license policy (MIT-0 through `borrow-or-share`). The test suite validates each example, with rdy-spec's validator, and decodes it with `parse_unverified` (ADR 0034). | Amend the bullet to: "Examples are stored as JSON in the schema. The test suite checks each one against its schema (ADR 0034). The renderer shows each as YAML and reads it back to the same value." Restore the render-time check if the license policy allows the crate. | should fix before M1 | M1-084 review (PR #89), ADR 0034 |
 | PC-49 | 08 Appendix C, Normalisation table | The table lists `producer.version`, `commit` and `target` only. M1-051 `normalize` also scrubs `producer.rdy_spec` (`<rdy_spec>`), which moves with every release of the crate. `normalize_across_jobs` also resets `run.options.jobs` to 1, because the report records the jobs value and the `jobs = 1` against `jobs = 8` comparison varies it. The table's last two rows (certificate serials and digests as `<serial>` and `<sha256>`) are not built. | Add `producer.rdy_spec` to the version row. Add a row for `run.options.jobs`: set to 1, in `normalize_across_jobs` only (the jobs comparison). Mark the serial and digest row as deferred to M1-090, which owns the first golden that holds a generated certificate. | should-fix | M1-051 review (PR #111) |
+| PC-50 | 07 section 4.1 (files that cannot be written after the verdict), 02 "Watchdog" | 07 says that when the files cannot be written, `--json` stdout gets the Report with `complete: false`. M1-176 prints stdout before it claims the write state and writes the files, because a blocked stdout is the one write that can hang for good and the watchdog must still own the report while it does (M1-043 carry). So the document is already on stdout when the files fail. | With `--json`, a failed file write after the verdict leaves the document on stdout as printed and puts the summary and the error on stderr, exit 70. Without `--json`, stdout stays empty. The exit code is the authority: 07 section 4.1 and the `complete` doc in `rdy-spec` say that a printed report can read `complete: true` with exit 70. cli-ux signed off. A script checks the exit code (`set -o pipefail`, or stdout to a file and `$?`), never the document alone; stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` Check the number at merge. | should-fix | M1-176 |
+| PC-51 | 11 backlog, M1-176 exit test ("proved with the real binary") and M1-088 (watchdog clause) | The exit test needs the shipped `rdy` to hang on a check that never yields, and to end within the deadline plus grace. The shipped binary cannot do either: ADR 0011 decision 4 gives it no hook, so it has only the real families (none hangs) and the fixed five minute deadline. | M1-176 proves the spin clause with a test binary that calls `rdy_cli::run` with a one second hook deadline and the real watchdog (`crates/rdy-cli/tests/run_watchdog.rs`, a pipe run and a spin run). The blocked-pipe clause is also proved on the real unsteered binary by `crates/rdy-cli/tests/run_watchdog_binary.rs`, which is `#[ignore]`d because it takes about 5 min 10 s, and is run by hand (no nightly test job exists). M1-088's watchdog clause (blocked stdout pipe, exit 70, `complete: false` in the folder) is the same case: it relies on that test and does not repeat it. Check the number at merge. | should-fix | M1-176 (PR #34 review) |
+| PC-52 | M1-043 carry (macOS SIGCHLD-ignored check), M1-176 | The carry asks for a check that the SIGCHLD-ignored test really ignores SIGCHLD on macOS. M1-176 tried a behavioural probe (a child's `wait` fails with ECHILD when the ignore holds). The macos-x64 CI run on ee62985e failed that probe in `sigchld_ignored` (0.195 s), so macOS does not auto-reap the way the probe assumes, or the ignore does not survive `exec` there. The runner itself works there (the rest of the test passes without the probe). | The probe is Linux only (`/proc` SigIgn plus ECHILD). The macOS carry stays open. Owner: qa-engineer, a follow-up to find out how SIGCHLD-ignored behaves on macOS (does the ignore survive `bash -c 'trap "" CHLD; exec ...'`, and what does a child of an ignoring parent report) and to write a probe that holds there. Check the number at merge. | should-fix | M1-176 (macos-x64 CI) |
 
 ## Decisions made
 
@@ -196,6 +199,23 @@ This file is the corrections list.
   reqwest with the platform verifier, which ADR 0014 rejects. Not resolved here. Before M2-026 starts,
   rust-architect writes one ADR that picks the upload stack, its verifier and its `deny.toml` entry,
   reviewed by security-reviewer (`reviews/adr-and-00-review-by-security-reviewer.md`, CF-03).
+- **Correction-35, the adjtimex source (blocks the adjtimex half of M2-004, not M1).** M1-148 and 03 read
+  `adjtimex(2)` through `native`, but the closed `NativeCall` enum has no variant for it, rustix 1.1.6 has no
+  `clock_adjtime` or `adjtimex`, and `forbid(unsafe_code)` rules out a raw call. Correction-35 moves the
+  variant, its policy row, snapshot, 05 row, Live and Replay arms, `native/adjtimex.json` and the "`EPERM` is
+  partial" clause to M2-004 (3.5 h to 5 h). M1-148 takes the sync state from `timedatectl` and `chronyc` and
+  the offset from its SNTP client. Before M2-004 starts, rust-engineer names the Live source: a safe wrapper
+  in a rustix release, or another crate that passes the new-dependency review (05 Appendix C T5, `deny.toml`), reviewed
+  by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
+  of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
+  does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
+- **Correction-36, k8s.namespace follow-ups (M2-116 and M2-117, not M1).** A `LimitRange` `Container`
+  default limit below `container_max_memory` is a note in M1, not a block, because the spec cannot say that
+  the product sets requests without limits. M1-161's builder chose this and k8s-expert confirmed it on
+  PR #32, which edits 03 to match. M2-116 adds the spec key, owned by rust-architect, before rdy-spec's
+  first crates.io release. M2-117 makes k8s.namespace work on OpenShift without cluster-scoped reads:
+  `AppliedClusterResourceQuota` instead of `ClusterResourceQuota`, and the project GET when
+  `get namespaces` is Forbidden. Its two new guard reads need a security-reviewer review.
 
 ## CLAUDE.md edits
 
@@ -348,3 +368,36 @@ Review follow-ups collected during the build:
 - ADR 0017 (changelog fragments) added and indexed. C-4 carries the `CLAUDE.md` checklist line.
 - M1-003: the exit test says the 12 labels of 10 section 6, so "the 10 section 6 labels" cannot be read
   as a count.
+
+## Applied during the M1 build
+
+Corrections that a build review found and that were applied to the planning documents at once. Each one is also in
+the corrections log of `11-backlog.md`.
+
+- **Correction-37, host.time_sync commands and peers.** 03 named `chronyc -n -c -t 3 tracking`, but chronyc has
+  no `-t` option, so that form fails on every host. 03 now says `chronyc -n -c tracking`, and PR #35 fixes the
+  command table. A command limit equal to the check limit let a hung `timedatectl` throw away a good SNTP
+  sample. Each step is now cut to the time left in the 5 s budget minus a 250 ms margin, SNTP stops at the first
+  good reply, each command form has at most 3 s, and a timed-out command keeps the SNTP verdict with a note. 05
+  INV-11 names the local IPC of exactly two allowlisted commands as a third exception, M1-128 allows exactly
+  those destinations (both the `/run` and the `/var/run` paths), and 05 Appendix A T5 accepts unauthenticated
+  SNTP.
+- **Correction-38, review follow-ups from PR #34 and PR #35.** The env harness gets a Timeout class for a hang the
+  check survived (M1-179, `core: no`), so host.time_sync needs no `PENDING` row. The watchdog's partial report
+  keeps the action log in M2 (M2-118), and host.time_sync asks its servers at once in M2 (M2-119). M1-130 takes
+  three carries from PR #34. No test-pinned document changed.
+- **Correction-39, what `--no-network` means.** rdy and its children open only `AF_UNIX` sockets.
+  That local IPC still runs: the commands 05 INV-11 names and rdy's own `Probe::unix_get` to a
+  socket a check declares (INV-28). INV-11's exception now covers exactly `chronyc`, `timedatectl`
+  and `firewall-cmd`. Under `--no-network` `chronyc` is not run, because its loopback UDP is an
+  `AF_INET` socket. The facade refuses `tcp`, `udp` and lookups with `RULE_NO_NETWORK` (M1-059).
+  M1-059's strace test flags any family but `AF_UNIX`, and M1-128 limits the `AF_UNIX`
+  destinations.
+- **Correction-40, the unsigned banner may name its flag.** M1-126's exit test banned `--allow-unsigned` from
+  every stderr line, but the unsigned banner's `sig` line names it on purpose: it is the loud warning of
+  product rule 3. The rule now covers fix, hint and error lines (M1-126, 07 rule 8, 01 section 4.7). PR #42 also re-wraps
+  07 C.12 to 07's own wrap rule.
+- **Correction-41, host facts and a reserved product name.** No row filled `report.host.os` from os-release,
+  so the header printed `linux`. New M1-180 (core) does it, and the env goldens and README transcripts depend
+  on it. A product named `rdy` would print `fix from rdy:` like rdy's own lines; M2-120 makes `ProductSlug`
+  refuse it before rdy-spec's first crates.io release. The renderer refuses it in M1 (PR #42).

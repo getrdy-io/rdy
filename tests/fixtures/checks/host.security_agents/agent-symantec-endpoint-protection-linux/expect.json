@@ -1,0 +1,37 @@
+{
+  "entry": {
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": []
+    },
+    "fix": "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again. Detected: Symantec Endpoint Protection for Linux (antivirus).",
+    "level": "warn",
+    "message": "Detected Symantec Endpoint Protection for Linux (antivirus).",
+    "notes": [
+      "A match means a process with this name is running. It does not show that the product is installed."
+    ],
+    "observed": {
+      "detected": [
+        {
+          "category": "av",
+          "count": 3,
+          "display_name": "Symantec Endpoint Protection for Linux",
+          "id": "symantec-endpoint-protection-linux",
+          "processes": [
+            "sisamddaemon",
+            "sisidsdaemon",
+            "sisipsdaemon"
+          ]
+        }
+      ],
+      "limited_view": false,
+      "list_cut": false,
+      "processes_read": 6,
+      "processes_unreadable": 0
+    },
+    "partial": null
+  }
+}

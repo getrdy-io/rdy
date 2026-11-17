@@ -54,8 +54,8 @@ the founder should look at.
 
    ```text
    Signed-off-by: Rdy <dev@getrdy.io>
-   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-   Claude-Session: https://claude.ai/code/session_011oBtEfTsAHp3D8SPZaBQJq
+   Co-Authored-By: Claude <model name> <noreply@anthropic.com>
+   Claude-Session: <the coordinator session URL>
    ```
 
 7. When main moves under an open PR: merge main into the branch, resolve `Cargo.toml` by taking the union of
@@ -95,10 +95,12 @@ approved. Build what they say. Do not widen the ticket.
 - You are in your own git worktree. Run `git fetch -q origin main && git checkout -q -B <branch> origin/main`
   where <branch> is `m1/<NNN>-<short-slug>` (e.g. m1/003-workspace-skeleton).
 - Never touch the coordinator's checkout (/home/user/rdy) and never push to main.
-- Commit with `git commit -s` (DCO sign-off) in imperative mood, one-line summary that starts with the ticket
-  id, e.g. `M1-003: create workspace skeleton`. End every commit message with these two lines:
+- Commit as `Rdy <dev@getrdy.io>` (the repo's git config; never override it), in imperative mood, with a
+  one-line summary that starts with the ticket id, e.g. `M1-003: create workspace skeleton`. End every
+  commit message, merges included, with these three lines:
+  Signed-off-by: Rdy <dev@getrdy.io>
   Co-Authored-By: Claude <your model name> <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_011oBtEfTsAHp3D8SPZaBQJq
+  Claude-Session: <the coordinator session URL>
 - Push with `git push -q -u origin <branch>`. Do not open the PR; the coordinator does.
 
 ## Every ticket must
@@ -159,10 +161,11 @@ else: sys.exit('line not found')
 open(p,'w').write('\n'.join(L))
 PY
 git add docs/plan/12-progress.md
-git commit -q -s -m "$2: record PR #$3 in progress tracker
+git commit -q -m "$2: record PR #$3 in progress tracker
 
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_011oBtEfTsAHp3D8SPZaBQJq"
+Signed-off-by: Rdy <dev@getrdy.io>
+Co-Authored-By: Claude <model name> <noreply@anthropic.com>
+Claude-Session: <the coordinator session URL>"
 git push -q
 grep "^- $2 |" docs/plan/12-progress.md
 git rev-parse --short HEAD
@@ -187,67 +190,89 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-10-29, about 02:40 UTC)
+## State at the pause (2026-11-06)
 
-The second coordinator session paused here because the founder's session limit was near. Merged tickets
-are in `12-progress.md`. Read this section, then check every open PR's head and CI before acting: agents
-that were running at the pause may have pushed after it.
+The fifth coordinator session paused here at the founder's request. Read this section and
+`reviews/open-findings-2026-11-06/pending-fixes.md`, then check every open PR's head and CI before acting.
+Every agent was stopped at the pause. The briefs, fix lists and coordinator scripts for the resume are in
+`reviews/open-findings-2026-11-06/`. They carry `<the coordinator session URL>` and `<scratchpad>`
+placeholders, which the next session fills in.
 
-Merged in this session: #48 M1-022, #49 M1-067, #47 M1-007, #57 M1-028, #51 M1-121, #59 M1-027,
-#60 M1-011, #54 M1-031, #53 M1-039, #56 correction-08, #62 M1-089, #52 M1-125, #67 correction-09, #65 M1-014.
-That makes 47 M1 tickets merged in all.
+**Identity.** The 2026-10-31 rule is unchanged. Every commit is authored and committed as
+`Rdy <dev@getrdy.io>`. Every commit message, merges too, ends with `Signed-off-by: Rdy <dev@getrdy.io>`, a
+`Co-Authored-By` line and the coordinator's `Claude-Session` URL. Set it first in a new container:
+`git config user.name Rdy && git config user.email dev@getrdy.io`. `get_me` returned `getrdy-io` all session.
+Squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. A subagent writes its
+own model name in `Co-Authored-By`; the brief now says so.
 
-Open PRs at the pause. "Approved" means every required reviewer approved the current head.
+**Ownership.** Apostolic Path LLC owns the code, the copyright and the marks (NOTICE and TRADEMARKS.md on
+main). No document may name a person as owner, and no document may mention the founder's employer.
 
-| PR | Ticket | State and next step |
-| --- | --- | --- |
-| #55 | M1-056 | Approved by code and security (three rounds). At 3dc8456 the `lint` job fails: the older guard from M1-022 in ci.yml ("the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature") runs `cargo tree` with dev-dependencies, so it sees rdy-cli's dev-dependency on rdy-engine `testing`. Fix: make that guard use `-e normal,build` (the new M1-056 guard already does), merge main, CI, merge. |
-| #69 | correction-10 | Approved; the coordinator applied the review fixes at 78bfe79 (kept #66's version of the sandbox hand-step row, M2-105 is 8 h, a clause on M1-122). Next: merge main if dirty, CI, merge. Merge after #67. |
-| #71 | M1-036 | Opened at the pause; the coordinator merged main twice (lib.rs, rdy-cli Cargo.toml, Cargo.lock), clippy and fmt pass, the full test run was not finished. Next: CI, then code-reviewer and security-reviewer (filesystem writes, the new `Apache-2.0 WITH LLVM-exception` license for `winx`). |
-| #70 | M1-066 | Security review: changes required, findings in `reviews/open-findings-2026-10-29/pr70-sec.md` (two highs: `policy::run` must become crate-private with `table::run` the only public runner; Linux-only table tests fail on macOS and Windows). Code review: changes required too, in `pr70-code.md` (macOS and Windows legs red; shipped fix text unaudited). Next: fix round by rust-engineer or check-author. |
-| #58 | M1-040 | Fix round landed at 46fe58a: all findings in `pr58-*.md` applied (one `Cmd`, `Backend::spawn(&ResolvedCmd)`, a coalescing log that never drops a denied entry, the any-depth and `/proc/<pid>` allowlist rules, argv redaction, a schema-validated exit test, a cancel race for in-flight calls). It records PC-44 in 13; #55 adds PC-43, so check the numbers at merge. It kept `exec::policy::run` public, which conflicts with #70's security finding 1 (only `exec::table::run` public): settle that when #70 lands, and route the probe through `table::run`. Next: code and security re-review of the delta, then CI, merge. |
-| #66 | M1-010 | Fix round landed at 4d3e7ba (main merged): every finding in `pr66-*.md` applied. Verify pins the workflow repository, ref and trigger everywhere (self-verify, a new `announce` verify step, 06, SECURITY.md); the job has an owner check; the placeholder is M1-014's `@@RDY_STAMPED_VERSION@@` line; a real pinned GitHub-Actions-signed bundle (goreleaser v2.19.0) tests the claims; `cosign-roundtrip` is in `ci-ok`; ADR 0024 is shortened and marked founder ratification pending. It edits the sandbox hand-step row (needed before M1-010 and M1-012); #69 leaves that row alone. Next: code and security re-review of the delta, CI, merge. |
-| #68 | M1-122 | Fix round landed at 73c8dc0 (main merged): every finding in `pr68-*.md` applied. The write scope is a layout field, the strace check also fails on user-database lookups and uses `-y`, the Windows fix lines point to docs.getrdy.io/unsigned, and ADR 0027 lists the alternatives (status Proposed). Next: security-reviewer and rust-architect re-review the delta and sign off ADR 0027, then windows-x64 CI must be green, then merge. |
-| #63, #64 | Dependabot | Major bumps of `blake2` (0.11) and `ed25519-dalek` (3.0). ADR 0018 pins crypto crates exactly and reviews bumps by hand. Leave them open for the founder. |
+**Merged in this session** (main at 3c49a5a), in merge order:
+- #31 correction-35, #18 M1-174, #33 correction-36, #20 M1-149, #19 M1-078, #36 correction-37.
+- #37 fixes main after #36. #36 changed 03 Appendix A rows that a test pins.
+- #21 M1-079, #38 correction-38, #32 M1-161, #40 correction-39, #34 M1-176, #22 M1-080.
+- #44 M1-124, #43 correction-40, #46 correction-41, #23 M1-150, #25 M1-072, #42 M1-086.
 
-Unlocked and not started (recompute against the backlog before launching): M1-062, M1-102, M1-152
-(non-core), M1-131 (needs #52, now merged), M1-168 (needs M1-056), M1-037 (needs M1-036), M1-043 (needs
-M1-036), M1-041, M1-042, M1-044, M1-045 (need M1-040), M1-012 and M1-015 (need M1-010; M1-012 needs a tag
-push and the sandbox proof, both founder steps under ADR 0024), M1-065 and the replay chain (need M1-049,
-which needs M1-045 and M1-046).
+**Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
+M1-177 and M1-178, which makes 180. Totals on main: M1 178 tickets, 391 h, 328 h core. All milestones: 398
+tickets, 1349 h. Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
-Next PR number: #72. Next free ADR number: 0029 (0024 to 0028 are taken by #66, #65, #62, #68 and #70).
+**Corrections filed in this session:**
+- 35: M1-148 drops adjtimex. `NativeCall::Adjtimex` moves to M2-004.
+- 36: M1-175 builds k8s.namespace. New M2-116 (`limit_needs`) and M2-117 (OpenShift namespace reads).
+- 37: `chronyc -n -c tracking`, with no `-t`. time_sync gets a step budget. The INV-11 local IPC exception
+  and a forged-SNTP T5 row.
+- 38: new M1-179 (env harness bounded hang), M2-118 (the watchdog report keeps the action log) and M2-119
+  (parallel SNTP). M1-130 takes three carries.
+- 39: `--no-network` is an allow-list: only AF_UNIX sockets from rdy or its children. firewall-cmd's local
+  IPC is named. chronyc does not run offline. The facade refuses network calls.
+- 40: the unsigned banner may name `--allow-unsigned`. M1-126's rule covers only hint, fix and error lines.
+- 41: new core M1-180 (`report.host.os` from os-release) and M2-120 (`ProductSlug` refuses `rdy`).
 
-Coordinator decisions taken in this session (all conservative, recorded in ADRs or PR review records):
+**Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
+- #26, #27, #28 and #24 come first, from the 2026-10-31 list.
+- Then #35, #39, #45, #47, #41, #48, #49 and #30.
+- #1 and #2 (Dependabot) are for the founder.
 
-- ADR 0023 (#53): inherited descriptors are detected and listed, not closed, in M1; correction-08 amended
-  M1-039 and added M1-168 and M2-104.
-- ADR 0024 (#66): release proofs that need the sandbox, an environment approval or a tag push are founder
-  hand steps. Agents never push tags or publish releases.
-- ADR 0027 (#68): Windows trust stores stay refused in M1 and Windows has no user trust path; follow-up
-  M2-105 (an FFI crate) is filed in correction-10.
-- M1-056: `RUST_LOG` unset, empty or invalid means no log output; when set, hyper, h2, rustls, tower and
-  kube stay capped at warn.
-- M1-125: scrypt `p != 1` is refused; real-cost KDF tests run one at a time in nextest.
+**Not finished.** M1-162 and M1-087 pushed nothing. Rerun them from the brief.
 
-Lessons from this session:
+**Numbers.**
+- The next PR is #51 (#50 is this pause-state PR).
+- The next free ADR is 0043. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+  security.
+- The next ticket ids are M1-181 and M2-121, and the next correction is 42.
+- The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
-- Every merge moves main, and the same files conflict again and again: `docs/adr/README.md` rows,
-  `crates/rdy-cli/src/lib.rs` module lists, `.github/workflows/ci.yml` `ci-ok` needs, the 11-backlog
-  Corrections log, `Cargo.toml` and `Cargo.lock`. A PR with a conflict gets no CI. Merge main right
-  before merging and expect to repeat it. `reviews/open-findings-2026-10-29/resolve-conflict-union.py`
-  keeps both sides of each hunk; check the result by eye (module attributes, closing braces) and run
-  `cargo fmt` after resolving.
-- A debug build takes about 6 GB per worktree. Agents build with
-  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0` and run `cargo clean` when
-  done. Run at most three builders at once.
-- Do not remove an agent's worktree while it may be resumed with SendMessage; the resume fails.
-- Downloading tool binaries is refused by the sandbox; `cargo install --locked` works for cargo-deny and
-  cargo-nextest. sccache was not worth the build time.
-- The sandbox refuses some strings in files (for example `--proto =https` in a script); record such
-  items as founder steps.
-- `reviews/open-findings-2026-10-29/` holds the review findings for the open PRs and the implementer and
-  reviewer briefs used in this session. `<scratchpad>` in them means the session scratchpad.
+**Process lessons from this session.**
+- A docs PR that touches a doc a test reads waits for `ci-ok`. Main went red once: #36 merged without CI,
+  and #37 fixed it. Tests read these parts:
+  - 03: its `###` headings and Appendix A.
+  - 05: the Native calls table.
+  - 07: B.1 to B.3, C.11, the trust goldens, and the console blocks C.12 to C.18 and 2.7.
+  - 01: the json and yaml blocks under `###` headings.
+  Grep `crates/`, `tests/` and `xtask/` for the file name before calling a PR docs-only.
+- After any code merge, run the full `cargo test --workspace`. A compile error in one test crate stops every
+  other result. The lint wall's include prefixes are now `&[&str]` lists, and old branches still use a plain
+  string.
+- Host family merges conflict in `family.rs`, `family/tests.rs`, `lib.rs` and the fixtures README. Take
+  main's files and apply the branch's own changes, rather than resolving hunk by hunk.
+- `mergemain.sh` now works on a detached HEAD. The old version moved the branch out from under an agent's
+  worktree.
+- The kind workflow is outside `ci-ok`. It must still be green for a k8s PR that changes the role or the
+  guard, because `live_cluster.rs` pins the `GRANTED` list and a derived action count.
+- When main moves under a running CI, cancel the stale run and merge main again.
+- When a docs correction merges, hold it until the code PR whose CI is running has merged. Then main does not
+  move under that CI.
+- A security review on test-only PRs found a vacuous leak test (#41). Keep adding security review when a
+  ticket tests redaction.
+
+**Environment facts from this session.**
+- The pinned toolchain 1.99.1 was installed and worked. `cargo-deny` and `cargo-nextest` are not installed,
+  and the CI deny job covers deny.
+- The macOS x64 leg is the slowest at about 25 minutes. Three PRs at once is the most CI keeps up with.
+- The GitHub job log API sometimes cuts nextest failure output. A haiku agent with `get_job_logs` and
+  `tail_lines` finds the failing test names.
 
 ## Notes carried to later tickets
 
@@ -313,6 +338,36 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     (correction-10).
   - M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when cloud checks land.
 
+- From the 2026-10-30 session:
+  - M1-072: process name from `comm`, never `cmdline`; walk only the needed pids and stop at the first
+    match (correction-33); the #153 code nits N1 to N3.
+  - M1-086 and the README: once M1-057 merges, the README's status and build-from-source sections change
+    (`rdy run` works on main). Link NOTICE and TRADEMARKS.md once #157 merges. Add host.firewall and
+    k8s.access to "Works on main today".
+  - M1-115: two OpenShift label-sync checks (correction-33).
+  - M1-141: test string `"x\u{2069}\u{202e}"` in a banner line, a `<bdi>` field and the title.
+  - M1-110 or the next k8s change: SEC-147-9 comment wording.
+
+- From the 2026-11-06 session:
+  - M1-137 or release-engineer: the `install.sh` header comment (lines 6 and 7) and RELEASING.md:123 run
+    `curl -sSf` without `-L` on a GitHub release URL. GitHub answers with a redirect, so curl downloads 0
+    bytes and `| sh` installs nothing. Use `--proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL`.
+  - M1-126 or qa: `tests/fixtures/signed/acme-platform.yaml:11` and `tests/fixtures/minisign-c/acme-platform.yaml:11`
+    say the quickstart "can reach READY today". That is stale. Re-sign the fixtures if they change.
+  - M1-095 and M1-107: rerun the `root_*` `--no-network` strace test once net and k8s are registered. The
+    M1-107 kube client builds sockets outside the facade, so it must honour `--no-network` itself.
+  - M1-107: with network on and a context available, the k8s check is not `missing_need` (a control for the
+    M1-059 skip).
+  - qa (PC-52): the M1-043 macOS SIGCHLD carry stays open. The ECHILD probe failed on macos-x64, so it is gated
+    to Linux.
+  - M1-179: deletes the host.time_sync PENDING row in the env harness that #35 adds.
+  - Follow-ups with no ticket yet:
+    - net.mtu: a per-interface note on a hostile link, instead of ending the check (M2).
+    - A per-response byte cap in the k8s client, for example 16 MiB, with a cut list reported as partial
+      (#48 F3).
+    - `NetFailure::NotConnected` carries the connect attempts, so net.egress needs no second tcp call (#45).
+    The next correction should give each an id.
+
 ## For the founder
 
 Hand steps an agent cannot do (also in the Founder hand steps list in `11-backlog.md`):
@@ -364,4 +419,30 @@ From the 2026-10-29 session:
 - Dependabot PRs #63 and #64 bump crypto crates by a major version; review by hand per ADR 0018.
 - Ratify ADR 0024 (release proofs are founder steps) and ADR 0027 (Windows trust stores refused in M1).
 - Delete the branch `tmp/m1-011-unpinned` (proof PR #61, closed).
-\n
+From the 2026-10-30 session:
+
+- Claude's GitHub connection now returns the `getrdy-io` account, and squash merges are authored
+  `getrdy-io <dev@getrdy.io>`. Nothing more to do unless that changes.
+- Decide the kind gate (ADR 0039): keep the kind job out of `ci-ok`, or require it.
+- Run the trademark search and filing in Apostolic Path LLC's name.
+
+From the 2026-10-31 session:
+
+- To have GitHub show commits as Verified, add a signing key for `dev@getrdy.io` to the `getrdy-io`
+  account and configure commit signing in the build environment. Commits are not signed today, and
+  "Unverified" only means that. The DCO check reads the `Signed-off-by` line.
+- Install `cargo-deny` in the build environment, or accept that only CI runs it.
+- Review Dependabot PRs #1 (syn 3) and #2 (scrypt 0.12). Both CI runs were red at the pause.
+
+From the 2026-11-06 session:
+
+- File two issues labelled `flake` (08:435). One is for the fixtext test "`ip` must not be a fix command".
+  The other is for `probe::tests::link_reads_fold_and_drop_like_file_reads`. The labels do not exist yet, so
+  this is a hand step.
+- Decisions to look at:
+  - ADR 0042: the guard and the example role list every resource of `constraints.gatekeeper.sh/v1beta1`,
+    list only. Security accepted it with a written residual.
+  - Correction-35: adjtimex is moved to M2-004.
+  - Correction-39: `--no-network` allows only AF_UNIX sockets, and chronyc does not run offline.
+- Main went red once (#36, a docs PR merged without CI), and #37 fixed it within the hour. The runbook now
+  says which docs need `ci-ok`.

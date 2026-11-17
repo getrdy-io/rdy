@@ -1,0 +1,33 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 8
+  },
+  "result": {
+    "expected": {
+      "min": 8
+    },
+    "fix": "Read /sys/fs/cgroup/cpu.max (cgroup v2) or cpu.cfs_quota_us (v1) by hand and confirm the limit allows 8 CPUs or more, or run rdy where the cgroup files are readable.",
+    "level": "warn",
+    "message": "8 vCPUs found, 8 needed; not verified: a cgroup CPU limit could not be read",
+    "notes": [
+      "/proc/self/cgroup is not in the expected form (line 1 has no `id:controllers:path` form), so cgroup CPU limits were not counted."
+    ],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": {
+      "missing": [],
+      "note": "A CPU limit that could lower the count was not read."
+    }
+  }
+}

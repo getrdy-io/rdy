@@ -1,0 +1,12 @@
+schema = 1
+name = "loopback-only"
+summary = "6443 is held on 127.0.0.1 only while the product binds every address"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = true
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "nofile-dropin-wins"
+summary = "Three layers set the limit and the last name wins"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

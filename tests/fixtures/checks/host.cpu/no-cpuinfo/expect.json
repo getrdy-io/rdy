@@ -1,0 +1,39 @@
+{
+  "entry": {
+    "flags": [
+      "avx2"
+    ],
+    "id": "host.cpu",
+    "min": 8
+  },
+  "result": {
+    "expected": {
+      "flags": [
+        "avx2"
+      ],
+      "min": 8
+    },
+    "fix": "Check the flags line of /proc/cpuinfo by hand, or run rdy where /proc/cpuinfo is readable.",
+    "level": "warn",
+    "message": "8 vCPUs found, 8 needed; could not read the CPU flags",
+    "notes": [
+      "/proc/cpuinfo does not exist here, so CPU flags cannot be read."
+    ],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": null,
+      "logical_cores": 8,
+      "physical_cores": null,
+      "quota_cores": null,
+      "virtualization": "unknown",
+      "x86_64_level": null
+    },
+    "partial": {
+      "missing": [],
+      "note": "The CPU flags were not read."
+    }
+  }
+}

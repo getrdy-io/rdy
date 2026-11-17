@@ -78,6 +78,10 @@ fn every_cli_error() -> Vec<CliError> {
             path: s("rdy-report-x"),
             reason: IoReason::DiskFull.into(),
         },
+        CliError::ReportWriter {
+            message: s("the report is too big"),
+            fix: s("send this to the vendor"),
+        },
         CliError::Interrupted,
         CliError::Internal(InternalKind::Bug),
         CliError::Internal(InternalKind::OutputClosed),
@@ -87,6 +91,9 @@ fn every_cli_error() -> Vec<CliError> {
             reason: IoReason::DiskFull,
         }),
         CliError::Internal(InternalKind::NotImplemented { command: "run" }),
+        CliError::Internal(InternalKind::SecretRefused {
+            names: vec![s("API_TOKEN")],
+        }),
         CliError::Internal(InternalKind::Privilege(PrivilegeError::Refused(vec![
             Refusal::AtSecure,
         ]))),
@@ -105,6 +112,7 @@ fn check_variant(e: &CliError) -> ErrorCode {
         | CliError::Prompt(_)
         | CliError::TrustStore(_)
         | CliError::ReportWrite { .. }
+        | CliError::ReportWriter { .. }
         | CliError::Interrupted
         | CliError::Internal(_) => {
             let r = e.render();
@@ -291,6 +299,36 @@ fn every_spec_error_maps_to_a_code_with_a_hint_and_the_right_exit() {
             assert!(!cli.render().message.is_empty(), "{error:?}");
             assert_eq!(cli.exit_code().code(), 64, "{error:?}");
         }
+    }
+}
+
+/// M1-094: a spec that names 65 distinct hosts is refused by the real parser and exits 64.
+#[test]
+fn a_spec_with_more_than_64_hosts_exits_64() {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/specs/invalid");
+    for name in [
+        "too-many-endpoints.yaml",
+        "too-many-hosts-across-checks.yaml",
+    ] {
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let error = match rdy_spec::parse_unverified(&bytes) {
+            Err(error) => error,
+            Ok(_) => panic!("{name} must be refused"),
+        };
+        assert!(
+            matches!(
+                error,
+                SpecError::TooManyHosts {
+                    count: 65,
+                    limit: 64
+                }
+            ),
+            "{name}: {error:?}"
+        );
+        let cli = CliError::spec(name, error);
+        assert_eq!(cli.code(), ErrorCode::SpecInvalid);
+        assert_eq!(cli.exit_code().code(), 64);
     }
 }
 

@@ -1,0 +1,30 @@
+{
+  "entry": {
+    "forbid": [
+      "falco"
+    ],
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": [
+        "falco"
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "No known security software process was found among 5 processes.",
+    "notes": [
+      "rdy sees the processes of the machine it runs on. In a container, host processes are not visible."
+    ],
+    "observed": {
+      "detected": [],
+      "limited_view": false,
+      "list_cut": false,
+      "processes_read": 5,
+      "processes_unreadable": 0
+    },
+    "partial": null
+  }
+}

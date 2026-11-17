@@ -4,6 +4,9 @@
 //! - `crates/rdy-cli/src`, outside `#[cfg(test)]` items, never names `Replay` or `testing`.
 //! - `live_backend` appears outside test code in `src/entry.rs` only (INV-07). The lint wall allows the
 //!   one `expect(clippy::disallowed_methods)` there and in no other file of this crate.
+//! - `RunHooks` is built in exactly one place, `src/entry.rs`, and only as `RunHooks::default()`
+//!   (SEC-154, M1-176). The hooks are how a test steers a run (the clock, the deadline, the families),
+//!   so the shipped binary must never build any other value.
 //! - The normal `rdy-engine` dependency does not turn on `testing`. CI's `cargo tree` step checks the
 //!   built graph on every push; this is the same rule at the manifest.
 //!
@@ -123,6 +126,139 @@ fn only_the_entry_point_builds_the_live_backend() {
         }
     }
     assert_eq!(found, [Some("entry.rs".to_owned())]);
+}
+
+/// The hook fields a test steers a run through. A new field of `RunHooks` goes here too (the unit test
+/// in `src/hooks.rs` names every field, so adding one without it does not compile).
+const HOOK_FIELDS: [&str; 4] = ["clock", "run_id", "deadline", "families"];
+
+/// What a shipped line does to `RunHooks`, if anything.
+#[derive(Debug, PartialEq, Eq)]
+enum Use {
+    /// A path call (`RunHooks::default()`, `RunHooks::new(..)`), a struct literal or a tuple call.
+    Builds,
+    /// Anything else that makes a value or changes one: an assignment to a hook field, `&mut RunHooks`,
+    /// a typed `let` that takes a default, an `impl` block (so no `Self { .. }` can exist) or a manual
+    /// `Default`.
+    Steers(&'static str),
+}
+
+/// Whether `line` has `.field` on any receiver followed by `=` that is not `==` or `=>`. A renamed
+/// variable (`h.clock = ..`) must not slip past, so the receiver is not checked.
+fn assigns_field(line: &str, field: &str) -> bool {
+    let needle = format!(".{field}");
+    line.match_indices(&needle).any(|(at, _)| {
+        let rest = &line[at + needle.len()..];
+        if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            return false;
+        }
+        let rest = rest.trim_start();
+        rest.starts_with('=') && !rest.starts_with("==") && !rest.starts_with("=>")
+    })
+}
+
+/// How `line` uses `RunHooks` to build or change a value. The type's own definition, a mention in a
+/// signature and a `use` are not uses.
+fn run_hooks_use(line: &str) -> Option<Use> {
+    let line = line.trim_start();
+    if line.starts_with("pub struct RunHooks") {
+        return None;
+    }
+    if line.starts_with("impl RunHooks") || line.contains("for RunHooks") {
+        return Some(Use::Steers("an impl block of RunHooks"));
+    }
+    if line.contains("&mut RunHooks") {
+        return Some(Use::Steers("&mut RunHooks"));
+    }
+    if line.contains("RunHooks =") {
+        return Some(Use::Steers(
+            "a typed value of RunHooks that takes a default",
+        ));
+    }
+    if HOOK_FIELDS.iter().any(|field| assigns_field(line, field)) {
+        return Some(Use::Steers("an assignment to a hook field"));
+    }
+    ["RunHooks::", "RunHooks {", "RunHooks("]
+        .iter()
+        .any(|pattern| line.contains(pattern))
+        .then_some(Use::Builds)
+}
+
+#[test]
+fn only_the_entry_point_builds_run_hooks_and_only_as_the_default() {
+    let mut builds = Vec::new();
+    let mut steers = Vec::new();
+    let mut entry_code = Vec::new();
+    for (path, code) in shipped_files() {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        for line in &code {
+            // The one assignment to a field of that name that is not a hook: the engine's run options.
+            if name == "run_cmd.rs" && line.trim() == "options.deadline = deadline;" {
+                continue;
+            }
+            match run_hooks_use(line) {
+                Some(Use::Builds) => builds.push((name.clone(), line.trim().to_owned())),
+                Some(Use::Steers(why)) => steers.push((name.clone(), why, line.trim().to_owned())),
+                None => {}
+            }
+        }
+        if name == "entry.rs" {
+            entry_code = code;
+        }
+    }
+    assert!(
+        steers.is_empty(),
+        "shipped code steers RunHooks: {steers:?}"
+    );
+    assert_eq!(
+        builds.len(),
+        1,
+        "RunHooks is built in more than one place: {builds:?}"
+    );
+    let (name, line) = &builds[0];
+    assert_eq!(name, "entry.rs", "{builds:?}");
+    assert_eq!(line, "RunHooks::default(),", "{builds:?}");
+    // And it is an argument of the call that runs the command, not a value kept and changed.
+    let at = entry_code
+        .iter()
+        .position(|code| code.contains("RunHooks::default()"))
+        .unwrap_or_else(|| panic!("entry.rs does not build the default hooks"));
+    let before = entry_code[at.saturating_sub(4)..at].join("\n");
+    assert!(
+        before.contains("run_watched("),
+        "RunHooks::default() is not an argument of run_watched(..): {before}"
+    );
+}
+
+#[test]
+fn the_run_hooks_scan_sees_what_it_must() {
+    let builds = |line| run_hooks_use(line) == Some(Use::Builds);
+    let steers = |line| matches!(run_hooks_use(line), Some(Use::Steers(_)));
+    assert!(builds(
+        "    runtime.block_on(run(args, backend, RunHooks::default(), out))"
+    ));
+    assert!(builds("let hooks = RunHooks { clock: None };"));
+    assert!(builds("let hooks = RunHooks::new();"));
+    // Steering, one line each.
+    assert!(steers("hooks.clock = Some(now);"));
+    assert!(steers("hooks.deadline  = Some(d);"));
+    assert!(steers("hooks.run_id=None;"));
+    assert!(steers("h.clock = Some(now);"));
+    assert!(steers("self.families =  None;"));
+    assert!(steers("fn tweak(h: &mut RunHooks) {"));
+    assert!(steers("let h: RunHooks = Default::default();"));
+    assert!(steers("impl RunHooks {"));
+    assert!(steers("impl Default for RunHooks {"));
+    // Not uses.
+    assert!(run_hooks_use("use crate::hooks::RunHooks;").is_none());
+    assert!(run_hooks_use("    hooks: RunHooks,").is_none());
+    assert!(run_hooks_use("pub struct RunHooks {").is_none());
+    assert!(run_hooks_use("if hooks.clock == None {").is_none());
+    assert!(run_hooks_use("let clock = hooks.clock.unwrap_or(now);").is_none());
+    assert!(run_hooks_use("match hooks.deadline { _ => 1 }").is_none());
 }
 
 #[test]

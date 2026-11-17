@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "amzn",
+        "versions": [
+          "2023"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "amzn",
+          "versions": [
+            "2023"
+          ]
+        }
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Amazon Linux 2023 on aarch64 meets the spec.",
+    "notes": [],
+    "observed": {
+      "arch": "aarch64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "6.1.72-96.166.amzn2023.aarch64",
+      "os": {
+        "id": "amzn",
+        "id_like": [
+          "fedora"
+        ],
+        "name": "Amazon Linux",
+        "pretty_name": "Amazon Linux 2023",
+        "source": "/etc/os-release",
+        "version_id": "2023"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

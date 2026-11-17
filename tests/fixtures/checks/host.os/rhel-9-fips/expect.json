@@ -1,0 +1,64 @@
+{
+  "entry": {
+    "fips": "forbid",
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "forbid",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": "Run `fips-mode-setup --disable`, then reboot.",
+    "level": "fail",
+    "message": "FIPS mode is on, and the spec forbids it.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": true,
+      "init": "systemd",
+      "kernel": "5.14.0-362.el9.x86_64",
+      "os": {
+        "id": "rhel",
+        "id_like": [
+          "fedora"
+        ],
+        "name": "Red Hat Enterprise Linux",
+        "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
+        "source": "/etc/os-release",
+        "version_id": "9.2"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

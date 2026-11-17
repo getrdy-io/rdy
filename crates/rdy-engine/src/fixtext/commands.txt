@@ -15,6 +15,7 @@ az
 chcon
 chmod
 chronyc
+containerd
 df
 dkms
 dnf
@@ -45,6 +46,7 @@ rancher
 rdy
 rmmod
 setenforce
+ss
 swapoff
 sysctl
 systemctl
@@ -56,3 +58,4 @@ update-ca-certificates
 update-ca-trust
 update-grub
 update-initramfs
+usermod

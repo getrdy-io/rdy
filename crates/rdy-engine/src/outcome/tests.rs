@@ -261,7 +261,7 @@ fn without_a_spec_fix_rdy_text_is_the_fix_and_there_is_no_builtin_fix() {
 }
 
 #[test]
-fn a_block_or_warn_with_no_advice_anywhere_still_has_a_fix() {
+fn a_block_or_warn_with_no_fix_of_its_own_and_none_in_the_spec_shows_the_check_remediation() {
     for finding in [Finding::fail("low"), Finding::warn("low")] {
         let result = map(
             &PLAIN,
@@ -269,10 +269,44 @@ fn a_block_or_warn_with_no_advice_anywhere_still_has_a_fix() {
             &ctx("fake.plain", &[]),
             Ok(finding),
         );
-        let fix = result.fix.expect("fix");
-        assert!(!fix.is_empty());
+        assert_eq!(result.fix.as_deref(), Some(PLAIN.meta.remediation));
         assert_eq!(result.fix_source, Some(FixSource::Rdy));
+        assert_eq!(result.builtin_fix, None);
     }
+}
+
+#[test]
+fn a_spec_fix_still_wins_over_the_remediation() {
+    let result = map(
+        &PLAIN,
+        &entry_with_fix("fake.plain"),
+        &ctx("fake.plain", &[]),
+        Ok(Finding::fail("low")),
+    );
+    assert_eq!(result.fix.as_deref(), Some(VENDOR_FIX));
+    assert_eq!(result.fix_source, Some(FixSource::FromSpec));
+    assert_eq!(result.builtin_fix, None);
+}
+
+#[test]
+fn a_blank_remediation_falls_back_to_the_generic_no_advice_text() {
+    static BLANK: CheckInfo = CheckInfo {
+        meta: CheckMeta {
+            title: "Blank",
+            remediation: "  ",
+        },
+        ..info("fake.blank", &[], &[], FULL)
+    };
+    let result = map(
+        &BLANK,
+        &entry("fake.blank"),
+        &ctx("fake.blank", &[]),
+        Ok(Finding::fail("low")),
+    );
+    assert_eq!(
+        result.fix.as_deref(),
+        Some("rdy has no advice for this result. Tell the vendor which check it was.")
+    );
 }
 
 #[test]

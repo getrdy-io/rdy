@@ -1,0 +1,33 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 8
+  },
+  "result": {
+    "expected": {
+      "min": 8
+    },
+    "fix": "Read Cpus_allowed_list in /proc/self/status by hand and confirm it lists 8 CPUs or more, or run rdy where /proc is readable.",
+    "level": "warn",
+    "message": "8 vCPUs found, 8 needed; not verified: the CPU affinity mask could not be read",
+    "notes": [
+      "/proc/self/status does not exist here, so a CPU affinity mask is not counted."
+    ],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": {
+      "missing": [],
+      "note": "A CPU limit that could lower the count was not read."
+    }
+  }
+}

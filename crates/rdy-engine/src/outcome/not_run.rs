@@ -1,8 +1,8 @@
 //! Results for a check that did not finish: a timeout, a run that hit its deadline first, and a
 //! report that had to be written without a snapshot (M1-043).
 //!
-//! The scheduler and the watchdog both need them, and the outcome mapping of M1-057 uses the same
-//! functions for `End::TimedOut` and `End::RunDeadline`. Each takes a template: any result of the same
+//! The scheduler and the watchdog both need them, and the engine (M1-057) uses the same functions for
+//! `End::TimedOut`, `End::RunDeadline`, `End::Panicked` and `End::Cancelled`. Each takes a template: any result of the same
 //! entry, from which only the identity (key, id, name, family, severity and needs) is kept. The text
 //! is fixed, so it holds nothing that needs redaction. The spec's `fix` is never shown, because the
 //! check did not produce the failure the vendor's advice is about (01 section 2.6).
@@ -36,6 +36,34 @@ pub fn run_deadline_result(template: &CheckResult, limit: Duration) -> CheckResu
         limit_text(limit)
     );
     result.fix = Some("Run again. If it happens again, tell the vendor.".into());
+    result.refresh_bucket();
+    result
+}
+
+/// The result for a check that panicked (`error`, `error_kind: panic`).
+///
+/// The text is fixed. A panic message is raw and can hold anything the check had in hand, so it never
+/// reaches the report (ADR 0008 decision 8, ADR 0015 decision 6).
+#[must_use]
+pub fn panicked_result(template: &CheckResult) -> CheckResult {
+    let mut result = base(template, Status::Error);
+    result.error_kind = Some(ErrorKind::Panic);
+    result.message = "The check hit an internal error and stopped.".into();
+    result.fix = Some(
+        "This is a bug in rdy. Report it at https://github.com/getrdy-io/rdy/issues and name this check."
+            .into(),
+    );
+    result.refresh_bucket();
+    result
+}
+
+/// The result for a check that never started because the run was cancelled.
+#[must_use]
+pub fn cancelled_result(template: &CheckResult) -> CheckResult {
+    let mut result = base(template, Status::Skipped);
+    result.skip_kind = Some(SkipKind::Cancelled);
+    result.message = "Not run. The run was interrupted.".into();
+    result.fix = Some("Run it again.".into());
     result.refresh_bucket();
     result
 }
@@ -147,6 +175,25 @@ mod tests {
         assert_eq!(result.status, Status::Error);
         assert_eq!(result.error_kind, Some(ErrorKind::CheckFailed));
         assert_eq!(result.bucket, Bucket::RequiredNotRun);
+    }
+
+    #[test]
+    fn a_panic_is_an_error_with_a_fixed_message() {
+        let result = panicked_result(&template());
+        assert_eq!(result.status, Status::Error);
+        assert_eq!(result.error_kind, Some(ErrorKind::Panic));
+        assert_eq!(result.key, "net.dns/primary");
+        assert_eq!(result.fix_source, Some(FixSource::Rdy));
+        assert_eq!(result.bucket, Bucket::RequiredNotRun);
+    }
+
+    #[test]
+    fn a_cancelled_check_is_a_skip_that_counts_as_not_run() {
+        let result = cancelled_result(&template());
+        assert_eq!(result.status, Status::Skipped);
+        assert_eq!(result.skip_kind, Some(SkipKind::Cancelled));
+        assert_eq!(result.bucket, Bucket::RequiredNotRun);
+        assert_eq!(result.message, "Not run. The run was interrupted.");
     }
 
     #[test]

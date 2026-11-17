@@ -1,0 +1,7 @@
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "storage-driver": "overlay2",
+  "proxies": {
+    "http-proxy": "http://acme-svc:REDACTED-TEST-TOKEN@proxy.acme.example:3128"
+  }
+}

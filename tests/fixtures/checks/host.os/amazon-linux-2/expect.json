@@ -1,0 +1,51 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "amzn",
+        "versions": [
+          "2"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "amzn",
+          "versions": [
+            "2"
+          ]
+        }
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Amazon Linux 2 on x86_64 meets the spec.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "5.10.205-195.804.amzn2.x86_64",
+      "os": {
+        "id": "amzn",
+        "id_like": [
+          "centos",
+          "rhel",
+          "fedora"
+        ],
+        "name": "Amazon Linux",
+        "pretty_name": "Amazon Linux 2",
+        "source": "/etc/os-release",
+        "version_id": "2"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

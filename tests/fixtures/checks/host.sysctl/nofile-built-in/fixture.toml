@@ -1,0 +1,12 @@
+schema = 1
+name = "nofile-built-in"
+summary = "system.conf is all comments, so systemd's built-in limit applies"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

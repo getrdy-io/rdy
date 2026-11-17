@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "2Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 0,
+      "min_available_bytes": 1073741824,
+      "min_bytes": 2147483648,
+      "swap": "any"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "4 GiB found, 2 GiB needed, limited by cgroup /system.slice, host has 62.8 GiB",
+    "notes": [
+      "1 cgroup memory file(s) could not be read, so a limit may have been missed.",
+      "Available memory is the host's figure capped at the cgroup limit. Use inside the cgroup is not measured."
+    ],
+    "observed": {
+      "available_bytes": 59392000000,
+      "available_effective_bytes": 4294967296,
+      "available_estimated": false,
+      "cgroup_hierarchy": "v2",
+      "cgroup_limit_at": "/system.slice",
+      "cgroup_limit_bytes": 4294967296,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 4294967296,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 67420155904
+    },
+    "partial": null
+  }
+}

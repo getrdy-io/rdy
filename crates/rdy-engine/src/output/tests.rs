@@ -254,6 +254,26 @@ fn the_timestamp_has_the_documented_form() {
     assert!(is_timestamp(&report_timestamp(SystemTime::now())));
 }
 
+#[test]
+fn the_report_time_has_milliseconds_and_the_schema_form() {
+    let at = |secs: u64, millis: u64| {
+        UNIX_EPOCH + std::time::Duration::from_secs(secs) + std::time::Duration::from_millis(millis)
+    };
+    assert_eq!(report_time(at(0, 0)), "1970-01-01T00:00:00.000Z");
+    assert_eq!(
+        report_time(at(1_709_999_999, 123)),
+        "2024-03-09T15:59:59.123Z"
+    );
+    assert_eq!(
+        report_time(UNIX_EPOCH - std::time::Duration::from_secs(5)),
+        "1970-01-01T00:00:00.000Z"
+    );
+    let past_9999 = UNIX_EPOCH
+        .checked_add(std::time::Duration::from_secs(253_402_300_799 + 86_400))
+        .expect("a time just past year 9999 fits in SystemTime");
+    assert_eq!(report_time(past_9999), "9999-12-31T23:59:59.999Z");
+}
+
 /// Runs `create_new` with `swap` between the `mkdir` and the open, and removes the hook after.
 fn create_new_with_swap(
     parent: &Path,

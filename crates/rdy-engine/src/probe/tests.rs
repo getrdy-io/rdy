@@ -1890,7 +1890,8 @@ fn link_reads_fold_and_drop_like_file_reads() {
     for entry in &folded {
         assert_eq!(field(entry, "of"), Some(&json!("read_link")));
     }
-    assert_eq!(field(folded[0], "under"), Some(&json!("/proc/4242/fd")));
+    // The refused fd links of a walk share one key for the check, whatever process they were in.
+    assert_eq!(field(folded[0], "under"), Some(&json!("/proc/<pid>/fd")));
     assert_eq!(field(folded[0], "count"), Some(&json!(30)));
     assert_eq!(folded[0].outcome, ActionOutcome::Denied);
     assert_eq!(field(folded[1], "under"), Some(&json!("/proc/4243/fd")));
@@ -2074,6 +2075,49 @@ fn denied_calls_past_the_target_cap_share_one_entry_under_a_star() {
         hub.action_log().actions.len(),
         DENIED_TARGETS + COALESCE_AFTER + 2
     );
+}
+
+#[test]
+fn refused_fd_links_of_a_whole_walk_fold_under_one_key() {
+    // 300 processes with 30 refused links each: 9,000 refusals, in 300 directories.
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.ports", Os::Linux, None);
+    for pid in 0..300 {
+        for fd in 0..30 {
+            let (_, mut entry) = probe
+                .begin(ActionKind::ReadLink, Map::new(), "fixture")
+                .expect("probe is live");
+            entry.set("path", format!("/proc/{pid}/fd/{fd}"));
+            entry.set("rule", RULE_FD_TARGET);
+            entry.finish(ActionOutcome::Denied);
+        }
+    }
+    let log = hub.action_log();
+    assert_eq!(log.last_resort_drops, 0);
+    assert!(!log.truncated, "{:?}", log.dropped);
+    assert_eq!(log.actions.len(), COALESCE_AFTER + 1);
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .collect();
+    assert_eq!(folded.len(), 1);
+    assert_eq!(field(folded[0], "under"), Some(&json!("/proc/<pid>/fd")));
+    assert_eq!(field(folded[0], "of"), Some(&json!("read_link")));
+    assert_eq!(
+        field(folded[0], "count"),
+        Some(&json!(9000 - COALESCE_AFTER))
+    );
+    // Another rule on a link still folds per directory.
+    for pid in 0..3 {
+        let (_, mut entry) = probe
+            .begin(ActionKind::ReadLink, Map::new(), "fixture")
+            .expect("probe is live");
+        entry.set("path", format!("/srv/{pid}/link"));
+        entry.set("rule", "refused for the test");
+        entry.finish(ActionOutcome::Denied);
+    }
+    assert_eq!(hub.action_log().actions.len(), COALESCE_AFTER + 1 + 3);
 }
 
 #[test]

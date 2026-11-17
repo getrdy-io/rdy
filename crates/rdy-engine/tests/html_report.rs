@@ -8,13 +8,16 @@
 //! Checker over the two goldens (`scripts/validate-html.sh`). `well_formed` below is
 //! the smoke test that runs on all five legs: the doctype, `lang`, `color-scheme`, balanced tags, void
 //! elements and unique ids. The structure test (M1-082) goes further.
+//!
+//! The embedded result (M1-078, SEC-64) is tested at the end: the text of the `<script>` element is the
+//! bytes of the `.json` file, the hash on it is their SHA-256, and a hostile hostname cannot close it.
 
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
-use rdy_engine::report::render_html;
+use rdy_engine::report::{HtmlError, JsonError, json_bytes, read_report, render_html};
 use rdy_engine::testing::{fixtures_dir, golden::assert_golden};
 use rdy_spec::result::{Bucket, Report, group_by_bucket};
 use serde_json::{Value, json};
@@ -187,12 +190,28 @@ fn the_page_sets_the_csp_lang_color_scheme_and_loads_nothing() -> TestResult {
     ] {
         assert!(!head.contains(forbidden), "{forbidden:?} is in the head");
     }
-    for forbidden in ["<link", "<script", " src="] {
+    for forbidden in ["<link", " src="] {
         assert!(!body.contains(forbidden), "{forbidden:?} is in the body");
     }
-    // Every `href` is a link inside the page.
-    for part in html.split(" href=\"").skip(1) {
-        assert!(part.starts_with('#'), "an href leaves the page: {part:.40}");
+    // The only script element is the data block of the embedded result. Its type is not JavaScript, so a
+    // browser never runs it, and the CSP above has no `script-src` anyway.
+    assert_eq!(html.matches("<script").count(), 1);
+    assert!(body.contains(OPEN));
+    // Every link either stays inside the page or says `rel="noopener noreferrer"` (ADR 0003 decision 8).
+    for part in html.split("<a ").skip(1) {
+        let tag = format!(" {}", &part[..part.find('>').unwrap_or(part.len())]);
+        let href = attribute(&tag, "href").ok_or("a link has no href")?;
+        if !href.starts_with('#') {
+            assert_eq!(
+                attribute(&tag, "rel").as_deref(),
+                Some("noopener noreferrer"),
+                "an outside link has no rel: {tag}"
+            );
+        }
+    }
+    // The page has no event handler and no `javascript:` URL.
+    for forbidden in [" onerror=", " onclick=", " onload=", "javascript:"] {
+        assert!(!html.contains(forbidden), "{forbidden:?} is on the page");
     }
     Ok(())
 }
@@ -346,13 +365,12 @@ fn untrusted_text_is_shown_as_text() -> TestResult {
 /// The HTML half of the M1-056 exit test (PC-43, carried by M1-062): the canaries of the JSON test never
 /// reach the page, and neither do canaries planted in the free text the page does show.
 ///
-/// The page does not show `observed`, `expected` or the action log yet (M1-080 and M1-081 add them), so
-/// the first group is a check on those two tickets as much as on this one: it must keep passing when they
-/// land. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
+/// The page shows the action log (M1-080) but not `observed` or `expected` yet (M1-081 adds them), so the
+/// `observed` canaries are vacuous until then: that test must keep passing when it lands. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
 /// registration of the proxy password is M1-091's.
 #[test]
 fn canaries_never_reach_the_page() -> TestResult {
-    const CANARIES: [&str; 11] = [
+    const CANARIES: [&str; 12] = [
         "canary-env-token-2",
         "canary-kube-token-3",
         "canary-kube-text-3b",
@@ -364,6 +382,7 @@ fn canaries_never_reach_the_page() -> TestResult {
         "canary-Zk3v9Qx7-note",
         "canary-Zk3v9Qx7-fix",
         "canary-Zk3v9Qx7-part",
+        "canary-Zk3v9Qx7-act",
     ];
     let mut doc = five_buckets_doc()?;
     doc["checks"][0]["observed"] = json!({
@@ -377,7 +396,21 @@ fn canaries_never_reach_the_page() -> TestResult {
         "stdout": "Authorization: Bearer canary-output-hdr-4\nok",
         "cmdline": ["kubectl", "--token", "canary-argv-5"],
     });
-    doc["actions"][0]["argv"] = json!(["/usr/bin/tool", "--password", "canary-action-argv-6"]);
+    // A command in the action log, whose argument after `--password` is a secret, and a failed call whose
+    // error text holds one (M1-080).
+    let mut command = doc["actions"][0].clone();
+    command["kind"] = json!("exec");
+    command["program"] = json!("/usr/bin/tool");
+    command["argv"] = json!(["--password", "canary-action-argv-6", "--verbose"]);
+    command["exit"] = json!(0);
+    let mut failure = doc["actions"][0].clone();
+    failure["outcome"] = json!("failed");
+    failure["error"] = json!("refused, token=canary-Zk3v9Qx7-act");
+    let actions = doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?;
+    actions.push(command);
+    actions.push(failure);
     doc["host"]["hostname"] = json!("web-01 password=canary-Zk3v9Qx7-host");
     doc["checks"][1]["message"] = json!("failed, token=canary-Zk3v9Qx7-msg was sent");
     doc["checks"][1]["notes"] = json!(["secret=canary-Zk3v9Qx7-note"]);
@@ -399,6 +432,11 @@ fn canaries_never_reach_the_page() -> TestResult {
     assert!(html.contains("<bdi>secret="));
     assert!(html.contains("<bdi>run it with password="));
     assert!(html.contains("<bdi>token="));
+    // The action log shows the command with the secret replaced, not only without it (M1-080). The
+    // placeholder keeps the flag and the argument after it.
+    assert!(html.contains("<bdi>/usr/bin/tool</bdi> <bdi>--password</bdi> <bdi>[REDACTED:"));
+    assert!(html.contains("]</bdi> <bdi>--verbose</bdi>"));
+    assert!(html.contains("Failed: <bdi>refused, token=[REDACTED:"));
     Ok(())
 }
 
@@ -529,5 +567,491 @@ fn all_five_sections_match_their_golden() -> TestResult {
         fixtures_dir().join("reports/golden/five-sections-exec-plugin.html"),
         html_of(five_buckets_doc()?)?.as_bytes(),
     );
+    Ok(())
+}
+
+/// The vendor's fix is labelled with who wrote it. Only a verified signature with a pinned key puts the
+/// product's name on it (01 section 2.6).
+#[test]
+fn a_spec_fix_is_labelled_with_the_product_when_pinned() -> TestResult {
+    let html = html_of(sample()?)?;
+    assert!(html.contains(
+        "<span class=\"label\">From <bdi>acme-platform</bdi>:</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+    ));
+    // rdy's own text for a check that did not run says so, and the extra text below a vendor fix too.
+    assert!(html.contains("<span class=\"label\">From rdy:</span>"));
+    assert!(html.contains("<span class=\"label\">More from rdy:</span>"));
+    assert!(!html.contains("Fix:"));
+    Ok(())
+}
+
+#[test]
+fn a_spec_fix_that_was_not_verified_does_not_carry_the_product_name() -> TestResult {
+    let mut unsigned = sample()?;
+    unsigned["signature"] = json!({"state": "unsigned"});
+    let mut one_run_key = sample()?;
+    one_run_key["signature"]["trust_source"] = json!("flag");
+    for doc in [unsigned, one_run_key] {
+        let html = html_of(doc)?;
+        assert!(html.contains(
+            "<span class=\"label\">From the spec file (not verified):</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+        ));
+        assert!(!html.contains("From <bdi>acme-platform</bdi>"));
+        // rdy's own text keeps its label.
+        assert!(html.contains("<span class=\"label\">From rdy:</span>"));
+    }
+    Ok(())
+}
+
+/// A `fix_source` this version does not know, and a fix with none, are not verified (SEC-22-3). The raw
+/// value is never shown, and the product name is not put on it even when the key is pinned.
+#[test]
+fn an_unknown_or_missing_fix_source_is_labelled_not_verified() -> TestResult {
+    let mut unknown = sample()?;
+    unknown["checks"][1]["fix_source"] = json!("future_source");
+    let mut missing = sample()?;
+    missing["checks"][1]["fix_source"] = Value::Null;
+    for doc in [unknown, missing] {
+        let html = html_of(doc)?;
+        assert!(html.contains(
+            "<span class=\"label\">From the spec file (not verified):</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+        ));
+        // The visible page, not the embedded JSON, which holds the raw value by design.
+        let visible = html.split(OPEN).next().unwrap_or_default();
+        assert!(!visible.contains("future_source"));
+        assert!(!visible.contains("unknown source"));
+        // The other vendor fix on the page, whose source is known, keeps the product label.
+        assert!(html.contains(
+            "<span class=\"label\">From <bdi>acme-platform</bdi>:</span> <bdi>Ask your network team"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_product_name_in_a_fix_label_is_shown_as_text() -> TestResult {
+    let mut doc = sample()?;
+    doc["spec"]["product"] = json!("<b>x</b>");
+    let html = html_of(doc)?;
+    assert!(
+        html.contains("<span class=\"label\">From <bdi>&#60;b&#62;x&#60;/b&#62;</bdi>:</span>")
+    );
+    Ok(())
+}
+
+/// The part of the page that is the action log: from its section to the end of the section.
+fn action_section(html: &str) -> TestResult<&str> {
+    let start = at(html, "<section aria-labelledby=\"actions\">")?;
+    let end = at(&html[start..], "</section>")? + start;
+    Ok(&html[start..end])
+}
+
+#[test]
+fn the_action_log_is_one_table_with_no_details_element() -> TestResult {
+    for doc in [sample()?, five_buckets_doc()?] {
+        let html = html_of(doc)?;
+        assert!(!html.contains("<details"));
+        let section = action_section(&html)?;
+        assert_eq!(section.matches("<table>").count(), 1);
+        assert!(section.contains("<h2 id=\"actions\">What rdy read and contacted</h2>"));
+        assert!(section.contains("<caption>"));
+        assert!(section.contains("<th scope=\"col\">Detail</th>"));
+        // The sample has 15 entries, and the header row is one more.
+        assert_eq!(section.matches("<tr>").count(), 16);
+        assert!(html.contains("<li><a href=\"#actions\">What rdy read and contacted</a></li>"));
+        // It comes after the run and spec details.
+        assert!(at(&html, "<h2 id=\"details\">")? < at(&html, "<h2 id=\"actions\">")?);
+        assert_eq!(well_formed(&html), Vec::<String>::new());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_action_row_says_what_was_done_to_what_and_how_it_ended() -> TestResult {
+    let html = html_of(sample()?)?;
+    let section = action_section(&html)?;
+    assert!(section.contains(
+        "<tr><th scope=\"row\">1</th><td>the run itself</td><td>Read a file</td><td><bdi>~/.kube/config</bdi></td><td>Done, 5412 bytes</td></tr>"
+    ));
+    assert!(section.contains(
+        "<td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td>"
+    ));
+    assert!(section.contains(
+        "<td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, reply code 200</td>"
+    ));
+    assert!(section.contains(
+        "<td>Opened a connection</td><td><bdi>license.acme.example</bdi>:<bdi>443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td>"
+    ));
+    // No raw JSON key or engine word is visible text.
+    for raw in [
+        "read_dir",
+        "via_proxy",
+        "duration_ms",
+        "at_ms",
+        "outcome",
+        "denied",
+    ] {
+        assert!(
+            !section.contains(raw),
+            "{raw:?} is visible in the action log"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn action_text_from_the_report_is_shown_as_text() -> TestResult {
+    let mut doc = sample()?;
+    doc["actions"][0]["path"] = json!("</td><script>x</script>");
+    doc["actions"][1]["kind"] = json!("<i>kind</i>");
+    let html = html_of(doc)?;
+    assert!(html.contains("<bdi>&#60;/td&#62;&#60;script&#62;x&#60;/script&#62;</bdi>"));
+    assert!(html.contains("<td><bdi>&#60;i&#62;kind&#60;/i&#62;</bdi></td>"));
+    assert!(!html.contains("<script>x"));
+    assert_eq!(well_formed(&html), Vec::<String>::new());
+    Ok(())
+}
+
+/// A sample whose action log is `count` copies of its first entry, numbered from 1.
+fn doc_with_actions(count: u64) -> TestResult<Value> {
+    let mut doc = sample()?;
+    let template = doc["actions"][0].clone();
+    let actions = doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?;
+    actions.clear();
+    for seq in 1..=count {
+        let mut entry = template.clone();
+        entry["seq"] = json!(seq);
+        actions.push(entry);
+    }
+    Ok(doc)
+}
+
+/// The page lists the first 1000 entries and counts the rest (01 section 6, item 7). The 5 MiB cap on the
+/// whole page is tested in the unit tests of `report/html` (`fit_page` takes the cap as an argument).
+#[test]
+fn the_action_log_stops_at_1000_rows_and_counts_the_rest() -> TestResult {
+    let html = html_of(doc_with_actions(1003)?)?;
+    let section = action_section(&html)?;
+    assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1000);
+    assert!(section.contains("<th scope=\"row\">1000</th>"));
+    assert!(!section.contains("<th scope=\"row\">1001</th>"));
+    assert!(section.contains("<p>3 more entries are in the embedded JSON."));
+    Ok(())
+}
+
+#[test]
+fn one_entry_left_out_reads_as_one_entry() -> TestResult {
+    let html = html_of(doc_with_actions(1001)?)?;
+    assert!(action_section(&html)?.contains("<p>1 more entry is in the embedded JSON."));
+    Ok(())
+}
+
+/// A refusal is never left to the JSON: every `denied` entry past the cut is a row too (SEC-22-1).
+#[test]
+fn a_refusal_past_the_row_limit_is_still_listed() -> TestResult {
+    let mut doc = doc_with_actions(1010)?;
+    for index in [1004, 1008] {
+        doc["actions"][index]["outcome"] = json!("denied");
+        doc["actions"][index]["rule"] = json!("read_denylist");
+    }
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1002);
+    assert!(section.contains("<th scope=\"row\">1005</th>"));
+    assert!(section.contains("<th scope=\"row\">1009</th>"));
+    assert!(!section.contains("<th scope=\"row\">1006</th>"));
+    assert_eq!(
+        section
+            .matches("Refused by rdy: <bdi>read_denylist</bdi>")
+            .count(),
+        2
+    );
+    assert!(section.contains("<p>8 more entries are in the embedded JSON. Every refused call in the log is listed above.</p>"));
+    Ok(())
+}
+
+/// A log the engine cut says so and counts what it dropped, and the caption never claims to be complete
+/// (SEC-22-2).
+#[test]
+fn a_cut_log_says_what_was_dropped() -> TestResult {
+    let plain_html = html_of(sample()?)?;
+    let plain_section = action_section(&plain_html)?;
+    assert!(plain_section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(!plain_section.contains("Every "));
+    assert!(!plain_section.contains("left some entries out"));
+
+    let mut doc = sample()?;
+    doc["actions_truncated"] = json!(true);
+    doc["actions_dropped"] = json!({"read": 120, "read_dir": 5, "future_kind": 2});
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(section.contains(
+        "<p>rdy left some entries out of its own log to stay within its size limits: 2 <bdi>future_kind</bdi>, 120 file reads, 5 folder listings.</p>"
+    ));
+    assert!(!section.contains("read_dir"));
+    Ok(())
+}
+
+#[test]
+fn a_folded_row_uses_plain_words() -> TestResult {
+    let mut doc = sample()?;
+    let mut entry = doc["actions"][0].clone();
+    entry["seq"] = json!(16);
+    entry["kind"] = json!("coalesced");
+    entry["outcome"] = json!("failed");
+    entry["error"] = json!("permission denied");
+    entry["of"] = json!("read_dir");
+    entry["under"] = json!("/var/lib");
+    entry["count"] = json!(12);
+    for key in ["path", "bytes", "truncated"] {
+        entry[key] = Value::Null;
+    }
+    doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?
+        .push(entry);
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains(
+        "<td>Many calls shown as one row</td><td>12 folder listings under <bdi>/var/lib</bdi></td>"
+    ));
+    assert!(!section.contains("read_dir"));
+    Ok(())
+}
+
+#[test]
+fn an_empty_action_log_says_so() -> TestResult {
+    let mut doc = sample()?;
+    doc["actions"] = json!([]);
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains("<p>rdy recorded nothing in this run.</p>"));
+    assert!(!section.contains("<table>"));
+    assert_eq!(well_formed(&html), Vec::<String>::new());
+    Ok(())
+}
+
+// ---- The embedded result (M1-078) ----
+
+const OPEN: &str = "<script type=\"application/json\" id=\"rdy-result\" data-sha256=\"";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    digest.as_ref().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+/// The `data-sha256` value and the text of the one result element: what an importer would read.
+fn embedded(html: &str) -> TestResult<(String, String)> {
+    let start = at(html, OPEN)? + OPEN.len();
+    let quote = html[start..]
+        .find("\">")
+        .ok_or("the attribute never ends")?;
+    let hash = html[start..start + quote].to_owned();
+    let text_start = start + quote + 2;
+    let end = html[text_start..]
+        .find("</script>")
+        .ok_or("the element never ends")?;
+    Ok((hash, html[text_start..text_start + end].to_owned()))
+}
+
+/// A hostname that tries to close the element, open another and end the line in a script.
+const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end</SCRIPT x><!--<ScRiPt>\u{2029}";
+
+/// The ticket's exit test: the hostname comes back unchanged from the embedded JSON, and on the page it is
+/// text.
+#[test]
+fn a_hostname_that_closes_the_script_round_trips_through_the_embedded_json() -> TestResult {
+    let mut doc = sample()?;
+    doc["host"]["hostname"] = json!(HOSTILE);
+    let report = redact(doc)?;
+    let html = render_html(&report)?;
+
+    // One element, and nothing in the text can end it, in any case.
+    let lower = html.to_ascii_lowercase();
+    assert_eq!(lower.matches("<script").count(), 1);
+    assert_eq!(lower.matches("</script").count(), 1);
+    let (hash, text) = embedded(&html)?;
+    assert!(!text.contains(['<', '>', '&', '\u{2028}', '\u{2029}']));
+    assert!(
+        text.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end\\u003c/SCRIPT x\\u003e\\u003c!--\\u003cScRiPt\\u003e\\u2029"),
+        "{text}"
+    );
+
+    // Read back, the hostname is the one the report holds.
+    let back: Value = serde_json::from_str(&text)?;
+    assert_eq!(back["host"]["hostname"], HOSTILE);
+    assert_eq!(report.host.hostname, HOSTILE);
+
+    // The text is the bytes of the `.json` file, and the attribute is their hash.
+    let json = json_bytes(&report)?;
+    assert_eq!(text, json.as_str());
+    assert_eq!(hash, sha256_hex(json.as_bytes()));
+    assert_eq!(hash.len(), 64);
+    assert!(
+        hash.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
+
+    // Outside the element the same hostname is text: no tag came out of it.
+    let before = &html[..at(&html, OPEN)?];
+    let after = &html[at(&html, "</script>")?..];
+    let outside = format!("{before}{after}");
+    assert!(outside.contains("&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;"));
+    for raw in ["<img", "onerror=x>", "<!--"] {
+        assert!(!outside.contains(raw), "{raw:?} reached the page as markup");
+    }
+    let outside_lower = outside.to_ascii_lowercase();
+    assert_eq!(outside_lower.matches("<script").count(), 0);
+    assert_eq!(outside_lower.matches("</script").count(), 1);
+    assert_eq!(well_formed(&html), Vec::<String>::new());
+    Ok(())
+}
+
+/// The escapes reach every field, not only the hostname: text in the message, fix, notes, `observed`
+/// (values and keys), the spec file name and the user cannot end the element or open a comment.
+#[test]
+fn hostile_text_in_any_field_cannot_end_the_element() -> TestResult {
+    let mut doc = five_buckets_doc()?;
+    let evil = "</script><!--<script>alert(1)</script>-->";
+    doc["checks"][1]["message"] = json!(evil);
+    doc["checks"][1]["fix"] = json!(evil);
+    doc["checks"][1]["notes"] = json!([evil]);
+    doc["checks"][0]["observed"] = json!({ "text": evil, "list": [evil], "<key>": 1 });
+    doc["spec"]["file_name"] = json!(evil);
+    doc["identity"]["user"] = json!(evil);
+    let report = redact(doc)?;
+    let html = render_html(&report)?;
+    let (_, text) = embedded(&html)?;
+    assert_eq!(html.matches("<script").count(), 1);
+    assert_eq!(html.matches("</script>").count(), 1);
+    assert!(!html.contains("<!--"));
+    assert!(!text.contains(['<', '>', '&']));
+    let back: Value = serde_json::from_str(&text)?;
+    assert_eq!(back["checks"][1]["message"], evil);
+    assert_eq!(back["checks"][0]["observed"]["<key>"], 1);
+    Ok(())
+}
+
+/// The element holds the bytes of the file and nothing else: no leading newline, and the file's own
+/// trailing newline is the last character before the end tag.
+#[test]
+fn the_element_text_is_the_file_bytes_with_nothing_added() -> TestResult {
+    let report = redact(sample()?)?;
+    let html = render_html(&report)?;
+    let json = json_bytes(&report)?;
+    let element = format!("{OPEN}{}\">{}</script>", sha256_hex(json.as_bytes()), json);
+    assert!(html.contains(&element));
+    assert!(json.as_str().ends_with("}\n"));
+    Ok(())
+}
+
+/// The data block comes after the readable page, so a reader and a screen reader meet the report first.
+#[test]
+fn the_result_element_is_the_last_thing_in_the_body() -> TestResult {
+    let html = html_of(sample()?)?;
+    assert!(at(&html, "</footer>")? < at(&html, OPEN)?);
+    let after = &html[at(&html, "</script>")? + "</script>".len()..];
+    assert_eq!(after.trim(), "</body>\n</html>");
+    Ok(())
+}
+
+/// A report the JSON writer refuses cannot be rendered either, and the error says why.
+#[test]
+fn a_report_the_json_writer_refuses_is_not_rendered() -> TestResult {
+    let mut doc = sample()?;
+    let check = doc["checks"][0].clone();
+    let checks = doc["checks"].as_array_mut().ok_or("checks is not a list")?;
+    while checks.len() < 257 {
+        checks.push(check.clone());
+    }
+    let report = redact(doc)?;
+    let err = render_html(&report).err().ok_or("rendered 257 results")?;
+    assert!(matches!(
+        err,
+        HtmlError::Json(JsonError::TooManyChecks { .. })
+    ));
+    assert!(err.to_string().contains("Fix:"));
+    Ok(())
+}
+
+/// The golden pair of SEC-64: the page of the report that `json_writer` writes as
+/// `not-ready-hostile-host.json`. The hash on the page is the SHA-256 of that golden file, and the element
+/// holds its bytes.
+#[test]
+fn the_golden_page_carries_the_golden_json() -> TestResult {
+    let mut doc = sample()?;
+    doc["host"]["hostname"] = json!(HOSTILE);
+    doc["checks"][0]["observed"] =
+        json!({ "zone": "b", "cores": 8, "labels": { "y": 1, "x": [3, 2, 1] } });
+    doc["checks"][1]["observed"] = Value::Null;
+    let html = html_of(doc)?;
+    let golden_html = fixtures_dir().join("reports/golden/not-ready-hostile-host.html");
+    assert_golden(&golden_html, html.as_bytes());
+
+    // Read the golden pair back from disk, so the comparison is between the two files.
+    let page = std::fs::read_to_string(&golden_html)?;
+    let json = std::fs::read(fixtures_dir().join("reports/golden/not-ready-hostile-host.json"))?;
+    let (hash, text) = embedded(&page)?;
+    assert_eq!(hash, sha256_hex(&json));
+    assert_eq!(text.as_bytes(), json.as_slice());
+    Ok(())
+}
+
+/// Every golden page is consistent with itself: the hash is the hash of the element text, and the text
+/// reads as a report.
+#[test]
+fn every_golden_page_hashes_its_own_element() -> TestResult {
+    let mut seen = 0;
+    for entry in std::fs::read_dir(fixtures_dir().join("reports/golden"))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("html") {
+            continue;
+        }
+        let page = std::fs::read_to_string(&path)?;
+        // One script element, in any case, and it is the data block.
+        let lower = page.to_ascii_lowercase();
+        assert_eq!(lower.matches("<script").count(), 1, "{}", path.display());
+        assert_eq!(lower.matches("</script").count(), 1, "{}", path.display());
+        assert!(page.contains(OPEN), "{}", path.display());
+        let (hash, text) = embedded(&page)?;
+        assert_eq!(hash, sha256_hex(text.as_bytes()), "{}", path.display());
+        read_report(text.as_bytes())?;
+        seen += 1;
+    }
+    assert!(seen >= 3, "only {seen} golden pages");
+    Ok(())
+}
+
+/// "N more entries are in the embedded JSON" is true even when the JSON writer shed entries to fit its own
+/// cap: the table lists what the JSON holds, and the line counts the rest (07 D.4).
+#[test]
+fn the_table_lists_what_the_embedded_json_holds() -> TestResult {
+    let mut doc = doc_with_actions(1200)?;
+    // About 2.4 MiB of entries, so the writer has to shed some.
+    for entry in doc["actions"].as_array_mut().ok_or("no actions")? {
+        entry["path"] = json!("/p".repeat(1000));
+    }
+    let html = html_of(doc)?;
+    let (_, text) = embedded(&html)?;
+    let held = read_report(text.as_bytes())?.actions.len();
+    assert!(held < 1200, "the writer shed nothing");
+    let section = action_section(&html)?;
+    assert_eq!(
+        section.matches("<tr><th scope=\"row\">").count(),
+        held.min(1000)
+    );
+    let more = held.saturating_sub(1000);
+    if more > 0 {
+        assert!(section.contains(&format!("<p>{more} more entries are in the embedded JSON.")));
+    }
+    // The writer shed entries, so the page says the log was cut.
+    assert!(section.contains("rdy left some entries out of its own log"));
     Ok(())
 }

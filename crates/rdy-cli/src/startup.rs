@@ -14,8 +14,9 @@
 //! spec) only when the gate passes, so a refused run never opens the spec file.
 //!
 //! [`crate::run`] calls it for every command except help and version, so a refused run never opens a
-//! spec, a key or the trust store. `rdy run` (M1-057) must keep the order: gate first, then read the
-//! spec, and it passes [`rdy_engine::privilege::Privilege::identity`] into the report.
+//! spec, a key or the trust store. `rdy run` (M1-057) keeps the order: it calls [`privilege_gate`] first, then reads
+//! the spec, and it puts [`rdy_engine::privilege::Privilege::identity`] into the report. It is async, so it
+//! does not use [`gate_then`].
 
 use std::io::Write;
 

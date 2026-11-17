@@ -226,8 +226,8 @@ async fn an_unrecorded_argv_fails_with_not_recorded() {
 
 #[test]
 fn a_link_local_answer_loads_so_the_address_rule_can_run_in_every_net_fixture() {
-    // The address rule (`is_forbidden`) and the facade lookup that applies it are M1-094. What this
-    // ticket owes them is a fixture that records the forbidden answer as it is.
+    // The loader records the forbidden answer as it is. The facade's address rule refuses it when a
+    // check looks the name up (`Probe::lookup`, M1-094, in `probe/net/lookup/tests.rs`).
     let fixture = load(&[(
         "net.json",
         r#"{"dns": {"Metadata.acme.example": ["169.254.169.254", "fd00:ec2::254"],
@@ -1740,6 +1740,31 @@ async fn an_unreadable_directory_hides_what_is_under_it() {
         .await
         .expect_err("unreadable");
     assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[tokio::test]
+async fn an_unreadable_directory_hides_a_socket_below_it_and_an_unreadable_socket_stays_visible() {
+    // M1-150: a socket is a special file. A user who may not search `/run/containerd` cannot stat it,
+    // and a user outside the group of `docker.sock` can stat it but not open it.
+    let fixture = load(&[
+        (
+            "root.manifest.json",
+            r#"{"symlinks":{"run/containerd/containerd.sock":"socket:[1]","var/run/docker.sock":"socket:[2]"},"unreadable":["run/containerd","var/run/docker.sock"]}"#,
+        ),
+    ])
+    .expect("loads");
+    let replay = fixture.replay();
+    let error = replay
+        .stat(Path::new("/run/containerd/containerd.sock"), &guard())
+        .await
+        .expect_err("hidden");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    let seen = replay
+        .stat(Path::new("/var/run/docker.sock"), &guard())
+        .await
+        .expect("stat")
+        .expect("there");
+    assert!(!seen.is_file && !seen.is_dir);
 }
 
 #[tokio::test]

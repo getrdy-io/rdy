@@ -1,0 +1,61 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": "Use a supported OS image, or ask the vendor whether alpine 3.19.1 can be supported.",
+    "level": "fail",
+    "message": "Alpine Linux v3.19 (alpine 3.19.1) is not supported. The spec supports rhel 8 or 9, ubuntu 22.04.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": null,
+      "init": "other",
+      "kernel": "6.6.14-0-lts",
+      "os": {
+        "id": "alpine",
+        "id_like": [],
+        "name": "Alpine Linux",
+        "pretty_name": "Alpine Linux v3.19",
+        "source": "/etc/os-release",
+        "version_id": "3.19.1"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

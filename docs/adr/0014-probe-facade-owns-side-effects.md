@@ -1,6 +1,6 @@
 # ADR 0014: The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP
 
-- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016). Supersedes ADR 0009 decisions 1, 2, 3 and 5; tightens ADR 0004 decision 5. Decision 7 amended 2026-10-28 in M1-001 (PR #6, security MF-04): the lint wall lists std and kube items only, and the direct dependency allowlist keeps every other crate's I/O out of check crates.
+- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016). Supersedes ADR 0009 decisions 1, 2, 3 and 5; tightens ADR 0004 decision 5. Decision 2 amended 2026-10-30 in M1-094. Decision 7 amended 2026-10-28 in M1-001 (PR #6, security MF-04): the lint wall lists std and kube items only, and the direct dependency allowlist keeps every other crate's I/O out of check crates.
 - Date: 2026-10-28
 
 ## Context
@@ -26,6 +26,13 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
    per spec). On the proxied path the facade writes the CONNECT itself (8 KiB response head cap, own
    timeout, Basic auth from the `ProxyUrl` newtype, `Proxy-Authorization` never logged). TLS SNI is
    always the permitted host.
+   (Amendment, M1-094: the table also holds `fd20:ce::254/128`, the GCP IPv6 metadata address, and
+   `168.63.129.16/32`, the Azure host-services address. The Azure address serves the VM agent's settings
+   and certificates, so no spec host may be it. It is also the Azure VM's `resolv.conf` nameserver, so
+   the `SystemResolver` peer class may reach it on port 53, UDP and TCP, and only when the address came
+   from the OS nameserver list; ports 80 and 32526 stay refused. That class is not built yet (M1-155).
+   Name lookups through the OS resolver are unaffected, because the OS makes that connection. The
+   decision and its residual are in 05.)
 3. **TLS verifier.** Net checks verify against the system root store loaded by the facade (PEM bundles
    on Linux read through the facade; OS roots on macOS and Windows through a native call) with webpki,
    or against `webpki-roots` when the spec says `trust: bundled`. No `rustls-platform-verifier` in M1:

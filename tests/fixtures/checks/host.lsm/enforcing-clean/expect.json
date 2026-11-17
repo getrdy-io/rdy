@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "SELinux is enforcing. AppArmor is off.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "count": 0,
+          "groups": [],
+          "inspected": true,
+          "permissive": 0,
+          "watched": {},
+          "window": "24h",
+          "window_truncated": false
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": null
+  }
+}

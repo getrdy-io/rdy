@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-hung"
+summary = "firewall-cmd never answers: the daemon is stuck, so the check ends in a Timeout"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

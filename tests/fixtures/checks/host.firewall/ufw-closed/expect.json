@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": "Run `ufw allow 6443/tcp`.",
+    "level": "fail",
+    "message": "ufw blocks 6443/tcp.",
+    "notes": [
+      "ufw is enabled; before.rules, after.rules and user6.rules are not read"
+    ],
+    "observed": {
+      "active": [
+        {
+          "interface": "eth0",
+          "manager": "ufw",
+          "ports": {
+            "10250": {
+              "detail": "rule: allow 10250/tcp",
+              "verdict": "open"
+            },
+            "6443": {
+              "detail": "no rule allows it and the default input policy is DROP",
+              "verdict": "closed"
+            }
+          },
+          "zone": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}

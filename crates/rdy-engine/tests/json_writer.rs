@@ -81,7 +81,7 @@ fn parsed(json: &str) -> TestResult<Value> {
 }
 
 /// A hostname that tries to close the element, open another and end the line in a script.
-const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end";
+const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end</SCRIPT x><!--<ScRiPt>\u{2029}";
 
 fn hostile_doc() -> TestResult<Value> {
     let mut doc = sample_value()?;
@@ -93,7 +93,7 @@ fn hostile_doc() -> TestResult<Value> {
 fn a_hostname_with_a_script_end_tag_is_written_escaped() -> TestResult {
     let report = redact(hostile_doc()?)?;
     let json = written(&report)?;
-    assert!(json.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end"));
+    assert!(json.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end\\u003c/SCRIPT x\\u003e\\u003c!--\\u003cScRiPt\\u003e\\u2029"));
     for raw in ['<', '>', '&', '\u{2028}', '\u{2029}'] {
         assert!(!json.contains(raw), "{raw:?} is in the output");
     }

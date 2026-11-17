@@ -1,0 +1,12 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "timed_out_ms": 5000
+  }
+}

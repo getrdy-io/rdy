@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "8Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 429496729,
+      "min_available_bytes": 4294967296,
+      "min_bytes": 8589934592,
+      "swap": "any"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "62.8 GiB found, 8 GiB needed",
+    "notes": [
+      "rdy sees only part of the cgroup tree (a container), so a memory limit set above it was not visible."
+    ],
+    "observed": {
+      "available_bytes": 59392000000,
+      "available_effective_bytes": 59392000000,
+      "available_estimated": false,
+      "cgroup_hierarchy": "v2",
+      "cgroup_limit_at": null,
+      "cgroup_limit_bytes": null,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 67420155904,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 67420155904
+    },
+    "partial": null
+  }
+}

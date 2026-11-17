@@ -1,0 +1,47 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Run rdy on the node itself, or give the container the node's view: `--network host --pid host` for Docker, `hostNetwork: true` and `hostPID: true` for a pod.",
+    "level": "warn",
+    "message": "rdy is running in a container (/.dockerenv exists), so it sees the sockets of the container's network namespace, not the node's.",
+    "notes": [],
+    "observed": {
+      "container": "/.dockerenv exists",
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026532600]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

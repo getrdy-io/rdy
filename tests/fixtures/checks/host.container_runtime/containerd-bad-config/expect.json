@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "containerd"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "containerd"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Check the cgroup driver in /etc/containerd/config.toml and in the files it imports (fix the file first if it is not valid TOML), and check it matches the spec and the kubelet.",
+    "level": "warn",
+    "message": "rdy could not read the cgroup driver of containerd, so it is not verified.",
+    "notes": [
+      "containerd: /etc/containerd/config.toml: it is not valid TOML (unclosed table, expected `]`)"
+    ],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "not asked",
+          "cgroup_driver": null,
+          "cgroup_driver_source": null,
+          "config_version": 2,
+          "d_type": null,
+          "installed": true,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "containerd",
+          "socket": "/run/containerd/containerd.sock",
+          "socket_present": true,
+          "storage_driver": null,
+          "storage_driver_source": null,
+          "version": "1.7.13"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

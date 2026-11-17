@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "32Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 1717986918,
+      "min_available_bytes": 17179869184,
+      "min_bytes": 34359738368,
+      "swap": "any"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "31.3 GiB found, 32 GiB needed, inside the 5% tolerance",
+    "notes": [
+      "Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent)."
+    ],
+    "observed": {
+      "available_bytes": 30562426880,
+      "available_effective_bytes": 30562426880,
+      "available_estimated": false,
+      "cgroup_hierarchy": "v2",
+      "cgroup_limit_at": "/system.slice",
+      "cgroup_limit_bytes": 137438953472,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 33608118272,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 33608118272
+    },
+    "partial": null
+  }
+}

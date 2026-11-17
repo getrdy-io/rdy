@@ -2,15 +2,16 @@
 //! (correction-21).
 //!
 //! Environments. Every directory under `tests/fixtures/envs` that has a `spec` in its `fixture.toml` is
-//! run through the engine (`driver::run_env`) with the clock, run id and environment pinned by its
-//! `[run]` table. The test compares the exit code and verdict with `[expect]`, the report with
-//! `golden/report.json` through `assert_golden`, and the report at `jobs = 1` with the report at
-//! `jobs = 8`. Adding a directory adds a run, with no code change. A directory with no `spec` is a base
-//! that other environments build on and is skipped.
+//! run through `rdy_cli::run` (`driver::run_env`, M1-086) with the clock, run id and environment pinned by
+//! its `[run]` table. The test compares the exit code and verdict with `[expect]`, the report (read from
+//! the `--json` stdout) with `golden/report.json`, the human output on stderr with `golden/terminal.txt`,
+//! both through `assert_golden`, and the report at `jobs = 1` with the report at `jobs = 8`. Adding a
+//! directory adds a run, with no code change. A directory with no `spec` is a base that other
+//! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
+//! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
-//! Not here yet: `terminal.txt` (the human renderer, M1-086), `report.html` (M1-077) and the call to
-//! `rdy_cli::run` itself (M1-086, which also regenerates the golden from `--json` stdout). `driver` says
-//! where they plug in.
+//! Not here yet: `report.html` (M1-077 built the renderer; the run does not write it yet). `driver` says
+//! what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
@@ -24,8 +25,9 @@ use std::path::Path;
 
 use completeness::{Class, Pending, findings};
 use jsonschema::Validator;
-use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want};
+use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want, current_os};
 use rdy_engine::family::{BuildError, Built, Family};
+use rdy_engine::summary::last_line;
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, fixtures_dir, normalize, normalize_across_jobs};
 use rdy_spec::check::CheckParams;
@@ -81,6 +83,16 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
     let validator = report_validator()?;
     for env in driver::env_names(&fixtures_dir())? {
         let fixture = Fixture::load(&fixtures_dir(), &format!("envs/{env}"))?;
+        // `rdy_cli::run` plans for the OS it runs on (`current_os()`), and has no hook to change that on
+        // purpose, so an environment of another OS cannot run here. Say so and move on.
+        if fixture.os() != current_os() {
+            eprintln!(
+                "env_harness: skipping env {env}: it is a {:?} machine and this is {:?}",
+                fixture.os(),
+                current_os()
+            );
+            continue;
+        }
         let manifest = fixture.manifest();
         let jobs = manifest.run.jobs.map_or(1, |jobs| jobs as usize);
 
@@ -119,6 +131,15 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
             fixtures_dir().join(format!("envs/{env}/golden/report.json")),
             text,
         );
+        assert_golden(
+            fixtures_dir().join(format!("envs/{env}/golden/terminal.txt")),
+            &one.terminal,
+        );
+        assert_eq!(
+            one.terminal.lines().last(),
+            Some(last_line(&one.report.checks).as_str()),
+            "env {env}: the verdict is the last line"
+        );
 
         // The same environment at one job and at eight gives the same report. With one check this proves
         // little; M1-117's all-pass env is what gives it something to order.
@@ -139,48 +160,10 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// A case counts only through its `expect.json`. The checks below were merged with cases that their own
-/// Rust tests assert by hand, so the goldens are owed, not the cases. M1-174 (backlog correction-29) writes
-/// the `expect.json` files for all six. Each row shrinks when its files land, and the stale-row finding
-/// forces the edit.
-const PENDING: &[Pending] = &[
-    Pending {
-        check: "host.cpu",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.firewall",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial, Class::Timeout],
-        owner: "M1-174",
-        why: "no expect.json, and Replay cannot yet hang or deny the firewall reads (PR #98)",
-    },
-    Pending {
-        check: "host.lsm",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.memory",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "expect.json goldens were deferred in PR #116",
-    },
-    Pending {
-        check: "host.os",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.security_agents",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-];
+/// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
+/// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
+/// forces the row out when they land.
+const PENDING: &[Pending] = &[];
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {

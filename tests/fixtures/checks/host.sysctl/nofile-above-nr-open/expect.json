@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "id": "host.sysctl",
+    "limits": {
+      "nofile": ">=2097152"
+    }
+  },
+  "result": {
+    "expected": {
+      "limits": {
+        "nofile": ">=2097152"
+      }
+    },
+    "fix": "Raise the ceiling first: `echo 'fs.nr_open = 2097152' | sudo tee -a /etc/sysctl.d/99-rdy.conf`, then run `sysctl --system`. Then set the limit for the service.",
+    "level": "fail",
+    "message": "`fs.nr_open` is 1048576, so no service can have 2097152 open files.",
+    "notes": [
+      "rdy's own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services."
+    ],
+    "observed": {
+      "limits": {
+        "nofile": {
+          "default_limit_nofile": "infinity",
+          "file": "/etc/systemd/system.conf",
+          "file_max": 9223372036854775807,
+          "nr_open": 1048576,
+          "shell_limit": {
+            "hard": 524288,
+            "soft": 1024
+          }
+        }
+      }
+    },
+    "partial": null
+  }
+}
