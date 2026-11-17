@@ -43,7 +43,7 @@ pub(in crate::report::html) fn facts(map: Option<&Map<String, Value>>) -> Vec<Fa
         .into_iter()
         .flatten()
         .map(|(key, value)| Fact {
-            label: label(key),
+            label: super::shown(&label(key)),
             lines: lines(key, value),
         })
         .collect()

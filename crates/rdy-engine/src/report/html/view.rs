@@ -36,8 +36,9 @@ pub(super) struct Line {
 }
 
 /// A piece of a line. `untrusted` text is shown in `<bdi>`, which limits how far a bidi control in it can
-/// reorder the words around it. A U+2069 inside the text can still close the isolate early, so M1-141
-/// escapes the controls (SEC-149-11). Our own words stay outside the `<bdi>`.
+/// reorder the words around it. A U+2069 inside the text can still close the isolate early, so the text is
+/// made with [`shown`], which writes every format character as an escape (M1-141, SEC-149-11). Our own
+/// words stay outside the `<bdi>`.
 #[derive(Clone)]
 pub(super) struct Span {
     pub text: String,
@@ -68,7 +69,7 @@ impl Span {
 
     fn untrusted(text: &str) -> Self {
         Self {
-            text: text.to_owned(),
+            text: shown(text),
             untrusted: true,
         }
     }
@@ -76,6 +77,34 @@ impl Span {
 
 mod actions;
 mod facts;
+
+/// The Unicode format (Cf) characters that `rdy_engine::text::is_invisible` does not list. Together they
+/// are every Cf character of Unicode 16 and the zero-width characters outside Cf.
+fn is_extra_format(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x0600..=0x0605 | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0x110BD | 0x110CD | 0x13430..=0x1343F
+    )
+}
+
+/// `text` as the page shows it: every format (Cf) and zero-width character, among them the bidi controls
+/// U+202A to U+202E and U+2066 to U+2069, is written as an escape such as `\u{202e}`, so it cannot reorder
+/// or hide anything and a reader sees that it is there (M1-141, SEC-149-11). Everything else is kept.
+/// Every string from the report goes through this before it reaches the template, which then wraps it in
+/// `<bdi>` and HTML-escapes it. A backslash is left as it is, like `crate::text::escape_untrusted`.
+pub(super) fn shown(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if crate::text::is_invisible(c) || is_extra_format(c) {
+            // Writing to a String cannot fail.
+            let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
 
 use actions::ActionLog;
 use facts::{Fact, facts};
@@ -253,11 +282,11 @@ impl View {
         };
         let banners = banners(report);
         Ok(Self {
-            product: report.spec.product.clone(),
-            title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
-            version: report.spec.version.clone(),
+            product: shown(&report.spec.product),
+            title_product: format!("\u{2068}{}\u{2069}", shown(&report.spec.product)),
+            version: report.spec.version.as_deref().map(shown),
             serial: report.spec.serial,
-            hostname: report.host.hostname.clone(),
+            hostname: shown(&report.host.hostname),
             // The terminal's words: `READY`, `READY with warnings`, `NOT READY` (ADR 0003 decision 6).
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
@@ -265,9 +294,9 @@ impl View {
             no_blocks: Summary::from_checks(&report.checks).block == 0,
             legend: LEGEND,
             rule: RULE,
-            run_when: utc_text(&report.run.started_at),
-            rdy_version: report.producer.version.clone(),
-            user: report.identity.user.clone(),
+            run_when: shown(&utc_text(&report.run.started_at)),
+            rdy_version: shown(&report.producer.version),
+            user: report.identity.user.as_deref().map(shown),
             run_as: if report.identity.elevated {
                 "root"
             } else {
@@ -286,8 +315,8 @@ impl View {
                 .map(|cap| CapabilityView {
                     label: need_label(&cap.need, cap.name.as_deref()),
                     state: available_word(cap.available),
-                    detail: cap.detail.clone().unwrap_or_default(),
-                    hint: cap.hint.clone().unwrap_or_default(),
+                    detail: shown(cap.detail.as_deref().unwrap_or_default()),
+                    hint: shown(cap.hint.as_deref().unwrap_or_default()),
                 })
                 .collect(),
             details: details(report),
@@ -456,7 +485,7 @@ fn required_by(report: &Report, check: &CheckResult) -> Option<Vec<Span>> {
 /// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
 /// for the vendor's.
 fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
-    let text = check.fix.clone()?;
+    let text = shown(check.fix.as_deref()?);
     let label = match &check.fix_source {
         Some(FixSource::Rdy) => vec![Span::own("From rdy")],
         Some(FixSource::FromSpec) if key_is_pinned(report) => {
@@ -527,10 +556,10 @@ fn on_page_check<'a>(
 
 fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckView {
     let index = index_of(report, check);
-    let shown = on_page_check(on_page, index, check);
+    let in_json = on_page_check(on_page, index, check);
     // The writer keeps every check in order, so a miss is a bug. In release the lists are left out.
     debug_assert!(
-        shown.is_some(),
+        in_json.is_some(),
         "check {index} is not in the report the JSON holds"
     );
     let (status_word, status_class) = match check.status {
@@ -547,15 +576,15 @@ fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckVi
         index,
         status_word,
         status_class,
-        id: check.id.clone(),
-        name: check.name.clone(),
-        message: check.message.clone(),
+        id: shown(&check.id),
+        name: check.name.as_deref().map(shown),
+        message: shown(&check.message),
         not_run_reason: not_run_reason(check),
         required_by: required_by(report, check),
         fix: fix_view(report, check),
-        builtin_fix: check.builtin_fix.clone(),
-        found: facts(shown.and_then(|c| c.observed.as_ref())),
-        needed: facts(shown.and_then(|c| c.expected.as_ref())),
+        builtin_fix: check.builtin_fix.as_deref().map(shown),
+        found: facts(in_json.and_then(|c| c.observed.as_ref())),
+        needed: facts(in_json.and_then(|c| c.expected.as_ref())),
         facts_more: 0,
         requires: check
             .needs
@@ -588,10 +617,10 @@ fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckVi
             };
             PartialView {
                 summary,
-                note: partial.note.clone(),
+                note: shown(&partial.note),
             }
         }),
-        notes: check.notes.clone(),
+        notes: check.notes.iter().map(|note| shown(note)).collect(),
         took_ms: (!matches!(check.status, Status::Skipped)).then_some(check.duration_ms),
     }
 }
@@ -722,7 +751,10 @@ fn details(report: &Report) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut add = |label: &'static str, value: Option<String>| {
         if let Some(value) = value {
-            rows.push(Row { label, value });
+            rows.push(Row {
+                label,
+                value: shown(&value),
+            });
         }
     };
     let run = &report.run;

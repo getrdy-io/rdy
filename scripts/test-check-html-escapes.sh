@@ -133,6 +133,18 @@ fresh
 printf '%s\n' '{{ json_sha256 }} {{ json.len() }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: json.len() counts as a second use" 1 "exactly once"
 fresh
+printf '%s\n' '<p>{{ json ~ json }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: {{ json ~ json }} counts 2 in one tag" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' '{% let a = json %}{{ json }}' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: {% let a = json %}{{ json }} counts 2, one per tag" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' '<p>{{ json ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the allowed line plus {{ json ~ json }} counts 3" 1 "found 3 use(s) of json"
+fresh
+printf '%s\n' '<p>{{ jsonjson }} {{ a_json }} {{ json_a ~ json }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: json inside a longer word does not count, a bare json does" 1 "found 1 use(s) of json"
+fresh
 printf '%s\n' 'a::b in plain text, and {# askama::filters::Safe in a comment #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: :: outside a tag and inside a comment passes" 0 "ok:"
 fresh

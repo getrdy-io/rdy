@@ -140,6 +140,31 @@ tscan() {
 
 # The embedded result is printed raw, so it may be named in a tag exactly once, and only as the text of the
 # data block. `{{ json }}` in an attribute, a second use, or a use with a filter fails.
+#
+# count_json reads one template (newlines already joined) on stdin and prints how many times the word `json`
+# is used inside tags. It counts per whole tag, `{{ ... }}` or `{% ... %}`, so `{{ json ~ json }}` and
+# `{% let a = json %}{{ json }}` each count 2 (PR #19 review, M1-141). A use is `json` with no word
+# character on either side, so `json_sha256` and `x.json_len` do not count and `x.json` does.
+count_json() {
+  awk '
+    BEGIN { RS = "\001" }
+    {
+      rest = $0
+      n = 0
+      while (match(rest, /[{][{%]/)) {
+        open = substr(rest, RSTART, 2)
+        rest = substr(rest, RSTART + 2)
+        close_at = index(rest, open == "{{" ? "}}" : "%}")
+        if (close_at == 0) { tag = rest; rest = "" } else { tag = substr(rest, 1, close_at - 1); rest = substr(rest, close_at + 2) }
+        tag = " " tag " "
+        for (i = 2; i <= length(tag) - 4; i++) {
+          if (substr(tag, i, 4) == "json" && substr(tag, i - 1, 1) !~ /[A-Za-z0-9_]/ && substr(tag, i + 4, 1) !~ /[A-Za-z0-9_]/) n++
+        }
+      }
+      print n
+    }
+  '
+}
 JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
 json_uses=0
 json_line_found=0
@@ -147,7 +172,8 @@ first_template=""
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -n "$first_template" ] || first_template=$file
-  n=$(tr '\n\r\t' '   ' <"$file" | grep -Eo "[{][{%][-+~]?(([^}]|[}][^}])*[^A-Za-z0-9_])?json$word" | grep -c .)
+  n=$(tr '\n\r\t' '   ' <"$file" | count_json)
+  n=${n:-0}
   json_uses=$((json_uses + n))
   if grep -Fxq -- "$JSON_LINE" "$file"; then
     json_line_found=$((json_line_found + 1))

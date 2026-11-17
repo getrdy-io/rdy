@@ -99,7 +99,7 @@ fn dropped_note(report: &Report) -> Vec<Span> {
 fn row(action: &Action) -> ActionRow {
     ActionRow {
         number: action.seq,
-        check: action.check.clone(),
+        check: action.check.as_deref().map(super::shown),
         what: what(&action.kind),
         detail: detail(&action.kind, &action.fields),
         result: result(action),
