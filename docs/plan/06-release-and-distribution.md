@@ -97,6 +97,8 @@ Rules:
 
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.
 
+Merge queue (optional): `ci.yml` also triggers on `merge_group` (`checks_requested`), so the founder can turn on "Require merge queue" in the `main` ruleset. Until then the trigger is inert. When on: squash, `ci-ok` required, build concurrency about 5. Concurrency never cancels a queue run. The DCO commit step skips on `merge_group`, as on push to main, because the PR passed it before it was queued. `kind.yml` stays off the queue because it is not required. See `docs/security/github-settings.md`, section 4.
+
 Static-link proof (ADR 0006). Since Rust 1.59 the musl targets build static-pie, so `file` says "static-pie linked" and `ldd` output varies. The check is: `readelf -lW rdy` shows no `INTERP` header, `readelf -d rdy` shows no `NEEDED` entry, then run `rdy version` in a `scratch` container. `scripts/check-static.sh` runs the `readelf` checks from ADR 0006 (static-pie, full RELRO, non-executable stack) and `ci.yml` runs it on both Linux legs. `scratch` cannot be pulled, so CI imports an empty tar as the image. If `ring` needs a C compiler, set `CC_<target>` only. Never set the linker to `musl-gcc`; its wrappers do not handle static-pie.
 
 Caching, in short: `Swatinem/rust-cache` per leg, saved only from `main`; `CARGO_INCREMENTAL=0`; prebuilt tools via `taiki-e/install-action`; no `cargo install`; `--locked` everywhere; no cache in release builds. Target: warm PR runs under ten minutes. Details and the time budget are in Appendix A.

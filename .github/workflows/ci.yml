@@ -17,9 +17,16 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Inert until the main ruleset turns on "Require merge queue" (docs/security/github-settings.md,
+  # section 4). Then GitHub runs this workflow on each queue entry, and ci-ok must pass there too.
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
+# A PR run is replaced by the next push to the same PR. A merge_group run is never cancelled: its
+# github.ref is the unique gh-readonly-queue ref, so entries do not share a group, and cancelling one
+# would eject it from the queue.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -240,8 +247,9 @@ jobs:
       # Offline: a fake curl answers from scripts/test-check-org-settings.json. No token, no network.
       - name: Org settings check script tests
         run: sh scripts/test-check-org-settings.sh
-      # On push to main the job passes without checking. Squash and rebase merges
-      # rewrite commits, and the PR already passed this check before it merged.
+      # On push to main and on merge_group the job passes without checking. Squash and rebase merges
+      # rewrite commits, and the PR already passed this check before it merged or was queued.
+      # The queue's temporary commits have no PR base and head to compare, and need none.
       - name: Every commit has a Signed-off-by line
         if: github.event_name == 'pull_request'
         env:
