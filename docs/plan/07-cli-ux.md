@@ -1959,7 +1959,7 @@ error: no signature found at acme-quickstart.yaml.minisig
 fix: ask the vendor for acme-quickstart.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned
 
 $ rdy run acme-platform.yaml
-error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform
+error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05, which you have not trusted for acme-platform
 fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>
 
 $ rdy run acme-platform.yaml --allow-unsigned

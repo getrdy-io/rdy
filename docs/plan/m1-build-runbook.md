@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-47: M1 181 tickets, 400 h, 335.5 h core; M2 129 tickets, 461.5 h; all milestones 410 tickets,
-1375 h, 1310.5 h core.
+correction-50: M1 181 tickets, 400.5 h, 336 h core; M2 130 tickets, 465.5 h; all milestones 411 tickets,
+1379.5 h, 1315 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -244,6 +244,13 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 47: records and approves the 03 changes of #78 (k8s.cni reads DaemonSets by name only, unknown is partial,
   default-deny is 03's). M1-175 builds k8s.cni. New M2-129: plugin pod restarts, ready below desired and a
   live check of the unverified `cni.toml` entries.
+- 48: the env harness skips Linux envs on macOS and Windows (M1-086), so M1-117, M1-138, the done test and
+  08 say the Linux legs; PC-53 for the plan. New M2-130: a `RunHooks` OS override. M1-107 adds k8s.version
+  and the `api/` tree to `all-pass` and regenerates its goldens (4 h; M1-117's if it is not merged first).
+- 50: `--key` needs a signature; the unknown-key line shows the key id, not a fingerprint (01, 07 C.5). The
+  `--allow-unsigned` page is M1-181's. 05 Surface 2 lists the `--key` file swap for M1-132. M1-098 builds
+  the `auto` "direct works, proxy fails" sentence. M1-107 never uses an `HTTP_PROXY` proxy for https and
+  takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation tests (4 h).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -257,8 +264,8 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-182 and M2-130, and the next correction is 48.
-- The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
+- The next ticket ids are M1-182 and M2-131, and the next correction is 51 (49 is in #85).
+- The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
 - A docs PR that touches a doc a test reads waits for `ci-ok`. Main went red once: #36 merged without CI,
@@ -392,6 +399,12 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - Follow-ups that correction-47 gave ids:
     - M2-129: k8s.cni reports crash-looping and not-ready plugin pods, and k8s-expert checks the
       `cni.toml` entries still marked `verified = false` against a live cluster (#78 reviews).
+  - Follow-ups that correction-48 gave ids:
+    - M2-130: a `RunHooks` OS override, so the env harness runs every env on every leg (#80 review).
+  - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
+    "correction-50".
+  - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,
+    set `kube = true` and regenerate its three goldens.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel
     and the AWS VPC CNI): their names come from memory of the projects' manifests. Read each entry's
     `source` page. Where the page shows the names, set `verified = true` and `checked_on`. Leave the rest

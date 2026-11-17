@@ -36,6 +36,7 @@ below.
 | PC-50 | 07 section 4.1 (files that cannot be written after the verdict), 02 "Watchdog" | 07 says that when the files cannot be written, `--json` stdout gets the Report with `complete: false`. M1-176 prints stdout before it claims the write state and writes the files, because a blocked stdout is the one write that can hang for good and the watchdog must still own the report while it does (M1-043 carry). So the document is already on stdout when the files fail. | With `--json`, a failed file write after the verdict leaves the document on stdout as printed and puts the summary and the error on stderr, exit 70. Without `--json`, stdout stays empty. The exit code is the authority: 07 section 4.1 and the `complete` doc in `rdy-spec` say that a printed report can read `complete: true` with exit 70. cli-ux signed off. A script checks the exit code (`set -o pipefail`, or stdout to a file and `$?`), never the document alone; stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` Check the number at merge. | should-fix | M1-176 |
 | PC-51 | 11 backlog, M1-176 exit test ("proved with the real binary") and M1-088 (watchdog clause) | The exit test needs the shipped `rdy` to hang on a check that never yields, and to end within the deadline plus grace. The shipped binary cannot do either: ADR 0011 decision 4 gives it no hook, so it has only the real families (none hangs) and the fixed five minute deadline. | M1-176 proves the spin clause with a test binary that calls `rdy_cli::run` with a one second hook deadline and the real watchdog (`crates/rdy-cli/tests/run_watchdog.rs`, a pipe run and a spin run). The blocked-pipe clause is also proved on the real unsteered binary by `crates/rdy-cli/tests/run_watchdog_binary.rs`, which is `#[ignore]`d because it takes about 5 min 10 s, and is run by hand (no nightly test job exists). M1-088's watchdog clause (blocked stdout pipe, exit 70, `complete: false` in the folder) is the same case: it relies on that test and does not repeat it. Check the number at merge. | should-fix | M1-176 (PR #34 review) |
 | PC-52 | M1-043 carry (macOS SIGCHLD-ignored check), M1-176 | The carry asks for a check that the SIGCHLD-ignored test really ignores SIGCHLD on macOS. M1-176 tried a behavioural probe (a child's `wait` fails with ECHILD when the ignore holds). The macos-x64 CI run on ee62985e failed that probe in `sigchld_ignored` (0.195 s), so macOS does not auto-reap the way the probe assumes, or the ignore does not survive `exec` there. The runner itself works there (the rest of the test passes without the probe). | The probe is Linux only (`/proc` SigIgn plus ECHILD). The macOS carry stays open. Owner: qa-engineer, a follow-up to find out how SIGCHLD-ignored behaves on macOS (does the ignore survive `bash -c 'trap "" CHLD; exec ...'`, and what does a child of an ignoring parent report) and to write a probe that holds there. Check the number at merge. | should-fix | M1-176 (macos-x64 CI) |
+| PC-53 | Plan, Milestones table, M1, engineering done column ("Fixture envs exit 0, 1 and 2 on all five targets") | In M1 the in-process env harness runs an environment only on the legs of its own OS. `rdy_cli::run` plans for `current_os()` with no hook to change it (decided in M1-086, PR #42), and every M1 environment is a Linux machine, so the macOS and Windows legs skip them. The real-binary smoke and the unsigned and tampered spec tests still run on all five. | Say "Fixture envs exit 0, 1 and 2 on the Linux targets and write both reports" for M1, and keep "all five targets" for the real-binary smoke and the unsigned and tampered specs. M2-130 adds a `RunHooks` OS override, and then the envs run on all five (correction-48). 00's milestone table and 11's M1-138 already say so. Check the number at merge. | should-fix | PR #80 review (M1-117) |
 
 ## Decisions made
 
@@ -480,3 +481,31 @@ the corrections log of `11-backlog.md`.
   evidence with k8s.dns's pod read, reports ready below desired, and has k8s-expert confirm the 13 `cni.toml`
   entries marked `verified = false` against a live cluster. M1-115's reviewer reads their source pages first.
   No test-pinned document changed.
+- **Correction-48, the env harness skips Linux envs on macOS and Windows, and one M2 ticket.** M1-086 (PR #42)
+  made the env harness call `rdy_cli::run`, which plans for `current_os()` and has no hook to change it, so
+  the harness skips an env of another OS. Every M1 env is a Linux machine, so they run on the two Linux legs
+  only. M1-117's exit test said five legs; it now says the Linux legs. M1-138, the engineering done test in
+  11 and 00, the week 21 check and 08 (rule 3, the test-layer table, Environments) say the same. M1-118,
+  M1-119, M1-135 and M1-166 never said five legs and are unchanged. The plan's M1 row is PC-53. New M2-130
+  (qa-engineer, 3 h) adds a `RunHooks` OS override, `None` in the shipped binary, so every env runs on every
+  leg; security-reviewer reviews it. From the PR #80 review: M1-117's `all-pass` env has no cluster, because
+  the k8s family joins `rdy run` with M1-107. M1-107 adds k8s.version and the `api/` tree to it and
+  regenerates its goldens (4 h); the item moves to M1-117 if M1-117 is not merged first. M1-175 gets a
+  missing comma (PR #79 review). No test-pinned document changed.
+- **Correction-50, `--key` needs a signature, the unknown-key line, the proxy carries of M1-097, the `timeouts`
+  env, and M2-037.** From the reviews of PR #84 (M1-126) and of the M1-097 and M1-119 builds.
+  Correction-49 is PR #85. A `--key` run of a spec with no signature exits 64 even with `--allow-unsigned`,
+  with its own first line (01 section 4.7). The `spec_key_unknown` line shows the key id and no fingerprint,
+  because the sidecar carries only the key id, and its fix says to compare the vendor's fingerprint, because
+  a key id can be forged (01 section 4.8, 07 C.5). M1-181 writes the page that says UNSIGNED SPEC, the HTML
+  half of M1-126's "both reports say unsigned". 05 Surface 2 lists a residual for M1-132: a `--key` file read
+  as root has no owner check, and the fingerprint in the KEY NOT PINNED banner is the mitigation. The
+  "direct works, proxy fails" sentence of `auto` needs the `NO_PROXY` rules and moves to M1-098, which also
+  reports upper- and lower-case proxy variables that disagree and extends `ProbeHub::set_proxy_from_env`.
+  M1-107 must not use a proxy read from `HTTP_PROXY` for https (05 INV-11, ADR 0037). In the `timeouts` env
+  only the hung statvfs gives Timeout; the black-hole endpoint gives a bounded Block, because net.egress cuts
+  each endpoint to its own budget. k8s.version never calls `/version`, so M1-119 proves a slow cluster at
+  family level by delaying `GET /apis`, and the slow `/version` case in the CLI env moves to M1-107. 08 says
+  the same. The real-time `Fake::Block` test is M1-051's and is built. M2-037 takes the cancellation tests of
+  08 section 5: running checks marked cancelled, the drop guard that counts live futures, and the verdict
+  rule (4 h). 07 C.5 changed, but no test reads it; no 01 block changed.
