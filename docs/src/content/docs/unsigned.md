@@ -80,7 +80,7 @@ Check a spec with your vendor's key on Windows in these steps.
 
 1. Get the vendor's public key file. Get the fingerprint the vendor publishes, by another route than the spec.
 2. Put the spec, its `.minisig` file and the key file in one folder. Open a terminal in that folder.
-3. Check the signature. Compare the full fingerprint that rdy prints with the vendor's. Not the short one in the banner.
+3. Check the signature. Compare the full fingerprint that rdy prints with the vendor's, not the short one in the banner.
 
 ```powershell pending=M1-126
 rdy verify --key acme-platform.pub acme-platform.yaml

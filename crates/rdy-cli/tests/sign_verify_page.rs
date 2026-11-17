@@ -9,11 +9,12 @@
 //! show only the short form in the KEY NOT PINNED banner. A changed copy is refused.
 //!
 //! The trust test: `rdy trust add` pins the key, and `rdy verify` accepts the spec with no banner. It
-//! runs only as a normal user. A root run writes `/etc/rdy/trust.yaml`, which a test must not touch
-//! (INV-04), so a root run skips it, as `trust_commands.rs` does.
+//! is Unix only, and it runs only as a normal user. A root run writes `/etc/rdy/trust.yaml`, which a
+//! test must not touch (INV-04), so a root run skips it, as `trust_commands.rs` does.
 //!
 //! Keys are made at run time, so no key file is committed. The password is a test value. Each key
-//! derivation takes 1 GiB, so the tests take one at a time, as `spec_keygen_sign.rs` does.
+//! derivation takes 1 GiB, and the nextest group `real-kdf` runs these tests one at a time. Within
+//! this binary a mutex does the same, as in `spec_keygen_sign.rs`.
 // Helper functions in tests/ are not covered by clippy.toml, and a failed spawn must fail the test.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -35,12 +36,13 @@ fn example_spec() -> PathBuf {
 }
 
 /// True when the tests run as root. A root run reads and writes `/etc/rdy`, not `HOME`.
+#[cfg(unix)]
 fn is_root() -> bool {
     rustix::process::geteuid().is_root()
 }
 
-/// Runs one line of the page in `dir`. `HOME` is `home`, so a normal user's trust store lands there.
-/// Stdin is not a terminal, so no command can prompt. `password` goes in `RDY_KEY_PASSWORD`.
+/// Runs one line of the page in `dir`. `HOME` and `ProgramData` are under `home`, so a trust store lands
+/// there. Stdin is not a terminal, so no command can prompt. `password` goes in `RDY_KEY_PASSWORD`.
 fn run_page(dir: &Path, home: &Path, line: &str, password: Option<&str>) -> Output {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
     let mut words = line.split_whitespace();
@@ -53,9 +55,14 @@ fn run_page(dir: &Path, home: &Path, line: &str, password: Option<&str>) -> Outp
     cmd.args(words)
         .current_dir(dir)
         .env("HOME", home)
+        .env("ProgramData", home.join("ProgramData"))
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("RDY_KEY_PASSWORD")
         .env_remove("RDY_PROGRESS")
+        .env_remove("RUST_LOG")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("COLUMNS")
+        .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -152,9 +159,16 @@ fn the_page_flow_signs_the_example_and_its_verify_commands_check_it() {
     assert_eq!(full_fingerprint(&shown), fingerprint);
     let short = format!("fingerprint {}...{}", &fingerprint[..8], &fingerprint[60..]);
     assert!(shown.contains(&short), "the banner shows {short}: {shown}");
+    // The banner is the text before the first blank line. Its short form must not carry the middle
+    // digits of the full fingerprint, which a reader would then have to compare.
+    let banner = shown.split("\n\n").next().expect("a banner");
     assert!(
-        !shown.contains(&fingerprint),
+        !banner.contains(&fingerprint),
         "the banner never shows the full fingerprint"
+    );
+    assert!(
+        !banner.contains(&fingerprint[8..12]),
+        "the banner shows only the short form: {banner}"
     );
 
     // Without a key, a key nobody trusted yet exits 64 and says how to trust it.
@@ -172,10 +186,13 @@ fn the_page_flow_signs_the_example_and_its_verify_commands_check_it() {
     );
     let refused = stderr(&out);
     assert!(refused.contains("which you have not trusted"), "{refused}");
-    assert!(
-        refused.contains("rdy trust add acme-platform --key <file>"),
-        "{refused}"
-    );
+    // Windows has no trust add in this release, so its fix line points at the unsigned page instead.
+    if cfg!(unix) {
+        assert!(
+            refused.contains("rdy trust add acme-platform --key <file>"),
+            "{refused}"
+        );
+    }
 
     // A changed copy of the spec is refused, even with the key.
     let spec = dir.path().join("acme-platform.yaml");
@@ -199,6 +216,7 @@ fn the_page_flow_signs_the_example_and_its_verify_commands_check_it() {
     assert!(tampered.contains("Do not run this file."), "{tampered}");
 }
 
+#[cfg(unix)]
 #[test]
 fn trust_add_pins_the_vendor_key_for_a_normal_user() {
     if is_root() {

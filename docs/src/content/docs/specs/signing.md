@@ -22,6 +22,8 @@ rdy writes two files:
 - `acme-signing.key` is the secret key. Only your user can read it.
 - `acme-signing.pub` is the public key. Send it to customers.
 
+On Windows, keep the key in a folder only you can read. The key file inherits that folder's access list.
+
 rdy asks for a password for the secret key. For CI, set `RDY_KEY_PASSWORD` to the password. Do not put the password on the command line.
 
 rdy prints the fingerprint of the public key. Publish that fingerprint on your docs page. Customers compare it with the one they see.
@@ -86,7 +88,7 @@ After you trust the key, check the spec again. The `KEY NOT PINNED` banner does 
 rdy verify acme-platform.yaml
 ```
 
-A normal user's key is saved in `~/.config/rdy/trust.yaml`. A root run reads only `/etc/rdy/trust.yaml`, so run `sudo rdy trust add` to trust a key for root runs.
+A normal user's key is saved in `$XDG_CONFIG_HOME/rdy/trust.yaml` when that variable is set, and in `~/.config/rdy/trust.yaml` when it is not. A root run reads only `/etc/rdy/trust.yaml`, so run `sudo rdy trust add` to trust a key for root runs.
 
 On Windows, this release does not save trusted keys. Use `--key` instead. See [Unsigned specs](../unsigned.md#windows).
 
@@ -94,8 +96,8 @@ On Windows, this release does not save trusted keys. Use `--key` instead. See [U
 
 | Command | Exit 0 | Exit 64 |
 | --- | --- | --- |
-| `rdy spec sign` | The spec is signed and the new signature verifies. | The spec has errors, the key is readable by others, or the signature file exists. |
-| `rdy verify` | `rdy run` would accept the spec with no override. | The signature does not match, or no trusted key signed the spec. |
-| `rdy trust add` | The key is saved. | You did not confirm, there is no terminal, or the key is already saved. |
+| `rdy spec sign` | The spec is signed and the new signature verifies. | The spec has errors, the key is readable by others, the signature file exists, or the password is wrong. |
+| `rdy verify` | `rdy run` would accept the spec with no override, with the same `--key`. | The signature does not match, or no trusted key signed the spec. |
+| `rdy trust add` | The key is saved. | You did not confirm, there is no terminal and no `--yes`, the file is a secret key, or the product already has a key with this key id. |
 
 For the full list, see [Exit codes](../run/exit-codes.md).

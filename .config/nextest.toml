@@ -10,10 +10,10 @@ nextest-version = "0.9.145"
 # minutes instead of two, and run one at a time so they do not fight over the target directory.
 # Every other test keeps the default limit. Name a new trybuild test binary `*_guarantee`.
 #
-# Tests at the real key derivation cost (scrypt N = 2^20, 1 GiB, a second or two each) run one at a
-# time too (M1-125, ADR 0022). nextest runs every test in its own process, so the mutexes inside the
-# test binaries do not stop two of them from running together. This group does. Add a test that
-# derives a key at `KdfCost::STANDARD` to the filter in `profile.default` below.
+# Tests that run the real key derivation (scrypt N = 2^20, 1 GiB, a second or two each) run one at a
+# time (M1-125, ADR 0022). nextest runs every test in its own process, so the mutex inside a test binary
+# does not stop two of its tests from running together. This group does that job for the binaries it
+# lists in the filter below. Add a binary or a test that derives a key at `KdfCost::STANDARD` to it.
 [test-groups]
 trybuild = { max-threads = 1 }
 real-kdf = { max-threads = 1 }
@@ -21,7 +21,7 @@ etc-rdy = { max-threads = 1 }
 pty-probe = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | test(a_key_made_at_the_standard_cost)'
+filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | binary(sign_verify_page) | test(a_key_made_at_the_standard_cost)'
 test-group = 'real-kdf'
 # One key derivation takes a few seconds on a busy runner. This is the slack for a slow one.
 slow-timeout = { period = "60s", terminate-after = 4 }

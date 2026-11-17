@@ -313,26 +313,45 @@ fn unsigned_page_covers_both_flags_and_windows() {
     }
 }
 
-/// The `rdy` command lines in the `sh` blocks of `page`, as written, without the fence lines.
-fn page_commands(page: &str) -> Vec<String> {
-    let mut commands = Vec::new();
-    let mut in_sh = false;
+/// The `rdy` command lines in the `sh` blocks of `page`, as written, and the `rdy` lines of any other
+/// fence. A fence is open from its line to the next line that is exactly three backticks. An opening
+/// fence whose info string is not exactly `sh` is not run by any test, so its `rdy` lines come back
+/// as the second list and fail the test.
+fn page_commands(page: &str) -> (Vec<String>, Vec<String>) {
+    let mut run = Vec::new();
+    let mut not_run = Vec::new();
+    // None outside a fence. Some(true) inside an `sh` fence, Some(false) inside any other.
+    let mut fence: Option<bool> = None;
     for line in page.lines() {
-        if let Some(info) = line.strip_prefix("```") {
-            in_sh = info.trim() == "sh";
-            continue;
-        }
-        if in_sh && line.starts_with("rdy ") {
-            commands.push(line.to_owned());
+        match fence {
+            Some(_) if line == "```" => fence = None,
+            Some(is_sh) => {
+                if line.starts_with("rdy ") {
+                    if is_sh {
+                        run.push(line.to_owned());
+                    } else {
+                        not_run.push(line.to_owned());
+                    }
+                }
+            }
+            None => {
+                if let Some(info) = line.strip_prefix("```") {
+                    fence = Some(info == "sh");
+                }
+            }
         }
     }
-    commands
+    (run, not_run)
 }
 
 #[test]
 fn sign_and_verify_page_runs_every_command_it_shows() {
     let page = read("docs/src/content/docs/specs/signing.md");
-    let commands = page_commands(&page);
+    let (commands, not_run) = page_commands(&page);
+    assert!(
+        not_run.is_empty(),
+        "these rdy lines are in a fence that is not exactly `sh`, so no test runs them: {not_run:?}"
+    );
     assert!(
         commands.len() >= 4,
         "the page shows the keygen, sign, verify and trust commands: {commands:?}"
