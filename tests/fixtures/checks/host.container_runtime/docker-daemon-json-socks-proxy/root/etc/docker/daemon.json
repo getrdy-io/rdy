@@ -1,0 +1,8 @@
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "storage-driver": "overlay2",
+  "proxies": {
+    "http-proxy": "http://proxy.acme.example:3128",
+    "https-proxy": "socks5://canary-svc:SOCKS-CANARY-PW@proxy.acme.example:1080"
+  }
+}
