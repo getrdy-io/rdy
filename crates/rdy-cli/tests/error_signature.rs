@@ -97,7 +97,10 @@ fn every_signature_error_has_its_own_code_a_fix_and_exit_64() {
         assert_ne!(cli.code(), ErrorCode::SpecInvalid, "{error:?}");
         assert_eq!(cli.exit_code().code(), 64, "{error:?}");
         // The fix is the one that knows the product, not the placeholder.
-        assert_eq!(cli.hint(), error.fix(), "{error:?}");
+        // A missing signature names the sidecar file in the fix; every other fix is the library's.
+        if error != SignatureError::Missing {
+            assert_eq!(cli.hint(), error.fix(), "{error:?}");
+        }
         assert!(!cli.hint().is_empty());
         assert!(!cli.hint().contains("<product>"), "{}", cli.hint());
         // Neither line names a flag that weakens the check.
@@ -132,9 +135,10 @@ fn a_signature_error_has_no_position() {
     );
     let r = cli.render();
     assert_eq!((r.line, r.column), (None, None));
-    // The file is named inside the sentence, so there is no `file:` prefix and no `file` in the JSON
-    // (01 section 4.8).
-    assert_eq!(r.file, None);
+    // The file is named inside the sentence, so the terminal has no `file:` prefix. The JSON keeps `file`
+    // (01 section 4.8, ADR 0008 decision 7).
+    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
+    assert!(r.named);
     assert_eq!(
         r.message,
         "no signature found at acme-platform.yaml.minisig"

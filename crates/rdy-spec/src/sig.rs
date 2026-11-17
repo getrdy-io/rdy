@@ -135,6 +135,9 @@ impl TrustStore {
     /// of `sidecar` names, and nothing else. Every pin has [`TrustSource::Flag`], so a verified result
     /// says the key was not pinned (KEY NOT PINNED). Nothing is read from disk and nothing is saved.
     ///
+    /// The key is trusted for whatever product the unverified comment names, for this run only. That is
+    /// the point of a one-run key: the person chose the key, and the file still has to verify against it.
+    ///
     /// Only the form of `sidecar` is read, not its signature. The comment names the product, and the
     /// key must still verify the file and the comment in [`crate::load`].
     ///

@@ -64,9 +64,16 @@ pub(crate) fn load_spec(
     // A root run with no `--key` reads only the system store, and says so when it finds no key (01
     // section 4.3).
     let root = key.is_none() && layout.is_root();
+    let keyed = key.is_some();
     let spec_error = |error| {
-        let error = CliError::spec_in(name, error, &bytes);
-        if root { error.as_root() } else { error }
+        let mut error = CliError::spec_in(name, error, &bytes);
+        if root {
+            error = error.as_root();
+        }
+        if keyed {
+            error = error.with_key();
+        }
+        error
     };
     let (trust, policy) = match (&key, &sidecar) {
         // The key decides which store there is. No store is read (ADR 0027).
@@ -90,9 +97,9 @@ fn policy_of(allow_unsigned: bool) -> Policy {
     }
 }
 
-/// The refusal for a `--key` argument. The same words as `rdy trust add` (07 C.10).
+/// The refusal for a `--key` argument. The words of `rdy trust add` (07 C.10), without its name.
 fn key_error(error: &GivenKeyError) -> CliError {
-    crate::trust_cmds::key_error(error)
+    crate::trust_cmds::key_error_for(error, "give the vendor's .pub file")
 }
 
 /// The signature sidecar: `--sig`, else `<SPEC>.minisig`, read once.
@@ -127,7 +134,9 @@ fn read_sidecar(spec: &Path, sig: Option<&Path>) -> Result<Option<Vec<u8>>, CliE
                 Ok(None)
             }
         }
-        // Present but not readable. It is a signature that fails, never a missing one.
+        // Present but not readable. It becomes empty input, which fails closed only because the loader
+        // refuses an empty signature file as malformed (`parse_sidecar`; a `rdy-spec` test pins it). It is
+        // a signature that fails, never a missing one.
         Err(_) => Ok(Some(Vec::new())),
     }
 }

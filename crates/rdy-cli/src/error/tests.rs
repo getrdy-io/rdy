@@ -30,6 +30,7 @@ fn spec_at(error: SpecError, line: u32, column: u32) -> CliError {
         source: located(error, line, column),
         crlf: false,
         root: false,
+        key: false,
     }
 }
 
@@ -92,7 +93,6 @@ fn every_cli_error() -> Vec<CliError> {
             path: "acme-signing.key".into(),
             reason: IoReason::DiskFull,
         }),
-        CliError::Internal(InternalKind::NotImplemented { command: "run" }),
         CliError::Internal(InternalKind::SecretRefused {
             names: vec![s("API_TOKEN")],
         }),
@@ -589,6 +589,7 @@ fn control_characters_in_a_spec_string_never_reach_the_output() {
         ),
         crlf: false,
         root: false,
+        key: false,
     };
     let r = e.render();
     for part in [
@@ -642,6 +643,7 @@ fn json_for_a_parse_error_matches_the_sample_in_07_c_11() {
         ),
         crlf: false,
         root: false,
+        key: false,
     };
     let got = json_of(&e);
     assert_eq!(got["api_version"], "rdy/v1");
@@ -975,7 +977,8 @@ fn signature_line(error: SignatureError, crlf: bool) -> String {
         if crlf { b"a\r\nb" } else { b"a\nb" },
     );
     let r = cli.render();
-    assert_eq!(r.file, None);
+    // The JSON keeps the file (ADR 0008 decision 7). Only the terminal prefix is left out.
+    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
     assert_eq!((r.line, r.column), (None, None));
     r.text()
         .lines()
@@ -1071,7 +1074,7 @@ fn an_expired_spec_names_the_file_inside_the_sentence() {
     );
     let r = cli.render();
     assert_eq!(r.code, ErrorCode::SpecExpired);
-    assert_eq!(r.file, None);
+    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
     assert_eq!(
         r.text(),
         "error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.\nfix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.\n"
@@ -1119,4 +1122,42 @@ fn a_root_run_with_no_matching_key_says_which_store_it_read() {
         );
         assert!(!hint.contains("--allow-unsigned"), "{hint}");
     }
+}
+
+#[test]
+fn an_unknown_key_with_windows_line_endings_gets_a_full_stop_before_the_note() {
+    let line = signature_line(
+        SignatureError::UnknownKey {
+            key_id: KeyId::from_bytes([1; 8]),
+            product: product("acme-platform"),
+        },
+        true,
+    );
+    assert!(
+        line.ends_with(&format!("not trusted for acme-platform.{CRLF}"))
+            || line.contains(&format!("have not trusted for acme-platform.{CRLF}")),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_missing_signature_names_the_sidecar_in_the_fix_and_a_key_changes_both_lines() {
+    let missing = || {
+        CliError::spec(
+            "acme-platform.yaml",
+            SpecError::Signature(SignatureError::Missing),
+        )
+    };
+    assert_eq!(
+        missing().hint(),
+        "ask the vendor for acme-platform.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned"
+    );
+    let keyed = missing().with_key();
+    let r = keyed.render();
+    assert_eq!(
+        r.message,
+        "a key was given, but acme-platform.yaml has no signature. rdy looked for acme-platform.yaml.minisig"
+    );
+    assert!(!r.fix.contains("unsigned"), "{}", r.fix);
+    assert!(!r.text().contains("--allow-unsigned"), "{}", r.text());
 }

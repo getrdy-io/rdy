@@ -256,9 +256,12 @@ fn every_row_with_json_prints_one_valid_error_object_and_the_same_stderr() {
 
         // The two lines on stderr say what the JSON says (07 section 4.1). A spec error names its file.
         let field = |name: &str| doc["error"][name].as_str().unwrap_or_default().to_string();
+        // A refusal that names the file inside its sentence has no `file:` prefix on the terminal.
         let message = match doc["error"]["file"].as_str() {
-            Some(file) => format!("{file}: {}", field("message")),
-            None => field("message"),
+            Some(file) if !field("message").contains(file) => {
+                format!("{file}: {}", field("message"))
+            }
+            _ => field("message"),
         };
         let message = scrub_stamp(&message);
         let message = if cfg!(windows) {

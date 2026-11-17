@@ -1084,3 +1084,16 @@ fn a_one_run_store_refuses_a_sidecar_that_is_not_a_signature() {
         ));
     }
 }
+
+#[test]
+fn an_empty_sidecar_is_malformed_under_both_policies() {
+    // The CLI turns a sidecar it cannot read into empty input. It must fail closed, flag or no flag.
+    for policy in [Policy::RequireSigned, Policy::AllowUnsigned] {
+        let (result, parses) = run(SPEC.as_bytes(), Some(b""), &TrustStore::new(), policy);
+        assert!(matches!(
+            sig_error(result),
+            SignatureError::Malformed { .. }
+        ));
+        assert_eq!(parses, 0);
+    }
+}

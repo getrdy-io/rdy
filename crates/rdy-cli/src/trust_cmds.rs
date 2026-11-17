@@ -261,6 +261,12 @@ fn key_summary(product: &ProductSlug, key: &PublicKey, origin: &Origin) -> Strin
 /// The refusal for a key argument. The wording of 07 C.10: it names the file, or says "that" for text,
 /// and never repeats key text.
 pub(crate) fn key_error(err: &GivenKeyError) -> CliError {
+    key_error_for(err, "give trust add the .pub file")
+}
+
+/// [`key_error`] with the first words of the secret-key fix chosen by the command (`rdy run` and `rdy
+/// verify` do not pin anything, so they do not mention `trust add`).
+pub(crate) fn key_error_for(err: &GivenKeyError, give: &str) -> CliError {
     let name = |origin: &Origin| match origin {
         Origin::File(path) => display(path),
         Origin::Text => "that".to_owned(),
@@ -280,7 +286,7 @@ pub(crate) fn key_error(err: &GivenKeyError) -> CliError {
         }
         GivenKeyError::SecretKey { origin } => {
             let message = format!("{} is a secret key, not a public key", name(origin));
-            let mut fix = "give trust add the .pub file. Never share the .key file.".to_owned();
+            let mut fix = format!("{give}. Never share the .key file.");
             if *origin == Origin::Text {
                 // The text was typed on the command line, so the shell has it now.
                 fix.push_str(" It is now in your shell history. Make a new key pair.");

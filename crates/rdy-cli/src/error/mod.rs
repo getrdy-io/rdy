@@ -256,11 +256,6 @@ pub enum InternalKind {
         /// The variable names.
         names: Vec<String>,
     },
-    /// The command exists in the tree but a later ticket builds it.
-    NotImplemented {
-        /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
-        command: &'static str,
-    },
 }
 
 /// Every failure that ends a command with exit 64 or 70 and no verdict.
@@ -298,6 +293,8 @@ pub enum CliError {
         /// A root run found no pinned key. Its fix says that root reads only the system store (01
         /// section 4.3).
         root: bool,
+        /// A key was given for this run, so the signature is not optional.
+        key: bool,
     },
     /// A scalar error from `rdy-spec`, such as a bad size or duration.
     #[error("{source}")]
@@ -366,9 +363,6 @@ fn internal_message(kind: &InternalKind) -> String {
             "rdy cannot promise to keep the value of {} out of its output",
             names.join(", ")
         ),
-        InternalKind::NotImplemented { command } => {
-            format!("rdy {command} is not yet implemented in this build")
-        }
     }
 }
 
@@ -399,6 +393,7 @@ impl CliError {
             source,
             crlf: false,
             root: false,
+            key: false,
         }
     }
 
@@ -411,7 +406,17 @@ impl CliError {
             source,
             crlf: bytes.windows(2).any(|pair| pair == b"\r\n"),
             root: false,
+            key: false,
         }
+    }
+
+    /// Marks a spec error as found by a run that was given a key, so a missing signature says so.
+    #[must_use]
+    pub fn with_key(mut self) -> Self {
+        if let Self::Spec { key, .. } = &mut self {
+            *key = true;
+        }
+        self
     }
 
     /// Marks a spec error as found by a root run, so an unknown key says which store root reads.
@@ -486,6 +491,7 @@ impl CliError {
                     source,
                     crlf: false,
                     root: false,
+                    key: false,
                 };
             }
             Err(err) => err,
@@ -539,6 +545,20 @@ impl CliError {
                 source: SpecError::Signature(SignatureError::UnknownKey { .. }),
                 ..
             } if cfg!(windows) => "see https://docs.getrdy.io/unsigned".to_owned(),
+            // A key was given but the spec has no signature: no page about unsigned specs helps.
+            Self::Spec {
+                file: Some(file),
+                source: SpecError::Signature(SignatureError::Missing),
+                key: true,
+                ..
+            } => format!("ask the vendor for {file}.minisig and put it next to the spec, then run again"),
+            Self::Spec {
+                file: Some(file),
+                source: SpecError::Signature(SignatureError::Missing),
+                ..
+            } => format!(
+                "ask the vendor for {file}.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned"
+            ),
             // A root run reads only /etc/rdy/trust.yaml, and never looks under a user's home to word a
             // hint (INV-04). So it says what it read, whatever the user may have pinned.
             Self::Spec {
@@ -598,10 +618,6 @@ impl CliError {
                 "unset {}, or give it a value of 6 bytes to 64 KiB, then run rdy again",
                 names.join(" and ")
             ),
-            Self::Internal(InternalKind::NotImplemented { .. }) => {
-                "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
-                    .to_owned()
-            }
         }
     }
 
@@ -627,17 +643,19 @@ impl CliError {
             file: Some(file),
             source,
             crlf,
+            key,
             ..
         } = self
-            && let Some(message) = refusal_line(file, source, *crlf)
+            && let Some(message) = refusal_line(file, source, *crlf, *key)
         {
             return Rendered {
                 code: self.code(),
                 message: clean(&message),
                 fix: clean(&self.hint()),
-                file: None,
+                file: Some(clean(file)),
                 line: None,
                 column: None,
+                named: true,
             };
         }
         let (file, location) = match self {
@@ -653,6 +671,7 @@ impl CliError {
             file: file.map(clean),
             line: location.map(|at| at.line),
             column: location.map(|at| at.column),
+            named: false,
         }
     }
 }
@@ -694,13 +713,16 @@ fn wants_crlf_note(error: &SignatureError) -> bool {
 
 /// The first line of a refusal that names the file inside the sentence (01 section 4.8): the signature
 /// errors and an expired spec. `None` for every other error, which the terminal prefixes with the file.
-fn refusal_line(file: &str, source: &SpecError, crlf: bool) -> Option<String> {
+fn refusal_line(file: &str, source: &SpecError, crlf: bool, key: bool) -> Option<String> {
     match source {
         SpecError::Expired { expired_on, today } => Some(format!(
             "{file} expired on {expired_on}. This machine's clock says {today}."
         )),
         SpecError::Signature(error) => {
             let mut line = match error {
+                SignatureError::Missing if key => format!(
+                    "a key was given, but {file} has no signature. rdy looked for {file}.minisig"
+                ),
                 SignatureError::Missing => format!("no signature found at {file}.minisig"),
                 SignatureError::UnknownKey { key_id, product } => format!(
                     "{file} is signed with key {key_id}, which you have not trusted for {product}"
@@ -721,6 +743,9 @@ fn refusal_line(file: &str, source: &SpecError, crlf: bool) -> Option<String> {
             };
             let crlf = crlf || matches!(error, SignatureError::Tampered { crlf: true });
             if crlf && wants_crlf_note(error) {
+                if !line.ends_with('.') {
+                    line.push('.');
+                }
                 line.push(' ');
                 line.push_str(CRLF_NOTE);
             }
@@ -815,6 +840,9 @@ pub struct Rendered {
     pub line: Option<u32>,
     /// The column in the file, from 1.
     pub column: Option<u32>,
+    /// The message already names the file inside the sentence (01 section 4.8), so the terminal puts no
+    /// `file:` in front of it. The JSON `file` is still filled.
+    pub named: bool,
 }
 
 impl Rendered {
@@ -827,6 +855,7 @@ impl Rendered {
             file: None,
             line: None,
             column: None,
+            named: false,
         }
     }
 
@@ -840,7 +869,8 @@ impl Rendered {
     /// front of the message. The JSON message does not repeat it (07 section 4.1).
     #[must_use]
     pub fn text(&self) -> String {
-        let place = match (&self.file, self.line, self.column) {
+        let shown = self.file.as_ref().filter(|_| !self.named);
+        let place = match (shown, self.line, self.column) {
             (Some(file), Some(line), Some(column)) => format!("{file}:{line}:{column}: "),
             (Some(file), _, _) => format!("{file}: "),
             _ => String::new(),

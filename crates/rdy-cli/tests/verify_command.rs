@@ -438,12 +438,24 @@ fn assert_refused_even_with_the_flag(dir: &Dir, extra: &[&str], what: &str) {
 fn allow_unsigned_still_exits_64_for_an_unpinned_key() {
     let dir = Dir::new();
     dir.with_signed_fixture();
-    // No store holds the key (a fresh home), and a different key is not it either.
+    // The key is not the signer, so only that key is considered and no store is read.
     assert_refused_even_with_the_flag(
         &dir,
         &["--key", "other.pub"],
         "a key that is not the signer",
     );
+    // The untouched fixture: a valid signature by a key that is in no store (a fresh home). Present and
+    // good is not enough; the key has to be pinned for the product.
+    assert_refused_even_with_the_flag(&dir, &[], "valid signature, unpinned key");
+    let out = dir.rdy(&[
+        "run",
+        "acme-platform.yaml",
+        "--allow-unsigned",
+        "--no-network",
+        "--json",
+    ]);
+    assert_eq!(code(&out), 64, "{}", stderr(&out));
+    assert_eq!(json(&out)["error"]["code"], "spec_key_unknown");
 }
 
 #[test]
@@ -463,8 +475,16 @@ fn allow_unsigned_still_exits_64_for_a_key_with_no_signature() {
     let dir = Dir::new();
     dir.with_signed_fixture();
     std::fs::remove_file(dir.path().join("acme-platform.yaml.minisig")).expect("rm");
-    // A key means the person wants a signature checked. A spec with none is refused.
+    // A key means the person wants a signature checked. A spec with none is refused, with a line of its
+    // own: the flag that was passed is not what is missing.
     assert_refused_even_with_the_flag(&dir, &["--key", "acme-platform.pub"], "key, no signature");
+    let out = dir.rdy(&["verify", "acme-platform.yaml", "--key", "acme-platform.pub"]);
+    let err = stderr(&out);
+    assert!(
+        err.starts_with("error: a key was given, but acme-platform.yaml has no signature."),
+        "{err}"
+    );
+    assert!(!err.contains("docs.getrdy.io/unsigned"), "{err}");
 }
 
 #[test]
@@ -599,7 +619,19 @@ fn a_secret_key_given_to_verify_is_refused_and_never_echoed() {
     );
     let out = dir.rdy(&["verify", "acme-platform.yaml", "--key", "acme-platform.key"]);
     assert_eq!(code(&out), 64);
-    assert!(stderr(&out).contains("is a secret key, not a public key"));
+    let err = stderr(&out);
+    assert!(err.contains("is a secret key, not a public key"), "{err}");
+    assert!(
+        err.contains("fix: give the vendor's .pub file. Never share the .key file.\n"),
+        "{err}"
+    );
+    assert!(!err.contains("trust add"), "{err}");
+    // No byte of the key reaches either stream.
+    let key = String::from_utf8_lossy(&fixture("minisign-c/acme-platform.key")).into_owned();
+    let all = format!("{err}{}", String::from_utf8_lossy(&out.stdout));
+    for line in key.lines().skip(1).filter(|l| l.len() > 8) {
+        assert!(!all.contains(line), "key bytes in the output");
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -657,4 +689,41 @@ fn a_root_run_with_no_matching_key_says_it_reads_only_the_system_store() {
     // `--key` runs name no store at all.
     let out = dir.rdy(&["verify", "acme-platform.yaml", "--key", "other.pub"]);
     assert!(!stderr(&out).contains("As root"), "{}", stderr(&out));
+}
+
+/// The pinned form of 07 C.4: the key is pinned in the user store of a temporary home, so the output has
+/// no banner and ends `VERIFIED`. The store path holds the temporary folder, which the golden writes as
+/// `<home>`. A root run reads only `/etc/rdy`, so this is for a normal user.
+#[cfg(unix)]
+#[test]
+fn verify_with_a_pinned_key_matches_the_c4_golden() {
+    if rustix::process::geteuid().is_root() {
+        eprintln!("skipped: a root run reads only /etc/rdy/trust.yaml");
+        return;
+    }
+    let dir = Dir::new();
+    dir.with_signed_fixture();
+    let out = dir.rdy(&[
+        "trust",
+        "add",
+        "acme-platform",
+        "--key",
+        "acme-platform.pub",
+        "--yes",
+        "--note",
+        "Acme security page",
+    ]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let out = dir.rdy(&["verify", "acme-platform.yaml"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let home = dir.path().join("home").to_string_lossy().into_owned();
+    assert_golden(
+        repo().join("tests/fixtures/verify/pinned.stderr.txt"),
+        stderr(&out).replace(&home, "<home>"),
+    );
+    let out = dir.rdy(&["verify", "acme-platform.yaml", "--json"]);
+    let doc = json(&out);
+    assert_valid(&validator("Verification"), &doc);
+    assert_eq!(doc["signature"]["trust_source"], "user");
+    assert_eq!(doc["signature"]["trust_note"], "Acme security page");
 }

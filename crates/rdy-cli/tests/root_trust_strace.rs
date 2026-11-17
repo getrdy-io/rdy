@@ -239,6 +239,10 @@ fn root_verify_binary_opens_no_path_under_sudo_users_home() {
     // matters is where the loader looked.
     assert_eq!(out.status.code(), Some(64), "{err}");
     assert!(err.contains("which you have not trusted"), "{err}");
+    assert!(
+        err.contains("As root, rdy reads only /etc/rdy/trust.yaml."),
+        "{err}"
+    );
     let log = fs::read_to_string(fixture.log()).expect("strace log");
     assert!(
         log.contains("/etc/rdy"),
@@ -277,5 +281,52 @@ fn root_control_a_user_layout_does_show_the_home_in_the_log() {
     assert!(
         !hits.is_empty(),
         "the control run never touched the user's store, so the strace check above proves nothing:\n{log}"
+    );
+}
+
+/// A `--key` run reads no trust store (ADR 0027), so under `strace` the log has no `/etc/rdy` and nothing
+/// under the fixture home.
+#[test]
+fn root_verify_with_key_reads_no_trust_store() {
+    if !root_or_skip() || !strace_or_skip() {
+        return;
+    }
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let signed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
+    let out = Command::new("strace")
+        .arg("-f")
+        .arg("-y")
+        .args(["-s", "512"])
+        .arg("-o")
+        .arg(fixture.log())
+        .arg("--")
+        .arg(env!("CARGO_BIN_EXE_rdy"))
+        .arg("verify")
+        .arg(signed.join("acme-platform.yaml"))
+        .arg("--key")
+        .arg(signed.join("acme-platform.pub"))
+        .args(["--color", "never"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("TERM")
+        .env("SUDO_USER", "alice")
+        .env("SUDO_UID", "1000")
+        .output()
+        .expect("strace could not be started; the root job installs it (apt-get install strace)");
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    let log = fs::read_to_string(fixture.log()).expect("strace log");
+    let store: Vec<&str> = log.lines().filter(|l| l.contains("/etc/rdy")).collect();
+    assert!(
+        store.is_empty(),
+        "a --key run looked at /etc/rdy:\n{}",
+        store.join("\n")
+    );
+    let hits = mentions(&log, &home);
+    assert!(
+        hits.is_empty(),
+        "a --key run touched the fixture home:\n{}",
+        hits.join("\n")
     );
 }
