@@ -6,10 +6,10 @@ rdy checks a machine, a Kubernetes cluster or a cloud account against a software
 requirements, before the install. It tells you what is wrong and how to fix it. It ships as one signed
 binary with no runtime, and it works offline.
 
-> **Pre-release.** rdy is under active development. `rdy run`, the command that does the main job, works
-> on `main` today, with thirteen host checks and two network checks. There is no tagged release yet, so the install command below
-> is the shape it will have, and for now you build from source. See [Status](#status) for what works
-> and what is coming.
+> **Pre-release.** rdy is under active development. `rdy run`, the command that does the main job,
+> works on `main` today, with thirteen host checks and two network checks. There is no tagged release
+> yet, so the install command below is the shape it will have, and for now you build from source. See
+> [Status](#status) for what works and what is coming.
 
 ## The problem
 
@@ -32,9 +32,8 @@ It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 
 PATH. Without it, the script stops and installs nothing. It checks the signature of the checksum file
 and the sha256 of the archive before it installs anything. It never runs `sudo`. It writes one file,
 `rdy`, to `$HOME/.local/bin`, or to the folder in `RDY_INSTALL_DIR`. As root, it refuses unless you
-pass `--allow-root`, and then it writes `/usr/local/bin/rdy`,
-unless `RDY_INSTALL_DIR` is set. On Windows, download the `.zip` from the
-release page and check its sha256 by hand.
+pass `--allow-root`, and then it writes `/usr/local/bin/rdy`, unless `RDY_INSTALL_DIR` is set. On
+Windows, download the `.zip` from the release page and check its sha256 by hand.
 
 There is no tagged release yet. When there is one, the command is this, with the version filled in:
 
@@ -45,14 +44,13 @@ curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL \
 ```
 
 Root shells need `sh -s -- --allow-root` after the pipe, and then run `/usr/local/bin/rdy`, not
-`"$HOME/.local/bin/rdy"`. A shorter `getrdy.io/install` address comes
-later, in M2.
+`"$HOME/.local/bin/rdy"`. A shorter `getrdy.io/install` address comes later, in M2.
 
 Until then, build from source ([below](#build-from-source)).
 
 ### Try it on an example spec
 
-This is a real run from a build of `main`, on a Linux VM, against
+This run uses
 [`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
 so it needs `--allow-unsigned`. A spec from your vendor does not:
 
@@ -124,10 +122,10 @@ not in the code yet.
   whose signature does not verify, always. It refuses an unsigned spec unless you pass
   `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
-  lists, your proxy, your DNS servers and the Kubernetes API server you chose. Redirects are recorded,
-  never followed (the egress policy is built, and `net.egress` and `net.mtu` use it; `--no-network` turns
-  every network check off). A vendor portal is
-  planned, and it is optional.
+  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` only
+  `net.egress` and `net.mtu` touch the network, and `--no-network` skips both. `net.egress` makes no
+  HTTP request yet, so there is no redirect to follow. The rule for the HTTP path, when it lands, is
+  that redirects are recorded and never followed. A vendor portal is planned, and it is optional.
 - **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
 - **No telemetry.**
 
