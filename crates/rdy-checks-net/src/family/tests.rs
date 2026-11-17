@@ -1,7 +1,7 @@
 //! Tests for the net family. They run on every CI leg with the same expectations: the OS is an argument
 //! of the plan and of the scheduler, never `cfg!`.
 
-use rdy_engine::check::{Os, Support};
+use rdy_engine::check::{Need, Os, Support};
 use rdy_engine::family::{Registry, RegistryError};
 use rdy_engine::plan::{PlanAction, RunPlan};
 use rdy_spec::parse_unverified;
@@ -41,9 +41,9 @@ fn skip_kind(plan: &RunPlan, key: &str) -> Option<SkipKind> {
 }
 
 #[test]
-fn the_family_lists_net_mtu_and_registers_once() {
+fn the_family_lists_net_egress_and_net_mtu_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
-    assert_eq!(ids, ["net.mtu"]);
+    assert_eq!(ids, ["net.egress", "net.mtu"]);
     let mut twice = registry();
     assert_eq!(
         twice.register(NetFamily).map(|_| ()),
@@ -58,7 +58,14 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         assert_eq!(info.family, "net");
         let timeout = info.default_timeout.expect("a timeout from the catalog");
         assert!(timeout.as_secs() >= 1 && timeout <= rdy_engine::check::MAX_TIMEOUT);
-        assert!(info.needs.is_empty(), "{} has a hard need", info.id);
+        // Only net.egress needs the network (`--no-network` skips it as `missing_need`); net.mtu reads the
+        // interface table and needs nothing.
+        let expected: &[Need] = if info.id == "net.egress" {
+            &[Need::Network]
+        } else {
+            &[]
+        };
+        assert_eq!(info.needs, expected, "{} needs", info.id);
     }
     // 03 gives net.mtu 3 seconds.
     assert_eq!(mtu::INFO.default_timeout.map(|d| d.as_secs()), Some(3));
