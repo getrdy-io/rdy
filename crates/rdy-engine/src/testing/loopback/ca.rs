@@ -128,6 +128,42 @@ impl TestCa {
         }
     }
 
+    /// A new intermediate CA signed by this one whose certificate carries the basicConstraints extension
+    /// twice, which a strict reader refuses. For a test of a pin on such a certificate.
+    ///
+    /// # Panics
+    ///
+    /// If signing fails (see [`TestCa::root`]).
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
+    pub fn intermediate_with_duplicate_basic_constraints(&self, common_name: &str) -> Self {
+        let mut params = ca_params(common_name);
+        // SEQUENCE { BOOLEAN TRUE }: cA true, the same value as the extension rcgen already writes.
+        params
+            .custom_extensions
+            .push(rcgen::CustomExtension::from_oid_content(
+                &[2, 5, 29, 19],
+                vec![0x30, 0x03, 0x01, 0x01, 0xff],
+            ));
+        let key = KeyPair::generate().expect("generate the intermediate key");
+        let cert = params
+            .signed_by(&key, &self.issuer())
+            .expect("sign the intermediate");
+        let mut chain_to_root = vec![cert.der().clone()];
+        chain_to_root.extend(self.chain_to_root.iter().cloned());
+        Self {
+            der: cert.der().clone(),
+            root_der: self.root_der.clone(),
+            root_pem: self.root_pem.clone(),
+            chain_to_root,
+            params,
+            key,
+        }
+    }
+
     fn issuer(&self) -> Issuer<'_, &KeyPair> {
         Issuer::from_params(&self.params, &self.key)
     }

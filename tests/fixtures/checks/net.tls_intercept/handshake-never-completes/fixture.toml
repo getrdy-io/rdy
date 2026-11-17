@@ -1,6 +1,6 @@
 schema = 1
 name = "net-tls-intercept-handshake-never-completes"
-summary = "A listener that opens TCP and never answers the ClientHello, so the handshake stalls and is cut to its limit"
+summary = "A peer that opens the connection and never answers the ClientHello, so the handshake stalls and is cut to its limit"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

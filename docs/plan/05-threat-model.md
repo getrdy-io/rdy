@@ -435,8 +435,8 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
   `num-bigint`, `num-integer`, `synstructure` and `displaydoc`; the rest of its tree was already there.
   Approved by security-reviewer: security review of PR #91 (SEC-100) approved it.
   - Purpose: read the issuer and subject of the chain a server presents, for `net.tls_intercept`
-    evidence and `expected_issuer`. It parses peer-controlled DER, so the check reads at most the first and
-    last certificate of a chain, skips any certificate over 16 KiB (`MAX_ROOT_BYTES`), and a proptest feeds
+    evidence and `expected_issuer`. It parses peer-controlled DER, so the check reads the first and last
+    certificate, and any later certificate whose hash is pinned, skips any certificate over 16 KiB (`MAX_ROOT_BYTES`), and a proptest feeds
     it arbitrary bytes (08 Appendix E). It does no signature check and opens no file or socket.
   - Names it returns are cleaned (control and invisible characters removed) and cut before they reach a
     report, and never enter a `Fix:` line.

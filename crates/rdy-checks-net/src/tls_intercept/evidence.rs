@@ -77,11 +77,26 @@ pub(super) fn names_of(der: &[u8]) -> Option<Names> {
 pub(super) enum PinState {
     /// The leaf, the one certificate the server proves it holds the key of, is pinned.
     Leaf,
-    /// Only a later certificate of the chain is pinned. The server can append any public certificate, so
-    /// this proves nothing about the path that was verified.
+    /// The leaf is not pinned, and a later certificate is, which x509-parser reads (at most 16 KiB) and
+    /// which has exactly one basicConstraints extension with `cA` true. The server can append any public
+    /// CA certificate, so this proves nothing about the path that was verified: a partial result.
     CaOnly,
-    /// No certificate the server sent is pinned.
+    /// Everything else, which blocks: no certificate is pinned, or the pinned later certificate is not a
+    /// CA, has no basicConstraints, cannot be read, is over 16 KiB or has a duplicate extension.
     Miss,
+}
+
+/// Whether `der` is a certificate x509-parser reads, of at most [`MAX_ROOT_BYTES`], with exactly one
+/// basicConstraints extension whose `cA` is true. A duplicate extension makes `basic_constraints` fail,
+/// which is not a CA.
+fn is_ca(der: &[u8]) -> bool {
+    if der.len() > MAX_ROOT_BYTES {
+        return false;
+    }
+    let Ok((_, cert)) = X509Certificate::from_der(der) else {
+        return false;
+    };
+    matches!(cert.basic_constraints(), Ok(Some(bc)) if bc.value.ca)
 }
 
 /// What a chain shows, read once.
@@ -136,13 +151,22 @@ impl ChainEvidence {
             .is_some_and(|issuer| issuer.chars().count() <= MATCHED_CHARS && matches(issuer))
     }
 
-    /// Where the chain stands against `pins`. Only the leaf proves anything: a server can append any
-    /// certificate it likes after its own.
-    pub(super) fn pin_state(&self, pins: &[String]) -> PinState {
-        let mut hashes = self.hashes.iter();
-        if hashes.next().is_some_and(|leaf| pins.contains(leaf)) {
-            PinState::Leaf
-        } else if hashes.any(|hash| pins.contains(hash)) {
+    /// Where the chain stands against `pins`, by the security ruling on pins: the leaf (the one
+    /// certificate the handshake binds to the server's key) passes the rule; a later certificate that
+    /// is a readable CA with one basicConstraints extension is a partial result; all else is a miss.
+    /// `certs` are the DER certificates this evidence was read from.
+    pub(super) fn pin_state(&self, certs: &[Vec<u8>], pins: &[String]) -> PinState {
+        if self.hashes.first().is_some_and(|leaf| pins.contains(leaf)) {
+            return PinState::Leaf;
+        }
+        let ca_pinned = self
+            .hashes
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, hash)| pins.contains(hash))
+            .any(|(at, _)| certs.get(at).is_some_and(|der| is_ca(der)));
+        if ca_pinned {
             PinState::CaOnly
         } else {
             PinState::Miss

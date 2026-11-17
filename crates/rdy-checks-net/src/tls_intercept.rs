@@ -301,7 +301,7 @@ impl Seen {
             .issuer
             .as_ref()
             .map(|rule| evidence.issuer_matches(&*rule.matches));
-        let pin = (!rules.pins.is_empty()).then(|| evidence.pin_state(&rules.pins));
+        let pin = (!rules.pins.is_empty()).then(|| evidence.pin_state(&chain.certs, &rules.pins));
         Self {
             evidence,
             issuer_ok,

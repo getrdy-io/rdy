@@ -19,7 +19,7 @@
 //! | `machine_only` | leaf, issuing CA | the root | real |
 //! | `unknown_ca` | leaf, issuing CA | another CA | real |
 //! | `expired` | an expired leaf (2020 to 2021), issuing CA | the root | pinned to `clock`: after the notAfter it is `clock_or_expiry`, inside the window it is `machine_only` |
-//! | `silent` | nothing: a listener opens TCP and never answers the ClientHello | an empty store | paused, so the 5 s handshake limit costs nothing |
+//! | `silent` | nothing: an in-memory peer that never reads or answers the ClientHello | an empty store | paused, so the 5 s handshake limit costs nothing |
 //!
 //! Optional keys: `clock` (`2022-06-01T00:00:00Z`, required by `expired`), `os_store` (`"empty"` for a
 //! machine with no trust store), `sources` (the places the OS roots were read from, the `system_roots`
@@ -49,7 +49,7 @@ use rdy_engine::probe::{
 };
 use rdy_engine::sched::Planned;
 use rdy_engine::testing::golden::assert_golden;
-use rdy_engine::testing::loopback::{HttpOptions, HttpServer, NeverAccepts, TestCa, Validity};
+use rdy_engine::testing::loopback::{HttpOptions, HttpServer, TestCa, Validity};
 use rdy_engine::testing::{
     Fixture, Replay, TcpScript, TestRun, assert_within_manifest, expect_bytes,
 };
@@ -183,16 +183,17 @@ struct Rig {
 async fn build(wanted: &Wanted, fixture: &Fixture) -> Result<Rig, String> {
     let addr: std::net::SocketAddr = ADDR.parse().map_err(|e| format!("{e}"))?;
     if wanted.kind == Kind::Silent {
-        // TCP opens (the kernel completes it) and nothing ever reads the ClientHello.
-        let silent = NeverAccepts::start()
-            .await
-            .map_err(|e| format!("the listener did not start: {e}"))?;
+        // The connection opens in memory and the peer never reads the ClientHello or answers: a paused
+        // clock cannot race a real connect.
         let replay = fixture
             .replay()
             .clone()
             .host(&wanted.host, [addr.ip()])
             .tcp(addr, TcpScript::Serve("silent".to_owned()))
-            .serve_tcp("silent", silent.addr())
+            .serve_duplex("silent", |stream| async move {
+                let _held = stream;
+                std::future::pending::<()>().await;
+            })
             .native(
                 NativeCall::SystemRoots,
                 NativeValue::SystemRoots(SystemRoots::new(Vec::new(), Vec::new())),
@@ -205,7 +206,7 @@ async fn build(wanted: &Wanted, fixture: &Fixture) -> Result<Rig, String> {
                 ("<root>", String::new()),
                 ("<other>", "ab".repeat(32)),
             ],
-            server: Box::new(silent),
+            server: Box::new(()),
         });
     }
     let root = TestCa::root("Acme Test Root CA");

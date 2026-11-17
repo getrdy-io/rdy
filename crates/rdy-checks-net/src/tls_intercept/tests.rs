@@ -1156,12 +1156,116 @@ async fn a_forged_chain_with_the_real_leaf_appended_does_not_meet_the_pin() {
     extra["pin_sha256"] = json!([hex_of(&real_der)]);
     let ran = run_with(run, extra).await;
     let finding = ran.finding();
-    assert_eq!(ran.host(0)["pin_sha256_matches"], "ca_only");
-    assert_ne!(finding.level, Level::Pass, "{}", finding.message);
-    assert!(finding.partial.is_some());
-    assert_ne!(ran.result().status, Status::Pass);
+    // The appended certificate is a leaf, not a CA, so the pin is a miss and the host blocks.
+    assert_eq!(ran.host(0)["pin_sha256_matches"], "none");
+    assert_eq!(finding.level, Level::Fail, "{}", finding.message);
+    assert_eq!(ran.result().status, Status::Block);
     // The pin of the attacker's own leaf is the only way to meet it, and the vendor never has that.
     assert_eq!(ran.host(0)["chain_depth"], 2);
+}
+
+/// A server that sends a leaf from `issuing` and then `later`, run with a pin on `later`.
+async fn pin_on_appended(issuing: &TestCa, root: &TestCa, later: Vec<u8>) -> String {
+    let leaf = issuing.issue(&[NAME], Validity::Always);
+    let pinned = hex_of(&later);
+    let web = HttpServer::start(HttpOptions::tls(&leaf.append(later)).alpn(&["http/1.1"]))
+        .await
+        .expect("a server");
+    let run = TestRun::new(machine(NAME, web.addr(), Vec::new()));
+    run.trust_as_public(&der(root));
+    let mut extra = hosts_of(NAME, &web);
+    extra["pin_sha256"] = json!([pinned]);
+    let ran = run_with(run, extra).await;
+    ran.host(0)["pin_sha256_matches"]
+        .as_str()
+        .expect("a pin state")
+        .to_owned()
+}
+
+#[tokio::test]
+async fn a_pinned_later_certificate_counts_only_when_it_is_a_readable_single_ca() {
+    let root = TestCa::root("Acme Test Root CA");
+    let issuing = root.intermediate("Acme Test Issuing CA");
+    // A CA certificate with one basicConstraints extension: partial.
+    let ca = root.intermediate("Acme Other Issuing CA");
+    assert_eq!(
+        pin_on_appended(&issuing, &root, ca.der().as_ref().to_vec()).await,
+        "ca_only"
+    );
+    // The same CA with the extension twice: basic_constraints errors, so it is a miss.
+    let twice = root.intermediate_with_duplicate_basic_constraints("Acme Twice CA");
+    {
+        use x509_parser::prelude::{FromDer, X509Certificate};
+        let bytes = twice.der().as_ref().to_vec();
+        let (_, cert) = X509Certificate::from_der(&bytes).expect("parses");
+        let count = cert
+            .extensions()
+            .iter()
+            .filter(|e| e.oid.to_id_string() == "2.5.29.19")
+            .count();
+        assert_eq!(count, 2, "the rig must write the extension twice");
+    }
+    assert_eq!(
+        pin_on_appended(&issuing, &root, twice.der().as_ref().to_vec()).await,
+        "none"
+    );
+    // A leaf (no CA), bytes that are not a certificate, and a certificate over 16 KiB are misses.
+    let other_leaf = root.issue(&["other.acme.test"], Validity::Always);
+    assert_eq!(
+        pin_on_appended(&issuing, &root, other_leaf.chain()[0].as_ref().to_vec()).await,
+        "none"
+    );
+    assert_eq!(
+        pin_on_appended(&issuing, &root, b"not a certificate".to_vec()).await,
+        "none"
+    );
+    let mut big = ca.der().as_ref().to_vec();
+    big.resize(rdy_engine::probe::MAX_ROOT_BYTES + 1, 0);
+    assert_eq!(pin_on_appended(&issuing, &root, big).await, "none");
+}
+
+#[test]
+fn an_unreadable_leaf_says_so_when_expected_issuer_is_not_met() {
+    let rules = Rules {
+        issuer: Some(IssuerRule {
+            pattern: "x".to_owned(),
+            matches: Box::new(|_| true),
+        }),
+        pins: Vec::new(),
+    };
+    let certs = vec![b"not a certificate".to_vec()];
+    let evidence = ChainEvidence::of(&certs);
+    let issuer_ok = rules
+        .issuer
+        .as_ref()
+        .map(|r| evidence.issuer_matches(&*r.matches));
+    let tested = Tested {
+        label: "web.acme.test:443".to_owned(),
+        host: "web.acme.test".to_owned(),
+        port: 443,
+        what: What::Chain {
+            class: Class::Public,
+            seen: Box::new(Seen {
+                depth: 1,
+                bundled: "valid",
+                system: "valid",
+                system_roots: 1,
+                protocol: None,
+                no_roots: None,
+                evidence,
+                issuer_ok,
+                pin: None,
+            }),
+        },
+        in_store: None,
+    };
+    let verdict = Verdict::of(&tested).expect("a chain");
+    assert_eq!(verdict.level(false), Level::Fail);
+    let reasons = verdict.reasons();
+    assert_eq!(
+        reasons,
+        ["issuer could not be read, so expected_issuer is not met"]
+    );
 }
 
 #[tokio::test]
@@ -1244,10 +1348,11 @@ async fn a_host_that_was_not_tested_is_never_read_as_meeting_a_rule() {
 fn an_unreadable_leaf_cannot_meet_expected_issuer() {
     // A server that sends bytes that are not a certificate cannot be built, so the evidence is proven
     // on the type: an unread issuer is a miss, and the pin still reads the DER.
-    let evidence = evidence::ChainEvidence::of(&[b"not a certificate".to_vec()]);
+    let certs = vec![b"not a certificate".to_vec()];
+    let evidence = evidence::ChainEvidence::of(&certs);
     assert!(!evidence.issuer_matches(&|_| true));
     assert_eq!(
-        evidence.pin_state(&[hex_of(b"not a certificate")]),
+        evidence.pin_state(&certs, &[hex_of(b"not a certificate")]),
         evidence::PinState::Leaf
     );
 }
@@ -1398,7 +1503,8 @@ proptest::proptest! {
         )
     ) {
         let evidence = evidence::ChainEvidence::of(&certs);
-        let _ = evidence.pin_state(&[hex_of(b"x")]);
+        let _ = evidence.pin_state(&certs, &[hex_of(b"x")]);
+        let _ = evidence.pin_state(&certs, &evidence.hashes);
         let _ = evidence.issuer_matches(&|s| s.contains('a'));
         let _ = evidence.shown_issuer();
     }
@@ -1413,23 +1519,29 @@ proptest::proptest! {
         proptest::prop_assert!(shown.chars().count() <= evidence::SHOWN_CHARS.max(3));
         let cleaned = evidence::clean(&text, max);
         proptest::prop_assert!(!cleaned.contains('`') && !cleaned.chars().any(char::is_control));
+        proptest::prop_assert!(!cleaned.chars().any(rdy_engine::text::is_invisible));
     }
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_listener_that_opens_tcp_and_never_answers_the_hello_is_bounded_and_named() {
-    use rdy_engine::testing::loopback::NeverAccepts;
-    let silent = NeverAccepts::start().await.expect("a listener");
+async fn a_peer_that_opens_the_connection_and_never_answers_the_hello_is_bounded_and_named() {
+    // Fully in memory: the peer holds its end of the pipe and never reads or writes, so a paused clock
+    // cannot race a real connect.
     let replay = Replay::new()
-        .host(NAME, ["127.0.0.1".parse().expect("ip")])
-        .tcp(silent.addr(), TcpScript::Serve("silent".to_owned()))
-        .serve_tcp("silent", silent.addr())
+        .host(NAME, ["192.0.2.7".parse().expect("ip")])
+        .tcp(
+            "192.0.2.7:443".parse().expect("addr"),
+            TcpScript::Serve("silent".to_owned()),
+        )
+        .serve_duplex("silent", |stream| async move {
+            let _held = stream;
+            std::future::pending::<()>().await;
+        })
         .native(
             NativeCall::SystemRoots,
             NativeValue::SystemRoots(Vec::new().into()),
         );
-    let extra = json!({"hosts": [format!("{NAME}:{}", silent.addr().port())]});
-    let ran = run_with(TestRun::new(replay), extra).await;
+    let ran = run_with(TestRun::new(replay), json!({"hosts": [NAME]})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Warn, "{}", finding.message);
     assert_eq!(ran.host(0)["class"], "not_tested");
