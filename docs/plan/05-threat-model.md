@@ -200,7 +200,7 @@ STRIDE table: Appendix B.
   swap the key file before a root run. The mitigation is the KEY NOT PINNED banner, which prints the
   short form of the fingerprint of the key that was used (PR #84 security review, F7). The full
   fingerprint is in the JSON report and in `rdy verify --key`. That is the value to compare, never the
-  short form (signing review SR-04). Accepted for M1 by the M1-132 signing review (AR-01). M2-034's TTY
+  short form (signing review SF-02). Accepted for M1 by the M1-132 signing review (AR-01). M2-034's TTY
   confirmation is the next control.
 
 ## Surface 3: install script and release pipeline
