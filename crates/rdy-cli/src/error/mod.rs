@@ -286,12 +286,18 @@ pub enum CliError {
         reason: IoReason,
     },
     /// A spec error from `rdy-spec`.
-    #[error("{source}")]
+    #[error("{}", spec_text(source, *crlf))]
     Spec {
         /// The spec path as typed, when known.
         file: Option<String>,
         /// The error.
         source: SpecError,
+        /// The spec file holds a CR LF pair. A signature error then adds the line-ending note (01
+        /// section 4.8).
+        crlf: bool,
+        /// A root run found no pinned key. Its fix says that root reads only the system store (01
+        /// section 4.3).
+        root: bool,
     },
     /// A scalar error from `rdy-spec`, such as a bad size or duration.
     #[error("{source}")]
@@ -391,7 +397,30 @@ impl CliError {
         Self::Spec {
             file: Some(file.into()),
             source,
+            crlf: false,
+            root: false,
         }
+    }
+
+    /// A spec error found in the file at `file`, whose bytes are `bytes`. A signature error says so when
+    /// the file has Windows line endings, the usual honest cause of a signature that does not match.
+    #[must_use]
+    pub fn spec_in(file: impl Into<String>, source: SpecError, bytes: &[u8]) -> Self {
+        Self::Spec {
+            file: Some(file.into()),
+            source,
+            crlf: bytes.windows(2).any(|pair| pair == b"\r\n"),
+            root: false,
+        }
+    }
+
+    /// Marks a spec error as found by a root run, so an unknown key says which store root reads.
+    #[must_use]
+    pub fn as_root(mut self) -> Self {
+        if let Self::Spec { root, .. } = &mut self {
+            *root = true;
+        }
+        self
     }
 
     /// The report writer refused, with its own words (code `report_write`, exit 70).
@@ -451,7 +480,14 @@ impl CliError {
             Err(err) => err,
         };
         let err = match err.downcast::<SpecError>() {
-            Ok(source) => return Self::Spec { file: None, source },
+            Ok(source) => {
+                return Self::Spec {
+                    file: None,
+                    source,
+                    crlf: false,
+                    root: false,
+                };
+            }
             Err(err) => err,
         };
         match err.downcast::<ScalarError>() {
@@ -498,6 +534,21 @@ impl CliError {
                 }
             }
             .to_owned(),
+            // Windows has no `rdy trust add` in M1, so the fix points at the page (ADR 0027).
+            Self::Spec {
+                source: SpecError::Signature(SignatureError::UnknownKey { .. }),
+                ..
+            } if cfg!(windows) => "see https://docs.getrdy.io/unsigned".to_owned(),
+            // A root run reads only /etc/rdy/trust.yaml, and never looks under a user's home to word a
+            // hint (INV-04). So it says what it read, whatever the user may have pinned.
+            Self::Spec {
+                source: SpecError::Signature(SignatureError::UnknownKey { product, .. }),
+                root: true,
+                ..
+            } => format!(
+                "{}. As root, rdy reads only /etc/rdy/trust.yaml. If you pinned this key as a normal user, pin it for root too: sudo rdy trust add {product} --key <file>",
+                source_fix_without_end(self)
+            ),
             Self::Spec { source, .. } => source.fix(),
             Self::Scalar { source, .. } => source.hint().to_owned(),
             Self::Password(err) => err.fix(),
@@ -570,8 +621,27 @@ impl CliError {
             }
             _ => None,
         };
+        // The signature and expiry refusals name the file inside the sentence, with no `file:` in front
+        // (01 section 4.8), so their JSON has no `file` either.
+        if let Self::Spec {
+            file: Some(file),
+            source,
+            crlf,
+            ..
+        } = self
+            && let Some(message) = refusal_line(file, source, *crlf)
+        {
+            return Rendered {
+                code: self.code(),
+                message: clean(&message),
+                fix: clean(&self.hint()),
+                file: None,
+                line: None,
+                column: None,
+            };
+        }
         let (file, location) = match self {
-            Self::Spec { file, source } => (file.as_deref(), source.location()),
+            Self::Spec { file, source, .. } => (file.as_deref(), source.location()),
             Self::Scalar { file, .. } => (file.as_deref(), None),
             Self::TrustStore(err) => (trust_file.as_deref(), err.location()),
             _ => (None, None),
@@ -584,6 +654,79 @@ impl CliError {
             line: location.map(|at| at.line),
             column: location.map(|at| at.column),
         }
+    }
+}
+
+/// The fix of a spec error with no final full stop, so a sentence can follow it.
+fn source_fix_without_end(error: &CliError) -> String {
+    match error {
+        CliError::Spec { source, .. } => source.fix().trim_end_matches('.').to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// What a spec error reads like when no file name is at hand, with the line-ending note when it applies.
+fn spec_text(source: &SpecError, crlf: bool) -> String {
+    let mut text = source.to_string();
+    if let SpecError::Signature(error) = source
+        && crlf
+        && wants_crlf_note(error)
+        && !matches!(error, SignatureError::Tampered { crlf: true })
+    {
+        text.push_str(". ");
+        text.push_str(CRLF_NOTE);
+    }
+    text
+}
+
+/// The note for a spec file with Windows line endings (01 section 4.8).
+const CRLF_NOTE: &str =
+    "The file has Windows line endings. If it went through Git or email, ask for the original.";
+
+/// A signature error that a line-ending conversion could be behind, or hide. A missing signature and a
+/// key that cannot be used have nothing to do with the spec's bytes.
+fn wants_crlf_note(error: &SignatureError) -> bool {
+    !matches!(
+        error,
+        SignatureError::Missing | SignatureError::BadKey { .. } | SignatureError::WeakKey
+    )
+}
+
+/// The first line of a refusal that names the file inside the sentence (01 section 4.8): the signature
+/// errors and an expired spec. `None` for every other error, which the terminal prefixes with the file.
+fn refusal_line(file: &str, source: &SpecError, crlf: bool) -> Option<String> {
+    match source {
+        SpecError::Expired { expired_on, today } => Some(format!(
+            "{file} expired on {expired_on}. This machine's clock says {today}."
+        )),
+        SpecError::Signature(error) => {
+            let mut line = match error {
+                SignatureError::Missing => format!("no signature found at {file}.minisig"),
+                SignatureError::UnknownKey { key_id, product } => format!(
+                    "{file} is signed with key {key_id}, which you have not trusted for {product}"
+                ),
+                SignatureError::Tampered { .. } | SignatureError::CommentTampered => format!(
+                    "the signature on {file} does not match the file. It may have been changed after signing."
+                ),
+                SignatureError::SidecarTooLarge { .. }
+                | SignatureError::Malformed { .. }
+                | SignatureError::LegacyAlgorithm
+                | SignatureError::BadComment { .. } => {
+                    format!("the signature on {file} is not in the form rdy accepts.")
+                }
+                SignatureError::ProductMismatch { signed, spec } => {
+                    format!("{file} is signed for product '{signed}', but the spec says '{spec}'.")
+                }
+                _ => return None,
+            };
+            let crlf = crlf || matches!(error, SignatureError::Tampered { crlf: true });
+            if crlf && wants_crlf_note(error) {
+                line.push(' ');
+                line.push_str(CRLF_NOTE);
+            }
+            Some(line)
+        }
+        _ => None,
     }
 }
 

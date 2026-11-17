@@ -260,7 +260,7 @@ fn key_summary(product: &ProductSlug, key: &PublicKey, origin: &Origin) -> Strin
 
 /// The refusal for a key argument. The wording of 07 C.10: it names the file, or says "that" for text,
 /// and never repeats key text.
-fn key_error(err: &GivenKeyError) -> CliError {
+pub(crate) fn key_error(err: &GivenKeyError) -> CliError {
     let name = |origin: &Origin| match origin {
         Origin::File(path) => display(path),
         Origin::Text => "that".to_owned(),

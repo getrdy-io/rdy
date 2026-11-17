@@ -131,6 +131,24 @@ impl TrustStore {
         });
     }
 
+    /// A store for one run: `key`, given on the command line, trusted for the product the signed comment
+    /// of `sidecar` names, and nothing else. Every pin has [`TrustSource::Flag`], so a verified result
+    /// says the key was not pinned (KEY NOT PINNED). Nothing is read from disk and nothing is saved.
+    ///
+    /// Only the form of `sidecar` is read, not its signature. The comment names the product, and the
+    /// key must still verify the file and the comment in [`crate::load`].
+    ///
+    /// # Errors
+    ///
+    /// The [`SignatureError`] of a sidecar that is too large or not in the minisign form, the same one
+    /// [`crate::load`] gives.
+    pub fn for_one_run(sidecar: &[u8], key: PublicKey) -> Result<Self, SignatureError> {
+        let parsed = parse_sidecar(sidecar)?;
+        let mut store = Self::new();
+        store.pin(parsed.product, key, TrustSource::Flag);
+        Ok(store)
+    }
+
     /// The pins for `product`.
     fn pins_for<'a>(&'a self, product: &'a ProductSlug) -> impl Iterator<Item = &'a Pin> {
         self.pins.iter().filter(move |pin| pin.product == *product)

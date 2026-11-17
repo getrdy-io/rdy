@@ -1,0 +1,2 @@
+error: no signature found at spec.yaml.minisig
+fix: ask the vendor for the .minisig file and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned

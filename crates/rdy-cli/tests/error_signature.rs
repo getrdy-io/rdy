@@ -132,7 +132,13 @@ fn a_signature_error_has_no_position() {
     );
     let r = cli.render();
     assert_eq!((r.line, r.column), (None, None));
-    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
+    // The file is named inside the sentence, so there is no `file:` prefix and no `file` in the JSON
+    // (01 section 4.8).
+    assert_eq!(r.file, None);
+    assert_eq!(
+        r.message,
+        "no signature found at acme-platform.yaml.minisig"
+    );
 }
 
 fn load_error(spec: &[u8], sig: Option<&[u8]>, store: &TrustStore, policy: Policy) -> CliError {

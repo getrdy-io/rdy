@@ -1,13 +1,16 @@
 //! Exit-code goldens (M1-087, 07 section 5, 08 section 3).
 //!
-//! The rows that need no fixture backend run the built binary: a bad flag (64), a missing spec (64), a
-//! spec that names 65 hosts (64) and a report folder that cannot be made (70). Each row is run twice.
+//! The rows that need no fixture backend run the built binary: a bad flag (64), a missing spec (64), an
+//! unsigned spec (64), a spec that names 65 hosts (64) and a report folder that cannot be made (70). Each row is run twice.
 //! Plain, it must exit with the row's code, print nothing on stdout and match the stderr golden. With
 //! `--json`, it must exit the same, print the same stderr, and print one ErrorOutput on stdout that
 //! validates against the result schema, carries the row's stable code and says what stderr says.
 //!
-//! Exits 0, 1 and 2 are the fixture env goldens (`env_harness`, M1-075). The unsigned row joins with
-//! `rdy verify` (M1-126). `rdy spec lint` exits 2 for a spec with 65 hosts by design (07 C.8); `rdy run`
+//! The unsigned row is `rdy run` on a spec with no `.minisig` and no flag (M1-126). `rdy verify` and the
+//! other signature refusals are in `verify_command.rs`.
+//!
+//! Exits 0, 1 and 2 are the fixture env goldens (`env_harness`, M1-075). `rdy spec lint` exits 2 for a
+//! spec with 65 hosts by design (07 C.8); `rdy run`
 //! exits 64 (M1-094 proves the same at the `CliError` level).
 //!
 //! The `unwritable-out-dir` row gives a folder whose parent does not exist. It fails the same way on all
@@ -63,6 +66,13 @@ const ROWS: &[Row] = &[
         cwd: Cwd::Empty,
         exit: 64,
         code: "spec_unreadable",
+    },
+    Row {
+        name: "unsigned",
+        args: &["run", "spec.yaml"],
+        cwd: Cwd::WithSpec,
+        exit: 64,
+        code: "spec_unsigned",
     },
     Row {
         name: "too-many-hosts",
