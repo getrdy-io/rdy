@@ -32,9 +32,47 @@ pub(super) struct NsFacts {
     pub(super) labels: Labels,
     /// `openshift.io/sa.scc.uid-range`, when it has the shape of one.
     pub(super) uid_range: Option<String>,
-    /// True when the namespace sets `security.openshift.io/scc.podSecurityLabelSync` to `false`, so
-    /// OpenShift does not write its `warn` and `audit` labels.
-    pub(super) label_sync_off: bool,
+    /// What the namespace says in `security.openshift.io/scc.podSecurityLabelSync`.
+    pub(super) sync_label: SyncLabel,
+}
+
+/// The value of the namespace's `security.openshift.io/scc.podSecurityLabelSync` label.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum SyncLabel {
+    /// Absent, or a value other than `true` and `false`.
+    #[default]
+    Unset,
+    On,
+    Off,
+}
+
+impl SyncLabel {
+    /// Reads the label value.
+    pub(super) fn from_value(value: Option<&str>) -> Self {
+        match value {
+            Some("true") => Self::On,
+            Some("false") => Self::Off,
+            _ => Self::Unset,
+        }
+    }
+}
+
+/// Whether OpenShift writes the `warn` and `audit` labels of namespace `name` from the SCCs.
+///
+/// The label sync controller never touches `default`, `kube-*` and `openshift`, and the system `openshift-*`
+/// namespaces are left out of it, except `openshift-operators`. A namespace a user creates with an
+/// `openshift-` prefix starts with the sync off too, and rdy cannot tell it from a system one, so every other
+/// `openshift-*` namespace counts as unsynced unless its label says `true`. Any other namespace is synced
+/// unless its label says `false`.
+fn label_sync_applies(name: &str, label: SyncLabel) -> bool {
+    if name == "default" || name == "openshift" || name.starts_with("kube-") {
+        return false;
+    }
+    match label {
+        SyncLabel::Off => false,
+        SyncLabel::On => true,
+        SyncLabel::Unset => name == "openshift-operators" || !name.starts_with("openshift-"),
+    }
 }
 
 /// Whether the cluster is OpenShift.
@@ -398,6 +436,18 @@ fn judge_labels(need: &Need, facts: &NsFacts, ns: &str, found: &Gathered, out: &
             }
         }
     }
+    // On OpenShift with no sync and no label of the namespace's own, the cluster default decides what warns
+    // and audits, and it is not readable.
+    if found.openshift == Openshift::Yes
+        && !label_sync_applies(ns, facts.sync_label)
+        && labels.warn == Label::Absent
+        && labels.audit == Label::Absent
+        && need.level < Standard::Restricted
+    {
+        notes.push(format!(
+            "OpenShift does not sync the warn and audit labels of namespace {ns}, and it sets none, so the cluster default applies. rdy cannot read it (cluster default not readable)."
+        ));
+    }
     for (mode, label) in [("warn", labels.warn), ("audit", labels.audit)] {
         if label == Label::Invalid {
             // The API server reads it as `privileged`: it fails open, so nothing is judged, but the label
@@ -411,8 +461,9 @@ fn judge_labels(need: &Need, facts: &NsFacts, ns: &str, found: &Gathered, out: &
         {
             // On OpenShift a controller syncs these two labels from the SCCs the service accounts of the
             // namespace may use, so they say what would warn, not what is rejected. The SCC is the gate.
-            // With the sync switched off the label is the namespace's own, so it is judged like any other.
-            if found.openshift == Openshift::Yes && !facts.label_sync_off {
+            // With the sync off, or never run for this namespace, the label is the namespace's own, so it is
+            // judged like any other.
+            if found.openshift == Openshift::Yes && label_sync_applies(ns, facts.sync_label) {
                 notes.push(format!(
                     "Namespace {ns} sets {mode} to {}. On OpenShift that label is synced from the SCCs, so pods are not rejected for it, if it was not edited by hand.",
                     have.name()

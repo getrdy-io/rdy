@@ -345,6 +345,15 @@ namespace(
 )
 scc_list("openshift-sync-off", SCCS)
 
+case("openshift-sync-off-no-labels", "OpenShift where label sync is off and the namespace sets no warn or audit label, so the cluster default applies")
+apis("openshift-sync-off-no-labels", OPENSHIFT)
+namespace(
+    "openshift-sync-off-no-labels",
+    {"security.openshift.io/scc.podSecurityLabelSync": "false"},
+    RANGE,
+)
+scc_list("openshift-sync-off-no-labels", SCCS)
+
 case("openshift-scc-forbidden", "OpenShift where the identity may not list the SCCs")
 apis("openshift-scc-forbidden", OPENSHIFT)
 namespace("openshift-scc-forbidden", SYNCED, RANGE)
@@ -432,7 +441,6 @@ case("engine-forbidden", "Kyverno is served but its group versions may not be re
 apis("engine-forbidden", KYVERNO)
 namespace("engine-forbidden", {PSA + "enforce": "baseline"})
 kinds("engine-forbidden", "kyverno.io", "v2", [], code=403)
-kinds("engine-forbidden", "kyverno.io", "v1", [], code=403)
 kinds("engine-forbidden", "policies.kyverno.io", "v1", [], code=403)
 
 case("openshift-and-engine", "OpenShift with Gatekeeper installed")

@@ -782,3 +782,24 @@ async fn a_block_becomes_a_warning_when_the_spec_says_severity_warn() {
 fn the_remediation_text_is_on_the_allow_list() {
     rdy_engine::fixtext::check(INFO.meta.remediation).expect("remediation text is clean");
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &["/v1/pods"];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // Not read yet: the pod list belongs to the free capacity half, which M1-159 builds. When it lands,
+    // this list must be empty, and the assert below fails until it is.
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    a_block_becomes_a_warning_when_the_spec_says_severity_warn();
+    a_cut_list_makes_a_count_or_zone_shortfall_a_warning_with_a_partial();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.nodes"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.nodes is read by no fixture of the tests listed here"
+    );
+}

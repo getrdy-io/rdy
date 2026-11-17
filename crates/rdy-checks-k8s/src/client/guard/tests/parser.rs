@@ -1157,3 +1157,15 @@ fn every_cited_check_id_is_a_check_in_the_catalog() {
         );
     }
 }
+
+#[test]
+fn allowed_has_one_entry_per_group_version_and_resource() {
+    // `target_of` and the audit use the first entry that matches, so a second entry for the same resource
+    // would never be reached and its checks would be refused as not cited. A check that needs more of a
+    // resource adds its access and its id to the entry that is there.
+    let mut seen = BTreeSet::new();
+    for entry in ALLOWED {
+        let key = (entry.group, entry.version, entry.resource);
+        assert!(seen.insert(key), "ALLOWED names {key:?} twice");
+    }
+}

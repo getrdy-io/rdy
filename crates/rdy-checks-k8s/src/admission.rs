@@ -11,7 +11,9 @@
 //! - `GET /apis/<group>/<version>` for each engine group that is served, to name the kinds it serves
 //!   (at most four requests), and `GET /apis/kyverno.io/v1` when that group lists `v1`, `v1` is not the
 //!   preferred version and the preferred version did not show `ClusterPolicy` or `Policy` (one more
-//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds;
+//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds. That
+//!   `v1` read is skipped when the preferred version was forbidden, because `v1` would say the same, and
+//!   the legacy kinds are then unknown (the command to list them stays in the fix);
 //! - on OpenShift, when the spec names an `scc`: the `SecurityContextConstraints` list, one page, for the
 //!   names only.
 //!
@@ -29,7 +31,10 @@
 //!   hardened profile defaults to `restricted`.
 //! - OpenShift without an `scc` in the spec warns with the SCC text. With one, it passes and says how to
 //!   bind it. Pod Security labels still apply on OpenShift, but only `warn` and `audit` are synced from the
-//!   SCCs, so the SCC is the real gate.
+//!   SCCs, so the SCC is the real gate. The sync never runs for `default`, `kube-*` and `openshift`, and
+//!   it starts off for `openshift-*` namespaces other than `openshift-operators` (a label `true` turns it on), so there the `warn` and
+//!   `audit` labels are the namespace's own. With the sync off and neither label set, the cluster default
+//!   applies and is not readable (a note).
 //! - A policy engine group warns with the engine's name, the groups and the kinds. A group is evidence of
 //!   an install, not of an enforcing policy.
 //!
@@ -66,7 +71,7 @@ mod tests;
 mod unit_tests;
 
 use engines::{FoundGroup, Group, OPENSHIFT_GROUP};
-use judge::{Gathered, NsFacts, Openshift};
+use judge::{Gathered, NsFacts, Openshift, SyncLabel};
 use level::{Labels, need_of};
 use scc::Scc;
 
@@ -405,9 +410,11 @@ async fn read_namespace(
                 .and_then(|annotations| annotations.get("openshift.io/sa.scc.uid-range"))
                 .and_then(|range| scc::uid_range(range));
             NsFacts {
-                label_sync_off: labels
-                    .get("security.openshift.io/scc.podSecurityLabelSync")
-                    .is_some_and(|value| value == "false"),
+                sync_label: SyncLabel::from_value(
+                    labels
+                        .get("security.openshift.io/scc.podSecurityLabelSync")
+                        .map(String::as_str),
+                ),
                 labels: Labels::from_map(&labels),
                 uid_range,
             }

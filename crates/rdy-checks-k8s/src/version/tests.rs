@@ -772,3 +772,22 @@ async fn a_review_the_authorizer_could_not_decide_leaves_the_list_to_say() {
     assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
     rig.audit();
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    openshift_reads_the_cluster_version();
+    a_node_list_with_a_second_page_is_read_to_the_end_with_the_paging_helper();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.version"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.version is read by no fixture of the tests listed here"
+    );
+}

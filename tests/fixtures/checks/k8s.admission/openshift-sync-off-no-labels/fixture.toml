@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-sync-off-no-labels"
+summary = "OpenShift where label sync is off and the namespace sets no warn or audit label, so the cluster default applies"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
