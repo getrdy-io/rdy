@@ -429,6 +429,12 @@ impl NtpServer {
     pub fn port_or_default(&self) -> u16 {
         self.target.port()
     }
+
+    /// The server as a [`Target`]: the host and the port to use (the one written, or 123).
+    #[must_use]
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
 }
 
 impl<'de> Deserialize<'de> for NtpServer {
