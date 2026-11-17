@@ -281,7 +281,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-132 | todo | | Security review of spec signing and trust store
 
-- M1-133 | todo | | Install, exit codes and unsigned pages | backlog corrected 2026-10-29 (correction-10): the unsigned page has a Windows section on verifying with the vendor key while Windows trust stores are refused (ADR 0027)
+- M1-133 | todo | | Install-only blocks are written and their runner is tested with stubs, but the CI job skips until the first release (M1-138) and has not run against one. The container is `ubuntu:24.04` by tag, not digest (founder pins it, ADR 0047). The `/unsigned` redirect is a founder hosting step (ADR 0047, `docs/redirects.txt`). The Windows and `--key` commands are marked `pending=M1-126` because `rdy verify` and `rdy run --key` are not built in this build. No Windows host was used. The exit codes page is tied to `ExitCode` by a test; 0, 1 and 2 are proved by the fixture goldens.
 
 - M1-134 | todo | | Sign and verify page
 

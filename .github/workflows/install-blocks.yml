@@ -1,0 +1,115 @@
+# The install-only blocks of the install page, run against the newest published release (M1-133, ADR 0047).
+#
+# Three jobs:
+# - test-runner: the shell tests of scripts/install-blocks.sh, with stubs. No network. It runs on every PR that
+#   touches the install page or these scripts.
+# - resolve: asks GitHub for the newest published release. With none, it prints a SKIPPED line, and the next
+#   job does not run. That is the state until the first release (M1-138), so the workflow shows a skip, not a
+#   failure.
+# - blocks: runs the install-only blocks in a fresh Ubuntu container, as a user with no rights. It installs cosign
+#   from the pinned file (scripts/install-release-tool.sh, sha256 checked) and runs the release's install.sh. A
+#   block that fails fails this job.
+#
+# This workflow is not in ci-ok's `needs:`. It reads a published release, which the PR under test does not
+# change, and it depends on GitHub and on the release. A release outage must not block merges. Making it a gate
+# is a decision for the founder (ADR 0047).
+#
+# Same rules as ci.yml: every `uses:` is pinned to a full commit SHA, the token is read-only, no pull_request_target.
+# The container image is the one exception: it is pinned by tag, not by digest, because the digest could not be
+# read when this file was written. The founder pins it by digest before this job becomes a gate (ADR 0047).
+
+name: install-blocks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/install-blocks.yml"
+      - "docs/src/content/docs/install.md"
+      - "scripts/install-blocks.sh"
+      - "scripts/test-install-blocks.sh"
+      - "scripts/install-release-tool.sh"
+  schedule:
+    - cron: "20 7 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: install-blocks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-runner:
+    name: test-runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Shell tests of the install-only runner (stubs, no network)
+        run: sh scripts/test-install-blocks.sh
+
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Newest published release (prints SKIPPED when there is none)
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # No pipe here: a failed lookup must fail this step, not look like a skip.
+          sh scripts/install-blocks.sh --resolve-tag > resolved.txt
+          tag=$(sed -n 's/^tag=//p' resolved.txt)
+          if [ -n "$tag" ]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "Newest published release: $tag"
+          else
+            echo "No published release. The blocks job is skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  blocks:
+    name: blocks
+    needs: [resolve]
+    if: needs.resolve.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # A fresh container, not the runner image. The runner has cosign and gh, a fresh Ubuntu does not.
+    container:
+      image: ubuntu:24.04
+    permissions:
+      contents: read
+    env:
+      RDY_TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tools the install script needs (curl and CA certificates; the image has neither)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates
+      - name: Install cosign (pinned file, sha256 checked), where every user can run it
+        run: |
+          sh scripts/install-release-tool.sh cosign
+          install -m 0755 "$HOME/.cargo/bin/cosign" /usr/local/bin/cosign
+          cosign version
+      - name: Run the install-only blocks as a user with no rights
+        run: |
+          useradd --create-home tester
+          runuser -u tester -- env -i \
+            HOME=/home/tester \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            LANG=C.UTF-8 \
+            sh scripts/install-blocks.sh --tag "$RDY_TAG"
