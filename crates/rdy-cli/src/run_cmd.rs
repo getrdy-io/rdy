@@ -34,7 +34,8 @@
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), `--key` and the full
 //! unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose` (M1-143) and the
-//! live progress line (M1-142) change the output later; this is the plain run.
+//! live progress line (M1-142) change the output later; this is the plain run, plus the static
+//! "Running N checks..." line of [`crate::static_line`] on a terminal.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -57,12 +58,13 @@ use rdy_spec::result::{
 use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
 
-use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
+use crate::cli::{COMMIT, ColorChoice, ProgressChoice, RunArgs, TARGET};
 use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
+use crate::static_line::{Gate, StaticLine};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
 use crate::terminal::{View, banner, render};
 use crate::trust::{self, Layout, Vars};
@@ -118,6 +120,12 @@ pub(crate) struct RunContext {
     pub(crate) registry: Registry,
     /// The `--color` choice.
     pub(crate) color: ColorChoice,
+    /// The `--progress` choice (and `RDY_PROGRESS`).
+    pub(crate) progress: ProgressChoice,
+    /// `--quiet`.
+    pub(crate) quiet: bool,
+    /// `--verbose`.
+    pub(crate) verbose: bool,
     /// The watchdog and the write state, started before the runtime (M1-176).
     pub(crate) rig: Rig,
 }
@@ -152,6 +160,9 @@ async fn execute(
         hooks,
         registry,
         color,
+        progress,
+        quiet,
+        verbose,
         rig,
     } = cx;
     let look = Look::new(color, &hooks);
@@ -257,12 +268,30 @@ async fn execute(
         board
     });
 
+    // The static line (07 section 3, M1-088): after the banner and the folder, before the first probe,
+    // and cleared before anything else is written to stderr.
+    let gate = Gate::new(
+        progress,
+        quiet,
+        verbose,
+        hooks
+            .stderr_terminal
+            .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr())),
+        hooks
+            .style_env
+            .clone()
+            .unwrap_or_else(StyleEnv::from_process)
+            .term_dumb(),
+    );
+    let mut line = StaticLine::show(gate, plan.runnable().count(), stderr);
+
     let host = host_facts(&engine.hub().run_probe()).await;
     if let Some(board) = &board {
         board.set_host(host.clone());
     }
     options.board = board;
     let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+    line.clear(stderr);
 
     let finished_at = clock();
     let run = make_run(
