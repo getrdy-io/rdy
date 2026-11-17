@@ -1,0 +1,22 @@
+{
+  "entry": {
+    "btf": true,
+    "id": "host.kernel"
+  },
+  "result": {
+    "expected": {
+      "btf": true
+    },
+    "fix": "Boot a kernel built with BTF: `sudo dnf upgrade kernel`, reboot, and check that `/sys/kernel/btf/vmlinux` exists.",
+    "level": "fail",
+    "message": "This kernel has no BTF type information: /sys/kernel/btf/vmlinux is missing.",
+    "notes": [],
+    "observed": {
+      "base": "4.18.0",
+      "btf": false,
+      "build": "348",
+      "release": "4.18.0-348.el8.x86_64"
+    },
+    "partial": null
+  }
+}
