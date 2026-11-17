@@ -97,6 +97,8 @@ pub fn report_error(step: ReportStep, shown: &Path, err: ReportError) -> CliErro
         ReportError::Json(json) => {
             return CliError::report_writer(&json).unwrap_or_else(CliError::bug);
         }
+        // The page failed to render: the renderer's words, as for the JSON (M1-181).
+        ReportError::Html(html) => return CliError::report_html(&html),
         _ => return CliError::bug(),
     };
     let path = if path.as_os_str().is_empty() {

@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-55: M1 184 tickets, 406.5 h, 342 h core; M2 141 tickets, 484.75 h; all milestones 425 tickets,
-1404.75 h, 1340.25 h core.
+correction-56: M1 184 tickets, 406.5 h, 342 h core; M2 143 tickets, 490.75 h; all milestones 427 tickets,
+1410.75 h, 1346.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -271,6 +271,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   results; M1-138 depends on it. 03 names the real OS roots source and says to pin the leaf or set
   `forbid_interception` until M2-135. M1-073 moves back to week 14. The real-run proof of a spec `as:`
   and the OpenShift grant text moves from M1-113 to M1-175.
+- 56: no new M1 ticket. `rdy run` has no family namespace in M1: 03 says what each k8s check does without
+  one, and 07 says `rdy run` has no `--namespace`. ADR 0049 (Proposed) picks a spec `k8s:` block with
+  `namespace` for M2 and no run flag. M1-162 to M1-165 register their check in the family if M1-175
+  merges first. New M2-142 (the `k8s:` block) and M2-143 (the `cluster-autoscaler-status` ConfigMap).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -281,10 +285,11 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+- The next free ADR is 0050. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
-  in #78 (M1-165).
-- The next ticket ids are M1-185 and M2-142, and the next correction is 56 (49 is in #85).
+  in #78 (M1-165). ADR 0047 is on the M1-133 branch. ADR 0048 is reserved for M1-136's docs-test ADR
+  (its branch numbers it 0046). ADR 0049 is correction-56's (Proposed).
+- The next ticket ids are M1-185 and M2-144, and the next correction is 57 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -468,6 +473,24 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     that a spec `as:` reaches k8s.rbac and an OpenShift mock shows the grant text (M1-113 code review).
   - M1-116 (correction-55): the network page says to pin the leaf or set `forbid_interception` to block
     until M2-135 (M1-101 review AR-01).
+  - Follow-ups that correction-56 gave ids:
+    - M2-142: the spec `k8s:` block with `namespace`, handed to `K8sFamily::with_namespace` by `rdy run`;
+      no `rdy run --namespace` (ADR 0049, M1-175 review). cli-ux and security-reviewer review ADR 0049
+      in it.
+    - M2-143: k8s.nodes reads `kube-system/cluster-autoscaler-status` by name for GKE Standard and AKS,
+      with the 03 grant text, a new ADR and a security review (M1-113 k8s review). Build it after #62
+      (M1-162), which brings the `Access::GetIn` guard shape.
+  - #62, #65, #64, #78 (M1-162 to M1-165) and M1-175 (correction-56): the second of M1-175 and each of
+    them to merge registers that check in the family: the `build_check` arm, the registry info and the
+    family test counts. Each PR keeps the correction-56 clause in its progress line.
+  - M1-175's PR (correction-56): in its progress line, "a correction will file it" becomes
+    "correction-56 filed it (M2-142)", and "a correction adds the clause to those rows" becomes
+    "correction-56 added the clause to those rows".
+  - #65 (M1-163, correction-56): its no-namespace fix says "the `k8s` block of the spec", which M1 does
+    not have. If #65 takes another fix round, word it like k8s.cni's (no key named); otherwise M2-142
+    rewrites it.
+  - docs/adr/README.md (correction-56): the rows of ADR 0043 to 0048 go above the 0049 row as their PRs
+    merge.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
