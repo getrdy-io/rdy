@@ -615,3 +615,19 @@ the corrections log of `11-backlog.md`.
   node shortfall; one guarded GET, a cut-down type, the 03 grant text, the role, the kind job, a new ADR
   (ADR 0043 decision 4) and a security review. No M1 hours change. No 03 `###` heading or Appendix A row
   changed, and no test-pinned text changed.
+- **Correction-57, the k8s.nodes pod list returns with M1-159, the Kubernetes page API reads, and two M2
+  tickets.** From the M1-115 k8s checks review (`docs/plan/reviews/k8s-checks-review.md`, on the M1-115
+  branch) and its code review, and from the M1-116 review. Correction-49 is PR #85. The `v1` `pods`
+  `ALLOWED` entry cites k8s.nodes, but only the free capacity half reads pods, and that is M1-159, so no
+  fixture read the pair and 0.1.0 would grant `list pods` for nothing (SF-01). M1-115 (approved, not
+  merged) removes the entry, the `pods` rule in `examples/rbac/rdy-readonly.yaml`, the pod reads of
+  `live_cluster.rs` and the guard's pod selector tests, and words 03's k8s.nodes Needs line and 02
+  Appendix B's `pods` row to say the Pod list arrives with M1-159. M1-159's row now adds all of it back,
+  with a fixture that reads the (`pods`, k8s.nodes) pair and the kind workflow green, and depends on
+  M1-115. It keeps its 1.5 h. Main still has the entry, the rule and the 03 text, so 02 and 03 do not
+  change here. New M2-144 (1 h) scopes k8s.version's three `v1beta1` removed-API rows to the kinds
+  removed in 1.22 (SF-03). New M2-145 (1 h) adds AKS `managed-csi` and a vSphere or Longhorn class
+  fixture to k8s.storageclass (SF-04). The review's folds onto M2-125 (SF-06) and M2-126 (SF-05) are
+  already in those rows, so they are not filed. M1-116's row now says the Kubernetes page gives each check
+  an API reads line from the guard's `ALLOWED` table, with a test. No M1 hours change. No 03 `###`
+  heading or Appendix A row changed, and no test-pinned text changed.
