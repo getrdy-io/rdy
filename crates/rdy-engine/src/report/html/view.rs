@@ -69,7 +69,7 @@ impl Span {
 
     fn untrusted(text: &str) -> Self {
         Self {
-            text: shown(text),
+            text: shown(text).as_str().to_owned(),
             untrusted: true,
         }
     }
@@ -77,34 +77,9 @@ impl Span {
 
 mod actions;
 mod facts;
+mod shown;
 
-/// The Unicode format (Cf) characters that `rdy_engine::text::is_invisible` does not list. Together they
-/// are every Cf character of Unicode 16 and the zero-width characters outside Cf.
-fn is_extra_format(c: char) -> bool {
-    matches!(
-        u32::from(c),
-        0x0600..=0x0605 | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0x110BD | 0x110CD | 0x13430..=0x1343F
-    )
-}
-
-/// `text` as the page shows it: every format (Cf) and zero-width character, among them the bidi controls
-/// U+202A to U+202E and U+2066 to U+2069, is written as an escape such as `\u{202e}`, so it cannot reorder
-/// or hide anything and a reader sees that it is there (M1-141, SEC-149-11). Everything else is kept.
-/// Every string from the report goes through this before it reaches the template, which then wraps it in
-/// `<bdi>` and HTML-escapes it. A backslash is left as it is, like `crate::text::escape_untrusted`.
-pub(super) fn shown(text: &str) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if crate::text::is_invisible(c) || is_extra_format(c) {
-            // Writing to a String cannot fail.
-            let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
+pub(super) use shown::{Shown, shown};
 
 use actions::ActionLog;
 use facts::{Fact, facts};
@@ -126,14 +101,14 @@ pub(super) struct PartialView {
     /// "Checked in part. Could not read: ...", with the names that came from the report marked.
     pub summary: Vec<Span>,
     /// The check's own note, which can be empty.
-    pub note: String,
+    pub note: Shown,
 }
 
 /// A fix and who it is from.
 pub(super) struct FixView {
     /// "From acme-platform", "From the spec file (not verified)" or "From rdy". The product is untrusted.
     pub label: Vec<Span>,
-    pub text: String,
+    pub text: Shown,
 }
 
 /// One check.
@@ -144,16 +119,16 @@ pub(super) struct CheckView {
     pub status_word: &'static str,
     /// The class that draws the left border.
     pub status_class: &'static str,
-    pub id: String,
-    pub name: Option<String>,
-    pub message: String,
+    pub id: Shown,
+    pub name: Option<Shown>,
+    pub message: Shown,
     /// Why a check that did not run did not run.
     pub not_run_reason: Option<Vec<Span>>,
     /// "required by acme-platform", or "required by the spec file" when the signature is not verified
     /// by a pinned key, on a required check that did not run (01 section 6, 07 D.7).
     pub required_by: Option<Vec<Span>>,
     pub fix: Option<FixView>,
-    pub builtin_fix: Option<String>,
+    pub builtin_fix: Option<Shown>,
     /// What the check saw (`observed`), as labels and plain values.
     pub found: Vec<Fact>,
     /// What the check wanted (`expected`).
@@ -163,35 +138,37 @@ pub(super) struct CheckView {
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
     pub partial: Option<PartialView>,
-    pub notes: Vec<String>,
+    pub notes: Vec<Shown>,
     /// How long the check took. Left out for a check that did not run, where it is always zero.
     pub took_ms: Option<u64>,
 }
 
 /// A row of the capabilities table.
 pub(super) struct CapabilityView {
-    pub label: String,
+    pub label: Shown,
     pub state: &'static str,
-    pub detail: String,
-    pub hint: String,
+    pub detail: Shown,
+    pub hint: Shown,
 }
 
 /// A label and its value in the run and spec details.
 pub(super) struct Row {
     pub label: &'static str,
-    pub value: String,
+    pub value: Shown,
 }
 
 /// Everything the template prints. `templates/report.html` is compiled against these fields.
 #[derive(Template)]
 #[template(path = "report.html")]
 pub(super) struct View {
-    pub product: String,
-    /// The product for the `<title>`, which cannot hold `<bdi>`: wrapped in Unicode isolates instead.
+    pub product: Shown,
+    /// The product for the `<title>`, which cannot hold `<bdi>`: the escaped product between one U+2068
+    /// and one U+2069 of ours. It is a `String` because those two are the only format characters the page
+    /// writes raw, and `shown` would escape them. It is built from a `Shown` only.
     pub title_product: String,
-    pub version: Option<String>,
+    pub version: Option<Shown>,
     pub serial: Option<u64>,
-    pub hostname: String,
+    pub hostname: Shown,
     pub verdict_word: String,
     pub verdict_class: &'static str,
     pub summary_line: String,
@@ -199,9 +176,9 @@ pub(super) struct View {
     pub no_blocks: bool,
     pub legend: &'static str,
     pub rule: &'static str,
-    pub run_when: String,
-    pub rdy_version: String,
-    pub user: Option<String>,
+    pub run_when: Shown,
+    pub rdy_version: Shown,
+    pub user: Option<Shown>,
     pub run_as: &'static str,
     pub banners: Vec<Banner>,
     /// Our own banner titles joined, which print in the top margin of every page, or `None` with no
@@ -313,7 +290,7 @@ impl View {
                 .capabilities
                 .iter()
                 .map(|cap| CapabilityView {
-                    label: need_label(&cap.need, cap.name.as_deref()),
+                    label: shown(&need_label(&cap.need, cap.name.as_deref())),
                     state: available_word(cap.available),
                     detail: shown(cap.detail.as_deref().unwrap_or_default()),
                     hint: shown(cap.hint.as_deref().unwrap_or_default()),

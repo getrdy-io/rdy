@@ -297,8 +297,8 @@ fn found_shows_what_the_json_holds_and_not_the_longer_text() {
 /// M1-141: every Unicode format (Cf) and zero-width character becomes an escape. Other text is kept.
 #[test]
 fn format_and_zero_width_characters_are_shown_as_escapes() {
-    assert_eq!(shown("x\u{2069}\u{202e}"), "x\\u{2069}\\u{202e}");
-    assert_eq!(shown("a\u{2066}b"), "a\\u{2066}b");
+    assert_eq!(esc("x\u{2069}\u{202e}"), "x\\u{2069}\\u{202e}");
+    assert_eq!(esc("a\u{2066}b"), "a\\u{2066}b");
     for (c, text) in [
         ('\u{200b}', "\\u{200b}"),
         ('\u{200d}', "\\u{200d}"),
@@ -312,11 +312,11 @@ fn format_and_zero_width_characters_are_shown_as_escapes() {
         ('\u{e0041}', "\\u{e0041}"),
         ('\u{3164}', "\\u{3164}"),
     ] {
-        assert_eq!(shown(&format!("a{c}b")), format!("a{text}b"), "{c:?}");
+        assert_eq!(esc(&format!("a{c}b")), format!("a{text}b"), "{c:?}");
     }
     let kept = "caf\u{e9} \u{4e2d}\u{6587} \u{1f600} \\ \"q\" <b>\n\t";
-    assert_eq!(shown(kept), kept);
-    assert_eq!(shown(""), "");
+    assert_eq!(esc(kept), kept);
+    assert_eq!(esc(""), "");
 }
 
 /// A span from the report is escaped. Our own words are not touched.
@@ -328,4 +328,26 @@ fn an_untrusted_span_is_escaped() {
         need_spans(&Need::from("x\u{2066}"), None)[0].text,
         "x\\u{2066}"
     );
+}
+
+/// The page's escaper as a `String`.
+fn esc(text: &str) -> String {
+    shown(text).as_str().to_owned()
+}
+
+/// S1: C0, DEL and C1 controls become `\xNN` like the terminal. Line feed and tab stay.
+#[test]
+fn control_characters_are_shown_as_hex_escapes_except_line_feed_and_tab() {
+    assert_eq!(esc("a\u{8}b"), "a\\x08b");
+    assert_eq!(esc("a\u{1b}[2Jb"), "a\\x1b[2Jb");
+    assert_eq!(esc("\u{7f}\u{85}\u{9b}\u{0}"), "\\x7f\\x85\\x9b\\x00");
+    assert_eq!(esc("a\r"), "a\\x0d");
+    assert_eq!(esc("a\nb\tc"), "a\nb\tc");
+}
+
+/// The escaper is idempotent, so a string that was escaped before is not changed by a second pass.
+#[test]
+fn escaping_twice_changes_nothing() {
+    let once = esc("a\u{202e}\u{1b}\u{200b}b");
+    assert_eq!(esc(&once), once);
 }

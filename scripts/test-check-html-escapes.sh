@@ -145,6 +145,21 @@ fresh
 printf '%s\n' '<p>{{ jsonjson }} {{ a_json }} {{ json_a ~ json }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: json inside a longer word does not count, a bare json does" 1 "found 1 use(s) of json"
 fresh
+printf '%s\n' '{% let (s, a) = ("%}", json) %}<p title="{{ a }}">' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a %} inside a string does not end the tag, json after it counts 1" 1 "found 1 use(s) of json"
+fresh
+printf '%s\n' '<p>{{ "}}" ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a }} inside a string does not end the tag, so the allowed line plus this counts 2" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' "<p>{{ 'a}}' ~ json }}</p>" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a }} inside single quotes does not end the tag either" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' '<p>{{ "a\"}}" ~ json }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: an escaped quote does not end the string" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' '<p>{{ "json" }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the word json inside a string is not a use" 0 "ok:"
+fresh
 printf '%s\n' 'a::b in plain text, and {# askama::filters::Safe in a comment #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: :: outside a tag and inside a comment passes" 0 "ok:"
 fresh

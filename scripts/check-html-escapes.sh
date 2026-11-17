@@ -24,7 +24,7 @@
 #               `workspace = true` nor `default-features = false`, or has `default-features = true`
 #   files       any file named `askama.toml`
 #
-# Known limit of the `::` rule: a string literal that holds `}}` or `%}` inside a tag ends the scan of that
+# Known limit of the `::` rule only (the `json` count reads quoted strings, see count_json): a string literal that holds `}}` or `%}` inside a tag ends the scan of that
 # tag early, so `{{ "}}" ~ askama::filters::Safe(x) }}` is not seen by the script. The clippy.toml entries
 # ban the Safe types and the safe, escape and e functions, but clippy may not report code that the template
 # derive generates, so this is a known limit and not a guarantee. The template is one file that review
@@ -143,26 +143,45 @@ tscan() {
 #
 # count_json reads one template (newlines already joined) on stdin and prints how many times the word `json`
 # is used inside tags. It counts per whole tag, `{{ ... }}` or `{% ... %}`, so `{{ json ~ json }}` and
-# `{% let a = json %}{{ json }}` each count 2 (PR #19 review, M1-141). A use is `json` with no word
-# character on either side, so `json_sha256` and `x.json_len` do not count and `x.json` does.
+# `{% let a = json %}{{ json }}` each count 2 (PR #19 review, M1-141). A use is the whole word `json`, so
+# `json_sha256` and `x.json_len` do not count and `x.json` does. It reads each tag a character at a time and
+# skips "..." and '...' literals (with backslash escapes), so a `}}` or `%}` inside a string does not end
+# the tag early and a word inside a string is not a use: `{{ "}}" ~ json }}` counts 1 and
+# `{% let (s, a) = ("%}", json) %}<p title="{{ a }}">` counts 1 (PR #89 security review S2). An unterminated
+# tag or string runs to the end of the file. awk runs under LC_ALL=C, and the sum is taken in END.
 count_json() {
-  awk '
-    BEGIN { RS = "\001" }
+  LC_ALL=C awk '
+    BEGIN { RS = "\001"; total = 0 }
     {
-      rest = $0
-      n = 0
-      while (match(rest, /[{][{%]/)) {
-        open = substr(rest, RSTART, 2)
-        rest = substr(rest, RSTART + 2)
-        close_at = index(rest, open == "{{" ? "}}" : "%}")
-        if (close_at == 0) { tag = rest; rest = "" } else { tag = substr(rest, 1, close_at - 1); rest = substr(rest, close_at + 2) }
-        tag = " " tag " "
-        for (i = 2; i <= length(tag) - 4; i++) {
-          if (substr(tag, i, 4) == "json" && substr(tag, i - 1, 1) !~ /[A-Za-z0-9_]/ && substr(tag, i + 4, 1) !~ /[A-Za-z0-9_]/) n++
+      s = $0
+      len = length(s)
+      i = 1
+      while (i <= len) {
+        two = substr(s, i, 2)
+        if (two != "{{" && two != "{%") { i++; continue }
+        closer = (two == "{{") ? "}}" : "%}"
+        i += 2
+        quote = ""
+        word = ""
+        while (i <= len) {
+          c = substr(s, i, 1)
+          if (quote != "") {
+            if (c == "\\") i++
+            else if (c == quote) quote = ""
+            i++
+            continue
+          }
+          if (c ~ /[A-Za-z0-9_]/) { word = word c; i++; continue }
+          if (word == "json") total++
+          word = ""
+          if (c == "\"" || c == "\047") { quote = c; i++; continue }
+          if (substr(s, i, 2) == closer) { i += 2; break }
+          i++
         }
+        if (word == "json") total++
       }
-      print n
     }
+    END { print total + 0 }
   '
 }
 JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
