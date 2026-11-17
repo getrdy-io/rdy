@@ -160,6 +160,49 @@ pub struct FamilyProbe<'a> {
     pub announce: &'a (dyn Fn(&str) + Send + Sync),
 }
 
+impl<'a> FamilyProbe<'a> {
+    /// A probe context for `checks` that allows the network and names no kubeconfig or context. The engine
+    /// builds the real one; tests of a family build theirs with this (see `TestRun::family_probe`).
+    #[must_use]
+    pub fn new(
+        probe: Probe,
+        hub: &'a ProbeHub,
+        checks: &'a [&'static CheckInfo],
+        announce: &'a (dyn Fn(&str) + Send + Sync),
+    ) -> Self {
+        Self {
+            probe,
+            hub,
+            checks,
+            network: true,
+            kubeconfig: None,
+            kube_context: None,
+            announce,
+        }
+    }
+
+    /// Sets whether the run allows sockets.
+    #[must_use]
+    pub fn with_network(mut self, network: bool) -> Self {
+        self.network = network;
+        self
+    }
+
+    /// Sets `--kubeconfig`.
+    #[must_use]
+    pub fn with_kubeconfig(mut self, path: &'a Path) -> Self {
+        self.kubeconfig = Some(path);
+        self
+    }
+
+    /// Sets `--kube-context`.
+    #[must_use]
+    pub fn with_kube_context(mut self, name: &'a str) -> Self {
+        self.kube_context = Some(name);
+        self
+    }
+}
+
 /// A family's probe failed in a way that ends the run: the CLI exits 70 with the message and the hint.
 /// The text holds no secret.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
