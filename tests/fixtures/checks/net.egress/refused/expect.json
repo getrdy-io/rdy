@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "endpoints": [
+      "closed.acme.test:8080"
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "closed.acme.test:8080 refused the connection: nothing listens there, or a firewall rejects it. Check the port in the spec, and ask the network team to allow tcp/8080 to closed.acme.test from this machine.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: closed.acme.test:8080 (refused)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.7",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "refused",
+              "started_ms": 0
+            }
+          ],
+          "class": "refused",
+          "endpoint": "closed.acme.test:8080",
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

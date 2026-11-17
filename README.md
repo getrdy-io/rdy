@@ -222,7 +222,7 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
   macOS and Windows they report not run.
 - Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
-  and ALPN, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
+  and ALPN, the HTTP status of a URL endpoint, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
   local data and runs offline.
 - The `net.tls_intercept` check, registered in `rdy run`. It does one TLS handshake per host, sends no
   data, and says whether the chain is public, trusted by this machine only (warn), from an unknown CA
