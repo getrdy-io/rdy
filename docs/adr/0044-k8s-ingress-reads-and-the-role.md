@@ -1,6 +1,6 @@
-# ADR 0044: `k8s.ingress` reads classes, Gateway API classes and namespace Services, and the example role grows by three lists
+# ADR 0044: `k8s.ingress` reads classes, Gateway API classes and namespace Services, by two lists and an optional namespace Role
 
-- Status: Proposed (reviews of PR #65 are not linked yet)
+- Status: Accepted, security-reviewed (PR #65)
 - Date: 2026-11-17
 
 ## Context
@@ -14,7 +14,7 @@ request count together.
 
 1. **Three new `ALLOWED` entries, all `list`.** `networking.k8s.io` `ingressclasses` (cluster scope),
    `gateway.networking.k8s.io` `gatewayclasses` (cluster scope) and core `services` in a namespace. No get by
-   name, no watch, no write. The example role gets one rule for each, and `services` joins the core list rule.
+   name, no watch, no write. The example cluster role gets a rule for each class list. `services` is in the optional target-namespace Role.
 2. **Services only when the spec asks, and only through a namespaced Role.** The Service list is sent only when
    `loadbalancer: true` and a family namespace is known. A cluster-wide Service list is never asked. The cluster
    role does not hold `services`. The grant is `examples/rbac/rdy-readonly-target-namespace.yaml`, an optional
