@@ -1964,6 +1964,9 @@ dependencies = [
  "askama",
  "clap",
  "colorchoice",
+ "http",
+ "k8s-openapi",
+ "kube",
  "proc-macro2",
  "rdy-engine",
  "rdy-spec",
@@ -1973,6 +1976,7 @@ dependencies = [
  "syn 2.0.119",
  "tokio",
  "toml",
+ "tower",
 ]
 
 [[package]]
