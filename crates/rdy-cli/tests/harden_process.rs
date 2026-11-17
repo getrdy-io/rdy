@@ -1,7 +1,8 @@
 //! `startup::harden_process` (M1-058, security review S3), in a process of its own.
 //!
-//! The call lowers the core-file limit and marks the process not dumpable for good, so it runs here and
-//! not in the unit-test process. No privilege is needed.
+//! The call lowers the core-file limit for good, so it runs here and not in the unit-test process. It
+//! must not mark the process not dumpable: the privilege gate reads `/proc/self/auxv` (INV-10). No
+//! privilege is needed.
 #![cfg(unix)]
 // A failed OS call must fail the test.
 #![allow(clippy::expect_used)]
@@ -17,6 +18,6 @@ fn harden_process_turns_core_dumps_off() {
     #[cfg(target_os = "linux")]
     assert_eq!(
         rustix::process::dumpable_behavior().expect("read the dumpable flag"),
-        rustix::process::DumpableBehavior::NotDumpable
+        rustix::process::DumpableBehavior::Dumpable
     );
 }

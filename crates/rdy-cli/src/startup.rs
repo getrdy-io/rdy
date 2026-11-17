@@ -26,11 +26,14 @@ use crate::error::{CliError, InternalKind, emit, escape_untrusted};
 use crate::redaction;
 
 /// Turns core dumps off for the whole process (M1-058, security review S3): the core-file size limit
-/// goes to 0 on every Unix, and on Linux the process is marked not dumpable. A signal can end the
-/// process through the 1 s abort fallback of the exit (SIGABRT), and a core file would hold the
-/// redaction key, passwords and report text. Best effort: a failure is ignored, since nothing useful
-/// can be done and the process is no worse off. A process that is not dumpable still reads its own
-/// `/proc/self` files.
+/// goes to 0 on every Unix. A signal can end the process through the 1 s abort fallback of the exit
+/// (SIGABRT), and a core file would hold the redaction key, passwords and report text. Best effort: a
+/// failure is ignored, since nothing useful can be done and the process is no worse off.
+///
+/// The process is not marked not dumpable here. The privilege gate (INV-10) treats a refused
+/// `/proc/self/auxv` as a setuid or file-capability start, and the kernel refuses it to a non-root user
+/// once the flag is off, so every run would fail. The flag belongs after the gate's snapshot, in the
+/// bundle and upload commands (M2-060).
 pub fn harden_process() {
     #[cfg(unix)]
     {
@@ -40,11 +43,6 @@ pub fn harden_process() {
             maximum: Some(0),
         };
         let _ = setrlimit(Resource::Core, zero);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let _ =
-            rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable);
     }
 }
 
