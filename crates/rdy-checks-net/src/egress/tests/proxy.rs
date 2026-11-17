@@ -945,4 +945,25 @@ async fn a_star_in_no_proxy_never_sends_a_forbidden_address_anywhere() {
     assert_eq!(ran.endpoint(0)["class"], "proxy_403");
     assert_eq!(ran.endpoint(0)["direct_tried"], true);
     assert_eq!(ran.endpoint(0)["direct_works"], false);
+    // The log proves why: the direct retry's connect entry was refused by the address rule, and no
+    // entry shows a connection to the metadata address.
+    let log = ran.run.action_log().actions;
+    let connects: Vec<_> = log
+        .iter()
+        .filter(|a| a.kind == rdy_spec::result::ActionKind::Connect)
+        .collect();
+    let direct = connects
+        .iter()
+        .find(|a| a.fields["via_proxy"].is_null() && a.fields["host"] == "meta.acme.test")
+        .unwrap_or_else(|| panic!("no direct connect entry: {connects:?}"));
+    assert_eq!(direct.outcome, rdy_spec::result::ActionOutcome::Denied);
+    assert_eq!(
+        direct.fields["rule"],
+        rdy_engine::probe::net::RULE_TCP_ADDRESS
+    );
+    assert!(
+        !log.iter()
+            .any(|a| a.fields.get("addr").is_some_and(|v| v == "169.254.169.254")),
+        "a connection went to the metadata address: {log:?}"
+    );
 }

@@ -839,3 +839,63 @@ mod parsers {
         }
     }
 }
+
+#[test]
+fn a_proxy_that_resolves_to_a_refused_address_has_its_own_fix() {
+    let facts = judge::Facts {
+        os: Os::Linux,
+        vars: vec![(
+            "HTTPS_PROXY",
+            parse::Setting::Proxy {
+                origin: "http://proxy.acme.test:3128".to_owned(),
+                credentials: false,
+            },
+        )],
+        no_proxy: None,
+        conflicts: Vec::new(),
+        daemons: Vec::new(),
+        reach: judge::Reach::Failed {
+            origin: "http://proxy.acme.test:3128".to_owned(),
+            class: "refused_by_policy",
+            why: "its address is in a range rdy refuses",
+        },
+        notes: Vec::new(),
+        missing_network: false,
+        unread: Vec::new(),
+    };
+    let finding = judge::judge(&facts, &judge::Rules::default());
+    assert_eq!(finding.level, Level::Fail);
+    let fix = finding.fix.as_deref().expect("a fix");
+    assert!(
+        fix.contains("resolves to an address rdy never connects to")
+            && fix.contains("Point HTTPS_PROXY at the real proxy address"),
+        "{fix}"
+    );
+    assert!(!fix.contains("ask the network team"), "{fix}");
+}
+
+#[test]
+fn on_windows_only_the_upper_case_names_are_read() {
+    // Windows names are not case sensitive: the lower-case spelling would read the same value twice, and
+    // two different values in a replay would be a false conflict.
+    let ran = run("windows-env-names", check(&plain()));
+    let finding = ran.finding();
+    let names: Vec<&str> = ran
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.check.as_deref() == Some("net.proxy") && a.kind == ActionKind::Env)
+        .filter_map(|a| a.fields["name"].as_str())
+        .collect();
+    assert!(names.contains(&"HTTPS_PROXY"), "{names:?}");
+    assert!(
+        names
+            .iter()
+            .all(|n| !n.chars().any(|c| c.is_ascii_lowercase())),
+        "{names:?}"
+    );
+    assert_eq!(
+        finding.observed["variables"].as_array().map(Vec::len),
+        Some(1)
+    );
+}
