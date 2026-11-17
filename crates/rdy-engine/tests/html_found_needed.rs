@@ -284,3 +284,60 @@ fn a_bidi_control_in_a_key_or_a_value_stays_in_its_own_isolate() -> TestResult {
     );
     Ok(())
 }
+
+/// The check ids that sit under "Required checks not run" in the sample are skipped with severity block.
+fn required_not_run_article(html: &str) -> TestResult<&str> {
+    let section = between(html, "<h2 id=\"required-not-run\">", "</section>")?;
+    Ok(section)
+}
+
+/// A required check that did not run says who requires it: the product when the signature is verified and
+/// the key pinned, else "the spec file" (01 section 6, 07 D.7). The product is untrusted.
+#[test]
+fn a_required_check_that_did_not_run_says_who_requires_it() -> TestResult {
+    // Verified and pinned: the product, in its own isolate.
+    let mut doc = sample()?;
+    doc["spec"]["product"] = json!("acme\u{202e}-platform");
+    let html = html_of(doc)?;
+    let section = required_not_run_article(&html)?;
+    assert!(
+        section.contains("<p>required by <bdi>acme\u{202e}-platform</bdi></p>"),
+        "{section}"
+    );
+    assert!(!section.contains("required by the spec file"));
+    // Not pinned (a key given for one run) and unsigned: the spec file, and no product name.
+    for signature in [json!("flag"), json!("unsigned")] {
+        let mut doc = sample()?;
+        if signature == json!("unsigned") {
+            doc["signature"] = json!({"state": "unsigned"});
+        } else {
+            doc["signature"]["trust_source"] = signature;
+        }
+        let html = html_of(doc)?;
+        let section = required_not_run_article(&html)?;
+        assert!(
+            section.contains("<p>required by the spec file</p>"),
+            "{section}"
+        );
+        assert!(!section.contains("required by <bdi>"), "{section}");
+    }
+    // Only a required check that did not run has the line: not a block, a warning or a pass.
+    let html = html_of(sample()?)?;
+    assert_eq!(
+        html.matches("required by ").count(),
+        required_not_run_article(&html)?
+            .matches("<p>required by ")
+            .count()
+    );
+    Ok(())
+}
+
+/// In print a page break comes before the action log, as before Passed and the capabilities (07 D.3).
+#[test]
+fn print_breaks_the_page_before_the_action_log() -> TestResult {
+    let html = html_of(sample()?)?;
+    let print = &html[html.find("@media print {").ok_or("no print block")?..];
+    assert!(print.contains("#passed, #capabilities, #actions { break-before: page; }"));
+    assert!(html.contains("<h2 id=\"actions\">"));
+    Ok(())
+}

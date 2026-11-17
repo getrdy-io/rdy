@@ -147,7 +147,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
      offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
      template adds a top page-margin box with the banner titles, so every page carries the mark. */
   .check, tr { break-inside: avoid; }
-  #passed, #capabilities { break-before: page; }
+  #passed, #capabilities, #actions { break-before: page; }
 }
 </style>
 </head>
@@ -181,12 +181,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>Not run. This version of rdy has no gpu checks yet.</bdi></p>
 <p>Not in this version of rdy</p>
 <p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+<p>required by <bdi>acme-platform</bdi></p>
 </article>
 <article class="check status-skip" id="check-5">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no aws checks yet.</bdi></p>
 <p>Not in this version of rdy</p>
 <p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+<p>required by <bdi>acme-platform</bdi></p>
 </article>
 </section>
 <section aria-labelledby="warnings">

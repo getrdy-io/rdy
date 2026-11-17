@@ -120,6 +120,9 @@ pub(super) struct CheckView {
     pub message: String,
     /// Why a check that did not run did not run.
     pub not_run_reason: Option<Vec<Span>>,
+    /// "required by acme-platform", or "required by the spec file" when the signature is not verified
+    /// by a pinned key, on a required check that did not run (01 section 6, 07 D.7).
+    pub required_by: Option<Vec<Span>>,
     pub fix: Option<FixView>,
     pub builtin_fix: Option<String>,
     /// What the check saw (`observed`), as labels and plain values.
@@ -438,6 +441,20 @@ fn key_is_pinned(report: &Report) -> bool {
 /// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
 /// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
 /// for the vendor's.
+/// Who requires a check that is required and did not run. The product name is the vendor's own claim, so
+/// it is named only when the signature verified and the key is pinned (01 section 2.6), like a fix.
+fn required_by(report: &Report, check: &CheckResult) -> Option<Vec<Span>> {
+    match check.bucket {
+        Bucket::Blocker | Bucket::Warning | Bucket::Passed | Bucket::NotApplicable => None,
+        // `required_not_run`, and a bucket this version does not know, which sits with it.
+        _ if key_is_pinned(report) => Some(vec![
+            Span::own("required by "),
+            Span::untrusted(&report.spec.product),
+        ]),
+        _ => Some(vec![Span::own("required by the spec file")]),
+    }
+}
+
 fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
     let text = check.fix.clone()?;
     let label = match &check.fix_source {
@@ -534,6 +551,7 @@ fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckVi
         name: check.name.clone(),
         message: check.message.clone(),
         not_run_reason: not_run_reason(check),
+        required_by: required_by(report, check),
         fix: fix_view(report, check),
         builtin_fix: check.builtin_fix.clone(),
         found: facts(shown.and_then(|c| c.observed.as_ref())),

@@ -139,5 +139,5 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
      offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
      template adds a top page-margin box with the banner titles, so every page carries the mark. */
   .check, tr { break-inside: avoid; }
-  #passed, #capabilities { break-before: page; }
+  #passed, #capabilities, #actions { break-before: page; }
 }

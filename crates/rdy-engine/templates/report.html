@@ -96,6 +96,9 @@
 {%- for need in check.requires %}
 <p>Requires: {% for part in need %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endfor %}
+{%- if let Some(by) = check.required_by %}
+<p>{% for part in by %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
+{%- endif %}
 {%- if let Some(partial) = check.partial %}
 <p>{% for part in partial.summary %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- if !partial.note.is_empty() %}
