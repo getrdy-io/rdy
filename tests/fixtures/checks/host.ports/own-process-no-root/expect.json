@@ -1,0 +1,59 @@
+{
+  "entry": {
+    "free": [
+      8080
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 8080
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Port 8080/tcp is held by `python3` (pid 3100). Stop it, or change the product's port setting.",
+    "level": "fail",
+    "message": "Port 8080/tcp is held by `python3` (pid 3100).",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 1,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": {
+                "name": "python3",
+                "pid": 3100,
+                "unit": null
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 8080,
+          "state": "in_use",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

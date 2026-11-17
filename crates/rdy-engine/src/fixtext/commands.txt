@@ -8,6 +8,7 @@
 Set-VMProcessor
 aa-status
 apparmor_parser
+apt
 apt-get
 ausearch
 aws
@@ -42,6 +43,7 @@ nvidia-ctk
 nvidia-smi
 oc
 openssl
+printf
 pro
 rancher
 rdy
@@ -50,12 +52,14 @@ route
 security
 setenforce
 sntp
+ss
 swapoff
 sysctl
 systemctl
 tee
 timedatectl
 ufw
+uname
 update-ca-certificates
 update-ca-trust
 update-grub

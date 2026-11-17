@@ -191,7 +191,7 @@
           "maxLength": 4096
         },
         "under": {
-          "description": "coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets",
+          "description": "coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets; for denied read_link calls that refused a non-socket link in a process fd directory it is the placeholder /proc/<pid>/fd, one entry for all processes of the check",
           "type": "string",
           "maxLength": 4096
         },

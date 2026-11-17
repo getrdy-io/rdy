@@ -5,7 +5,7 @@
 //!
 //! - `host`: registered. Its stubs are skipped as `not_in_build` by the planner
 //!   ([`rdy_engine::family::Family::not_built`]), so none runs on a customer's machine.
-//! - `net`: registered with `net.egress` (M1-095). The other `net.*` ids are not built, so the planner skips
+//! - `net`: registered with `net.egress` (M1-095) and `net.mtu` (M1-157). The other `net.*` ids are not built, so the planner skips
 //!   them as `not_in_build`. The check declares the `network` need, so `--no-network` skips it as
 //!   `missing_need`.
 //! - `k8s`: not registered yet. The checks exist in `rdy-checks-k8s`, but the family arrives with the

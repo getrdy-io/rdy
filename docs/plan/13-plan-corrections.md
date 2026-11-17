@@ -401,3 +401,11 @@ the corrections log of `11-backlog.md`.
   so the header printed `linux`. New M1-180 (core) does it, and the env goldens and README transcripts depend
   on it. A product named `rdy` would print `fix from rdy:` like rdy's own lines; M2-120 makes `ProductSlug`
   refuse it before rdy-spec's first crates.io release. The renderer refuses it in M1 (PR #42).
+- **Correction-42, the printed banner, the HTML size cap and five M2 tickets.** A print banner fixed in the
+  page margin cannot be built and proven in headless Chrome. The full banners stay in the page flow and print
+  once, at the top of page one, and every printed page carries the banner title in its top margin as fixed
+  text that rdy writes. Nothing covers the first lines (07 D.3, 01 section 6, M1-081). Past the 5 MiB cap the
+  action table loses rows first, then Found and Needed lines (07 D.4). M1-141 tests the Found and Needed
+  labels and lines. New M2-121 to M2-123 take the 2026-11-06 follow-ups, and new M2-124 adds the engine
+  progress observer and the full 07 section 3 line. 07 D.5 allows a test-only indicatif draw target. M1-175
+  also builds k8s.dns, and new M2-125 reads the RKE2 and OpenShift Corefiles that M1-162 leaves out.

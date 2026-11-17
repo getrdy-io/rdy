@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "require_sync": true
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": true
+    },
+    "fix": "Clock is not synchronized. Run `timedatectl set-ntp true`, or install chrony (`dnf install chrony && systemctl enable --now chronyd`, then `chronyc makestep`). On VMs also enable host time sync (VMware Tools, Hyper-V integration services).",
+    "level": "fail",
+    "message": "Clock is not synchronized.",
+    "notes": [
+      "Network time is turned off in systemd (`timedatectl set-ntp true` turns it on)."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "not installed",
+      "ntp_enabled": false,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [],
+      "state": "not_synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null
+  }
+}

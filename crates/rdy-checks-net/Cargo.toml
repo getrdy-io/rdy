@@ -22,6 +22,8 @@ serde_json = { workspace = true, features = ["std"] }
 # with a generated CA, the dual-stack case and the reset-after-hello server (ADR 0035).
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
+# Parsers of external text never panic on arbitrary bytes (08 Appendix E).
+proptest = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

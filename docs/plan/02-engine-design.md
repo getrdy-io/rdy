@@ -196,7 +196,9 @@ The rule is 01 section 5.3, recorded in ADR 0013 (refining ADR 0008 decision 3).
   vendor's `fix`. Nothing was measured as failing, so the vendor's advice would send the customer after
   a problem that was not found. `partial.missing_grants` is a field of the wire `partial` (M1-110), once
   each, in the order the check gave them.
-- A golden snapshot lists every `evidence_only` want and every `pass_by_absence` call site.
+- A golden snapshot lists every `evidence_only` want and every `pass_by_absence` call site. Today the
+  `evidence_only` wants are `host.ports` / `Root` (M1-072: `/proc/net` is world readable, root only names
+  the owner of another user's socket). No `pass_by_absence` call site exists yet.
 - Unknown severity counts as block and unknown status as not run, in `rdy_spec::result::verdict()`.
 - A run that verified nothing is `ready_with_warnings`, `verdict_reason: nothing_verified`. A spec with
   zero checks is refused by rdy-spec (exit 64).

@@ -1,4 +1,4 @@
-//! The `net` family: the checks of `rdy-checks-net` that are built, and the hosts each may reach.
+//! The net family: the checks that exist so far and how a spec entry builds them.
 
 use rdy_engine::check::CheckInfo;
 use rdy_engine::family::{BuildError, Built, Family, HostSet};
@@ -6,15 +6,22 @@ use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::egress::{self, EgressCheck};
+use crate::mtu::{self, MtuCheck};
 
-/// Every `net.*` check this crate has built, in catalog order. `net.proxy`, `net.tls_intercept` and the
-/// M1-late checks are not here, so the planner skips them as `not_in_build`.
-static CHECKS: [&CheckInfo; 1] = [&egress::INFO];
+#[cfg(test)]
+mod tests;
 
-/// The `net` family. It builds `net.egress`.
+/// Every net check this build lists, in catalog order (03 section 3).
+static CHECKS: [&CheckInfo; 2] = [&egress::INFO, &mtu::INFO];
+
+/// The `net` family.
 ///
-/// A check gets the hosts its own spec entry lists and no others (INV-11): for `net.egress`, its
-/// `endpoints`.
+/// It lists the checks that are written: `net.egress` ([`EgressCheck`]) and `net.mtu` ([`MtuCheck`]). A
+/// check gets the hosts its own spec entry lists and no others (INV-11): for `net.egress`, its `endpoints`.
+/// `net.proxy`, `net.tls_intercept`, `net.dns`, `net.registry` and `net.bandwidth` are reserved ids that
+/// no family lists yet, so the planner skips them with `not_in_build`. Each ticket that writes one adds
+/// its [`CheckInfo`] to the list and its arm to [`Family::build`]. There are no stubs, so the family may
+/// be registered in the CLI as it is.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NetFamily;
 
@@ -33,8 +40,9 @@ impl Family for NetFamily {
                 let hosts = HostSet::new(params.endpoints.iter().map(|e| e.target.clone()));
                 Ok(Built::new(Box::new(EgressCheck::new(params))).with_hosts(hosts))
             }
+            CheckParams::NetMtu(params) => Ok(Built::new(Box::new(MtuCheck::from_params(&params)))),
             _ => Err(BuildError::Unsupported(
-                "this net check is not built yet".to_owned(),
+                "not a net check this rdy can build".to_owned(),
             )),
         }
     }
