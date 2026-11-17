@@ -304,22 +304,34 @@ const ABORT_AFTER: Duration = Duration::from_secs(1);
 /// How long the watchdog waits for the stderr line before it exits anyway.
 const NOTICE_WAIT: Duration = Duration::from_millis(200);
 
-/// Writes [`NOTICE`] on a helper thread with one raw write, so neither a full pipe nor a held std lock
-/// can stop the exit.
+/// Which process stream [`write_raw_bounded`] writes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawStream {
+    /// Descriptor 1 (the stdout handle on Windows).
+    Stdout,
+    /// Descriptor 2 (the stderr handle on Windows).
+    Stderr,
+}
+
+/// Writes `bytes` to the stream with one raw write on a helper thread, and waits at most 200 ms for
+/// it, so neither a full pipe nor a held std lock can stop an exit.
 ///
-/// The handle is a clone of descriptor 2 (the stderr handle on Windows) made with `as_fd` or
-/// `as_handle`, which do not take std's stderr lock, and the write goes to a `File`, which has no lock
-/// either. It is safe code.
-fn write_notice() {
-    let Some(mut stderr) = clone_stderr() else {
+/// The handle is a clone of the descriptor made with `as_fd` or `as_handle`, which do not take std's
+/// locks, and the write goes to a `File`, which has no lock either. It is safe code. One `write`, not
+/// `write_all`: a partial write is not retried. The watchdog's notice and the Ctrl-C path both use it.
+pub fn write_raw_bounded(stream: RawStream, bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let Some(mut file) = clone_stream(stream) else {
         return;
     };
+    let bytes = bytes.to_vec();
     let (done, wait) = mpsc::channel();
     let spawned = thread::Builder::new()
-        .name("rdy-watchdog-notice".into())
+        .name("rdy-raw-write".into())
         .spawn(move || {
-            // One `write`, not `write_all`: a partial write is not retried.
-            let _ = stderr.write(NOTICE.as_bytes());
+            let _ = file.write(&bytes);
             let _ = done.send(());
         });
     if spawned.is_ok() {
@@ -327,28 +339,32 @@ fn write_notice() {
     }
 }
 
+fn write_notice() {
+    write_raw_bounded(RawStream::Stderr, NOTICE.as_bytes());
+}
+
 #[cfg(unix)]
-fn clone_stderr() -> Option<File> {
+fn clone_stream(stream: RawStream) -> Option<File> {
     use std::os::fd::AsFd as _;
-    io::stderr()
-        .as_fd()
-        .try_clone_to_owned()
-        .ok()
-        .map(File::from)
+    let fd = match stream {
+        RawStream::Stdout => io::stdout().as_fd().try_clone_to_owned(),
+        RawStream::Stderr => io::stderr().as_fd().try_clone_to_owned(),
+    };
+    fd.ok().map(File::from)
 }
 
 #[cfg(windows)]
-fn clone_stderr() -> Option<File> {
+fn clone_stream(stream: RawStream) -> Option<File> {
     use std::os::windows::io::AsHandle as _;
-    io::stderr()
-        .as_handle()
-        .try_clone_to_owned()
-        .ok()
-        .map(File::from)
+    let handle = match stream {
+        RawStream::Stdout => io::stdout().as_handle().try_clone_to_owned(),
+        RawStream::Stderr => io::stderr().as_handle().try_clone_to_owned(),
+    };
+    handle.ok().map(File::from)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn clone_stderr() -> Option<File> {
+fn clone_stream(_stream: RawStream) -> Option<File> {
     None
 }
 
