@@ -439,3 +439,15 @@ the corrections log of `11-backlog.md`.
   leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
   verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
   namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.
+- **Correction-44, the order of the run header, `--verbose` and the live line, and one M2 ticket.** From the
+  reviews of PR #68 (M1-143). PR #68 edits 07 C.1, C.2, 2.8, 3 and A.3, 02's `RunOptions` lines and M2-017's
+  dependencies; this entry records those decisions. The header prints at the end of the run, because it
+  holds facts known only then (the `needs` row). With `--verbose` the event lines print live after the
+  banner and before the header, one blank line follows them, and then come the header and the list (C.2).
+  07's rule for the M1-142 code now says so, and that "the header prints once before progress starts" is not
+  met until new M2-128 moves the header before progress (which also prints the `cluster` row before the first
+  Kubernetes request, as 07 section 2.1 says). `--verbose` turns the live line off: M1-142's exit test says
+  `quiet or verbose`, and the code lands with whichever of PR #60 and PR #68 merges second. 07 section 5.2
+  says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
+  exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
+  adds the started and phase events on it, and M2-017 depends on M2-124.
