@@ -503,19 +503,24 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     - M2-145: k8s.storageclass fixtures for AKS `managed-csi` (registered and not) and a vSphere or
       Longhorn class (M1-115 review SF-04).
   - M1-159 (correction-57): add back what M1-115 removes: the `pods` `ALLOWED` entry with the
-    `status.phase` selector, its guard tests and call table lines, `pods` in the `rdy-readonly.yaml` list
-    rule and its header text, the `live_cluster.rs` pods read, 02 Appendix B's `pods` row and 03's "wants
-    list on nodes and pods". Read the M1-115 diff (`e6183499`, `f68ec65a`) for the exact lines. A
+    `status.phase` selector (or, if M1-162 merged first, only k8s.nodes in that entry), its guard tests
+    and call table lines, the `rules.rs` module doc line on `pods` and `events` selectors,
+    `_kube/cluster/api/pods-active.json`, `pods` in the `rdy-readonly.yaml` list rule and its header text,
+    the `live_cluster.rs` pods read, 02 Appendix B's `pods` row and rule 1 sentence, and 03's "wants list
+    on nodes and pods". Read the M1-115 diff (`e6183499`, `f68ec65a`) for the exact lines. A
     k8s.nodes fixture with a Pod list must hit the pair in
     `every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run`.
   - M1-115's PR (correction-57): SF-01's "M1-159 adds the entry, the grant, a fixture and the pair test
     back" is now in M1-159's row. SF-03 and SF-04 are M2-144 and M2-145; SF-05 and SF-06 stay with M2-126
     and M2-125. The SF-02 fold is in the rows of M1-162 to M1-165 (+0.5 h each).
-  - #62, #64, #65 and #78 (M1-162 to M1-165, correction-57): fold the duplicate `services`, `configmaps`
-    and `apps/v1` `daemonsets` entries into one entry each, add `Access::GetIn` only in the first of #62
-    and #78 to merge, and copy M1-115's pair test into the module, so
-    `allowed_has_one_entry_per_group_version_and_resource` passes. Each PR adds "backlog corrected
-    2026-11-17 (correction-57)" to its progress line.
+  - #62, #64, #65 and #78 (M1-162 to M1-165, correction-57), if M1-115 merged first: fold the duplicate
+    `services`, `configmaps` and `apps/v1` `daemonsets` entries into one entry each, add `Access::GetIn`
+    only in the first of #62 and #78 to merge, and copy M1-115's pair test into the module, so
+    `allowed_has_one_entry_per_group_version_and_resource` passes. `pods`: M1-115 removes the entry #62
+    extends, so the first of #62 and M1-159 to merge adds the `pods` entry, the role rule and the
+    `live_cluster.rs` read citing only its own check, and the second adds its id. #62 drops k8s.nodes from
+    the entry unless M1-159 merged first. Each PR adds "backlog corrected 2026-11-17 (correction-57)" to
+    its progress line.
   - M1-116's PR (correction-57): add "backlog corrected 2026-11-17 (correction-57)" to its progress line
     for the Kubernetes page API reads line.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to

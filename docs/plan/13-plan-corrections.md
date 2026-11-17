@@ -631,6 +631,8 @@ the corrections log of `11-backlog.md`.
   already in those rows, so they are not filed. M1-116's row now says the Kubernetes page gives each check
   an API reads line from the guard's `ALLOWED` table, with a test. SF-02: PRs #62, #64, #65 and #78 add
   duplicate `ALLOWED` entries and #62 and #78 both add `Access::GetIn`, so M1-115's one-entry-per-resource
-  guard test fails once they land. Each of M1-162 to M1-165 now folds its entries into those on main, adds
-  `Access::GetIn` only if no earlier PR did, and copies the pair test, +0.5 h each. Weeks 29 and 30 go to
-  13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
+  guard test fails once they land. Each of M1-162 to M1-165, if M1-115 merged first, now folds its entries
+  into those on main, adds `Access::GetIn` only if no earlier PR did, and copies the pair test, +0.5 h
+  each. #62 also extends the `pods` entry that M1-115 removes, so the first of M1-159 and M1-162 to merge
+  adds the entry, the role rule and the live read citing only its own check, and the second adds its id.
+  Weeks 29 and 30 go to 13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
