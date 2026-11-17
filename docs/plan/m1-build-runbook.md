@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-53: M1 183 tickets, 405 h, 340.5 h core; M2 137 tickets, 478.25 h; all milestones 420 tickets,
-1396.75 h, 1332.25 h core.
+correction-54: M1 183 tickets, 405 h, 340.5 h core; M2 141 tickets, 484.75 h; all milestones 424 tickets,
+1403.25 h, 1338.75 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -262,6 +262,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   `/dev/zero` exits 64 within 1 s, and `spec sign` refuses an expired spec before any prompt; M1-138
   depends on it. The future `signed_at` warning moves to M2-032. M1-134 says to compare the full
   fingerprint. New M2-137: the container runtime proxy password joins the known-secret set.
+- 54: no new M1 ticket. M1-107 registers the plugin token before the first request leaves. The second of
+  #80 and M1-107 to merge adds k8s.version and `api/` to `all-pass`. 07 D.7's `nothing_verified` sentence
+  covers optional checks not run. New M2-138 to M2-141: the `delegated` outcome, `O_PATH` spec reads, the
+  Windows `spec sign` pipe opens, the kind `rdy run` step and paging variant.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -275,7 +279,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-184 and M2-138, and the next correction is 54 (49 is in #85).
+- The next ticket ids are M1-184 and M2-142, and the next correction is 55 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -431,10 +435,24 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     fingerprint from `rdy verify --key`, never the short form in the banner (#96 SF-02).
   - M2-107 (correction-53, +0.25 h): `check_note` also refuses the code points `is_invisible` flags in
     trust-store notes (#96 N-01).
+  - Follow-ups that correction-54 gave ids:
+    - M2-138: the action-log outcome `delegated` for the kube credential plugin, replacing M1-107's
+      `form: delegated` field (02, M1-107 reviews).
+    - M2-139: Linux spec reads open with `O_PATH`, then `fstat`, then reopen `/proc/self/fd/N` (#98
+      security).
+    - M2-140: `rdy spec sign` opens `--sig` and `--secret-key`, and `rdy spec keygen` checks its key paths,
+      at identification level on Windows, not through `canonicalize` and `symlink_metadata` (#98 security).
+    - M2-141: the kind job runs `rdy run` on a k8s.version spec, and a three-node variant pages the node
+      list with `continue` tokens (M1-107 reviews).
+  - M1-107 (correction-54): its row says the plugin token is registered before the first request leaves.
+    Its PR adds "backlog corrected 2026-11-17 (correction-54)" to its progress line.
+  - #100 (M1-140): use the new 07 D.7 `nothing_verified` sentence (correction-54) in `view.rs`,
+    `html_print.rs` and the golden.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
-  - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,
-    set `kube = true` and regenerate its three goldens.
+  - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
+    k8s.version and the `api/` tree to `all-pass`, sets `kube = true` and regenerates its three goldens.
+    #80 adds "backlog corrected 2026-11-17 (correction-54)" to M1-117's progress line.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel
     and the AWS VPC CNI): their names come from memory of the projects' manifests. Read each entry's
     `source` page. Where the page shows the names, set `verified = true` and `checked_on`. Leave the rest

@@ -559,3 +559,17 @@ the corrections log of `11-backlog.md`.
   known-secret set (PR #92 F8, INV-15). M2-107 (0.25 h more) also refuses invisible code points in
   trust-store notes (N-01). M1-133 moves to week 16 and M1-168 to week 17, so no week holds
   more than 15 h. Only 01 prose changed; no test-pinned text changed.
+- **Correction-54, the plugin token and the `delegated` outcome, the `all-pass` k8s item, the
+  `nothing_verified` sentence, and four M2 tickets.** From the reviews of the M1-107 build, the security
+  review of PR #98 (M1-183) and the review of PR #100 (M1-140). Correction-49 is PR #85. The exec plugin
+  runs after the cluster line and kube does not hand rdy its token, so M1-107's row now says the token is
+  registered before the first request leaves, by a layer under kube's auth layer. 02 asks for an action-log
+  outcome `delegated`, which rdy-spec lacks, so M1-107 writes a `form: delegated` field; new M2-138 (1.5 h)
+  adds the value to rdy-spec, 01 section 5.4 and the result schema, and 02 says so. Whichever of M1-107 and
+  M1-117 (PR #80) merges second adds k8s.version and the `api/` tree to `all-pass`; M1-117's row now says
+  so, which correction-48 did not. New M2-139 (1.5 h) opens spec reads with `O_PATH` on Linux, so a device
+  swapped in is never opened. New M2-140 (1.5 h) makes `rdy spec sign` open `--sig` and `--secret-key` at
+  identification level on Windows. New M2-141 (2 h) runs `rdy run` on a k8s.version spec in the kind job
+  and pages the node list on a three-node cluster. 07 D.7's `nothing_verified` sentence said every check is
+  for another OS; the verdict rule also gives it when every check is optional and was not run, so the
+  sentence now says that too. The rule is unchanged. No new M1 ticket, and no test-pinned text changed.
