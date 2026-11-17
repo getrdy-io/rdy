@@ -295,6 +295,10 @@ The text after the colon lists the checks running now, cut to the width with `..
 before the check list prints and leaves no trace in scrollback. The spinner is Braille when Unicode is allowed
 (Appendix D.1) and `- \ | /` otherwise. The rules for the code are in the ticket.
 
+M1 draws less than this. M1-142 shows the count and the elapsed time only, as `Running 8 checks, 4 s`,
+because the engine has no progress observer the CLI can use. The `Probing:` phase, the `3 of 8` count, the
+running names with the `...` cut and the dim elapsed time come with M2-124.
+
 ## 4. `--json` and the stable-output promise
 
 ### 4.1 What goes where
@@ -2584,9 +2588,9 @@ needs JavaScript. `@media print` sets `color-scheme: light`, black text on white
 the screen theme, so a dark-mode browser cannot print light text on white; the border styles stay; every
 section is expanded (no `<details>` anywhere); `break-inside: avoid` on each check. Page breaks come only
 before Passed, the capabilities section and the action log, so the verdict, blocks and required checks not
-run share page one (01 section 6). The banner is `position: fixed` in the page margin so it prints on every
-page, and the body gets a print `padding-top` equal to the banner height so the banner never covers the first
-lines. The footer link prints its URL as text.
+run share page one (01 section 6). In print the full banners stay in the page flow and print once, at the top
+of page one. When a banner is shown, every printed page also carries its title in the top page margin, as
+fixed text that rdy writes. Nothing covers the first lines of a page. The footer link prints its URL as text.
 
 ### D.4 Accessibility, size, embedded JSON, link and tests
 
@@ -2598,8 +2602,10 @@ motion. The "Jump to" links are in-page `href="#<id>"` links.
 
 The embedded `<script type="application/json" id="rdy-result" data-sha256="<hex>">` holds the exact bytes of
 the `.json` file with the `\u003c`, `\u003e`, `\u0026` escapes (ADR 0003). Typical size under 300 KiB; hard
-cap 5 MiB: past it the action table is cut to the rows that fit and ends with "N more entries are in the
-embedded JSON"; checks are never cut.
+cap 5 MiB. Checks are never cut. Past the cap the action table loses rows first and ends with "N more entries
+are in the embedded JSON". Then Found and Needed lines go, and each check that lost lines ends with "N more
+lines are in the embedded JSON." Found and Needed come from the report the JSON writer emits, and the page
+still meets the 5 MiB cap.
 
 The footer holds two links, both visible as text: `https://getrdy.io/?ref=report&product=<product>`, with
 `rel="noopener noreferrer"` so no referrer is sent, and the source repository. The only parameters on the first
@@ -2629,7 +2635,7 @@ checked by `cargo deny`.
 
 | Crate | Purpose | Notes |
 | --- | --- | --- |
-| `indicatif` | The live progress line (section 3) | Pulls `console`. Both MIT. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()` |
+| `indicatif` | The live progress line (section 3) | Pulls `console`. Both MIT. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()`. A test-only draw target (`term_like_with_hz`) is allowed behind `cfg(test)` or a test hook, never in a release path |
 | `anstream` | Colour stripping and Windows console handling (section 6) | MIT or Apache-2.0. Replaces `atty`, which is banned; TTY checks use `std::io::IsTerminal` |
 | `unicode-width` | Pad columns by display width (section 6) | MIT or Apache-2.0 |
 
@@ -2884,7 +2890,7 @@ M1 total 44.5 hours in 26 tickets, on top of the other slices. Core total 33.5 h
 - [M1] Refuse --password on argv and read key passwords from env or file | owner: rust-engineer | est: 1h | depends on: clap command tree in rdy-cli exposed as library rdy_cli | exit test: `--password` exits 64 with the reason of 10, and `RDY_KEY_PASSWORD` and `--password-file -` sign a spec in CI without a prompt. | core: yes
 - [M1] `--no-network` and `--jobs` flags | owner: rust-engineer | est: 1.5h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: `--no-network` skips network and Kubernetes checks as `missing_need` with `run.options.network` false, `strace -f -e trace=socket` shows zero `socket(2)` calls and the action log has no `connect` entries, `--no-network --kube-context x` prints the `cluster` line of 2.1 and exits by verdict, `--jobs 500` prints a cap note, and `--jobs 0` exits 64. | core: yes
 - [M1] Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | owner: cli-ux | est: 1.5h | depends on: askama HTML report with inline CSS, dark mode and print | exit test: a script reads the CSS variables and fails any text or border pair under 4.5:1 in light, dark, dark-preferred print and light print (D.2), and the golden HTML for B.1 to B.3 matches. | core: yes
-- [M1] Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | owner: cli-ux | est: 2h | depends on: HTML print override, labels and legend; Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | exit test: `_bytes`, `_ms` and `_percent` values print as sizes, milliseconds and percents, the footer link has only `ref=report` and the product with `rel="noopener noreferrer"`, and print has a top padding equal to the banner height. | core: yes
+- [M1] Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | owner: cli-ux | est: 2h | depends on: HTML print override, labels and legend; Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | exit test: `_bytes`, `_ms` and `_percent` values print as sizes, milliseconds and percents, the footer link has only `ref=report` and the product with `rel="noopener noreferrer"`, and print keeps the banners in the flow, covers nothing, and repeats the banner title in the top margin of every page. | core: yes
 - [M1] HTML next-step sentences and the nothing-verified wording | owner: cli-ux | est: 1h | depends on: Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | exit test: golden HTML carries the sentences of D.7 by verdict, including the `nothing_verified` sentence for C.13. | core: no
 - [M1] HTML structure test: headings, landmarks, tables and links | owner: cli-ux | est: 1.5h | depends on: Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | exit test: a Rust test over the three goldens asserts heading levels never skip, `lang` is set, every `h3` has a status word, tables have `th scope`, ids are unique, every `href="#id"` has a target in the document, and no other `href` or `src` is anything but `data:`, the footer link or the repo link. | core: yes
 - [M1] HTML untrusted strings in bdi with bidi controls shown as escapes | owner: cli-ux | est: 1h | depends on: HTML structure test: headings, landmarks, tables and links | exit test: a hostname holding U+202E and a vendor `fix` holding U+2066 render inside `<bdi>` as `\u{202e}` and `\u{2066}`, and the structure test asserts it. | core: no

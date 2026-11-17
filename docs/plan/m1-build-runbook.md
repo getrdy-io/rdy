@@ -216,7 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180. Totals on main: M1 178 tickets, 391 h, 328 h core. All milestones: 398
-tickets, 1349 h. Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
+tickets, 1349 h. After correction-42: M2 125 tickets, 453.5 h; all milestones 403 tickets, 1358 h.
+Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
 - 35: M1-148 drops adjtimex. `NativeCall::Adjtimex` moves to M2-004.
@@ -361,12 +362,12 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - qa (PC-52): the M1-043 macOS SIGCHLD carry stays open. The ECHILD probe failed on macos-x64, so it is gated
     to Linux.
   - M1-179: deletes the host.time_sync PENDING row in the env harness that #35 adds.
-  - Follow-ups with no ticket yet:
-    - net.mtu: a per-interface note on a hostile link, instead of ending the check (M2).
-    - A per-response byte cap in the k8s client, for example 16 MiB, with a cut list reported as partial
+  - Follow-ups that correction-42 gave ids:
+    - M2-121, net.mtu: a per-interface note on a hostile link, instead of ending the check.
+    - M2-122: a per-response byte cap in the k8s client, 16 MiB, with a cut list reported as partial
       (#48 F3).
-    - `NetFailure::NotConnected` carries the connect attempts, so net.egress needs no second tcp call (#45).
-    The next correction should give each an id.
+    - M2-123: `NetFailure::NotConnected` carries the connect attempts, so net.egress needs no second tcp
+      call (#45).
 
 ## For the founder
 
