@@ -252,7 +252,7 @@ Public repo, standard runners (including arm64 Linux and Intel macOS): $0, no mi
 ```yaml
 test:
   runs-on: ${{ matrix.os }}
-  timeout-minutes: 25
+  timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}  # macos-x64 is the slow leg
   permissions: { contents: read }
   strategy:
     fail-fast: false
