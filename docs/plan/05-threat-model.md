@@ -143,9 +143,14 @@ ADR 0010 stays as a second line.
   `rustls-native-certs` reads the OS store, but it reads the two variables itself with no rules and no
   caps, so it is never called while either is set (M1-092). Windows has no file reads in M1, so there a
   set variable makes the OS store "could not be read" and the operator unsets it. There is no
-  revocation check in M1, and the report says so. webpki rejects certificates with no SAN, and SHA-1
-  signatures, that some old appliances still issue. `net.tls_intercept` reports "rejected by rustls
-  policy" as its own result, and docs explain `SSL_CERT_FILE`.
+  revocation check in M1, and from M1-096 the report says so (M1-101 review, SF-01). webpki rejects
+  certificates with no SAN, and SHA-1 signatures, that some old appliances still issue.
+  `net.tls_intercept` reports "rejected by rustls policy" as its own result, and docs explain
+  `SSL_CERT_FILE`.
+  Until M2-135, a `pin_sha256` that matches only a later certificate (`ca_only`) is at best a warning,
+  and a middlebox this machine trusts can append the pinned public CA certificate after its own leaf, so
+  a CA pin cannot block it when `forbid_interception` is false. Pin the leaf, or set
+  `forbid_interception`, to block (M1-101 review, AR-01).
 - Reports are customer-attested. A customer can edit one before sending it.
 
 ## Surface 2: the spec supply chain
