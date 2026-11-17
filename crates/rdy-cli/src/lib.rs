@@ -233,11 +233,24 @@ where
             // goes into the hub now: after `ProbeHub::new`, before the privilege snapshot (the first
             // probe read, after which `set_proxy` is `TooLate`) and before anything is printed or
             // written, so its password is in the known-secret set before any string can hold it. A URL
-            // that does not parse is exit 64; a password the set refuses is exit 70 (M1-097).
-            if matches!(&cli.command, Commands::Run(_))
+            // that does not parse is exit 64 (a note under `--no-network`); a password the set refuses is exit 70
+            // (M1-097).
+            if let Commands::Run(run) = &cli.command
                 && let Err(failure) = hub.set_proxy_from_env()
             {
-                return emit(&CliError::proxy_env(failure), json, stdout, stderr);
+                // Under `--no-network` no socket opens, so a URL that does not parse cannot hurt: it is a
+                // note, not exit 64 (offline first). A password the set refuses is still exit 70, because
+                // `net.proxy` and the report may show the variable.
+                let ignorable = run.no_network
+                    && matches!(failure.error, rdy_engine::probe::ProxyError::Url(_));
+                if !ignorable {
+                    return emit(&CliError::proxy_env(failure), json, stdout, stderr);
+                }
+                let _ = writeln!(
+                    stderr,
+                    "note: {} is not a usable proxy URL. It is ignored because --no-network is set.",
+                    failure.var
+                );
             }
             // `rdy run`: the check families, and the value of every secret-named environment variable
             // they declare, go into the known-secret set before the first log event below and before

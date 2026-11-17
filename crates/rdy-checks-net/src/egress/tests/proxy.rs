@@ -219,24 +219,46 @@ async fn another_status_to_connect_is_proxy_refused_with_its_status() {
     assert_secrets_absent(&ran);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_proxy_that_cannot_be_reached_is_proxy_unreachable_and_not_a_fault_of_the_endpoint() {
-    let replay = Replay::new()
+    let refused = Replay::new()
         .host("proxy.acme.test", ["192.0.2.50".parse().expect("ip")])
         .tcp("192.0.2.50:3128".parse().expect("addr"), TcpScript::Refused);
-    for endpoint in ["registry.acme.test:8443", "https://api.acme.test/"] {
-        let ran = run_via(
-            replay.clone(),
-            json!([endpoint]),
-            json!({}),
-            NET,
-            Some(PROXY_URL),
-        )
-        .await;
-        assert_eq!(ran.endpoint(0)["class"], "proxy_unreachable", "{endpoint}");
-        let fix = ran.finding().fix.as_deref().expect("a fix");
-        assert!(fix.contains("`HTTPS_PROXY` or `HTTP_PROXY`"), "{fix}");
-        assert_secrets_absent(&ran);
+    let silent = Replay::new()
+        .host("proxy.acme.test", ["192.0.2.50".parse().expect("ip")])
+        .tcp(
+            "192.0.2.50:3128".parse().expect("addr"),
+            TcpScript::Blackhole,
+        );
+    // The proxy's own name does not resolve: the answer is empty.
+    let no_name = Replay::new().host("proxy.acme.test", Vec::<std::net::IpAddr>::new());
+    for (what, replay) in [
+        ("refused", refused),
+        ("silent", silent),
+        ("no name", no_name),
+    ] {
+        for endpoint in [
+            "registry.acme.test:8443",
+            "https://api.acme.test/",
+            "http://mirror.acme.test/",
+        ] {
+            let ran = run_via(
+                replay.clone(),
+                json!([endpoint]),
+                json!({}),
+                NET,
+                Some(PROXY_URL),
+            )
+            .await;
+            assert_eq!(
+                ran.endpoint(0)["class"],
+                "proxy_unreachable",
+                "{what}: {endpoint}"
+            );
+            let fix = ran.finding().fix.as_deref().expect("a fix");
+            assert!(fix.contains("`HTTPS_PROXY` or `HTTP_PROXY`"), "{fix}");
+            assert_secrets_absent(&ran);
+        }
     }
 }
 
@@ -471,4 +493,190 @@ async fn the_route_follows_via_proxy_and_whether_the_run_has_a_proxy() {
     )
     .await;
     assert!(ran.endpoint(0).get("route").is_none());
+}
+
+// ---- review round ------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_403_inside_an_https_tunnel_is_the_servers_and_only_warns() {
+    let ca = TestCa::root("Acme Test Root");
+    let options =
+        HttpOptions::tls(&ca.issue(&["api.acme.test"], Validity::Always)).reply(Reply::Status(403));
+    let server = HttpServer::start(options).await.expect("server");
+    let at = format!("api.acme.test:{}", server.addr().port());
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let ran = run_via(
+        through(&proxy, Some(&ca)),
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+        Some(PROXY_URL),
+    )
+    .await;
+    // The tunnel was open and verified, so the 403 came from the server: the direct rule applies.
+    assert_eq!(
+        ran.finding().level,
+        Level::Warn,
+        "{}",
+        ran.finding().message
+    );
+    assert_eq!(ran.endpoint(0)["result"], "reached");
+    assert_ne!(ran.endpoint(0)["class"], "proxy_403");
+    assert_eq!(ran.endpoint(0)["http_stage"]["status"], 403);
+    assert_secrets_absent(&ran);
+}
+
+#[tokio::test]
+async fn a_direct_http_endpoint_sends_no_proxy_credential_when_a_proxy_is_set() {
+    let server = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let at = format!("mirror.acme.test:{}", server.addr().port());
+    let proxy = ConnectProxy::start_forwarding(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let replay = through(&proxy, None)
+        .host("mirror.acme.test", ["127.0.0.1".parse().expect("ip")])
+        .tcp(server.addr(), TcpScript::Serve("web".to_owned()))
+        .serve_tcp("web", server.addr());
+    let ran = run_via(
+        replay,
+        json!([{"target": format!("http://{at}/"), "via_proxy": "direct"}]),
+        json!({}),
+        NET,
+        Some(PROXY_URL),
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Pass);
+    let seen = server.requests();
+    assert!(!seen.is_empty());
+    assert!(
+        seen.iter()
+            .all(|r| r.header("proxy-authorization").is_none())
+    );
+    assert_eq!(proxy.accepted(), 0);
+    assert_secrets_absent(&ran);
+}
+
+#[tokio::test]
+async fn no_proxy_is_reported_as_not_applied_without_its_value() {
+    let server = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let at = format!("db.acme.test:{}", server.addr().port());
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    for name in ["NO_PROXY", "no_proxy"] {
+        let replay = through(&proxy, None).env(name, "internal-canary.example,10.0.0.0/8");
+        let ran = run_via(replay, json!([at]), json!({}), NET, Some(PROXY_URL)).await;
+        assert!(
+            ran.finding()
+                .notes
+                .iter()
+                .any(|n| n.starts_with("NO_PROXY is set, and this build of rdy does not apply it")),
+            "{name}: {:?}",
+            ran.finding().notes
+        );
+        ran.assert_no_secret("internal-canary");
+    }
+    // Blank, or no proxy in use: no note.
+    for (env, proxied) in [("   ", true), ("internal.example", false)] {
+        let replay = through(&proxy, None).env("NO_PROXY", env);
+        let proxy_text = proxied.then_some(PROXY_URL);
+        let ran = run_via(
+            replay
+                .host("db.acme.test", ["127.0.0.1".parse().expect("ip")])
+                .tcp(server.addr(), TcpScript::Serve("web".to_owned()))
+                .serve_tcp("web", server.addr()),
+            json!([at]),
+            json!({}),
+            NET,
+            proxy_text,
+        )
+        .await;
+        assert!(
+            !ran.finding().notes.iter().any(|n| n.contains("NO_PROXY")),
+            "{env:?}: {:?}",
+            ran.finding().notes
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_proxy_read_from_http_proxy_is_named_for_an_https_endpoint_and_in_the_fixes() {
+    // A tunnelled TLS endpoint (port 443): the note names the variable. The proxy refuses, which is
+    // enough: the endpoint went through the proxy.
+    let forbidden = ConnectProxy::start(ProxyMode::Forbidden)
+        .await
+        .expect("proxy");
+    let ran = run_from_env(
+        through(&forbidden, None).env("http_proxy", PROXY_URL),
+        json!(["registry.acme.test:443"]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert!(
+        ran.finding()
+            .notes
+            .iter()
+            .any(|n| n.starts_with("An https endpoint went through a proxy read from http_proxy")),
+        "{:?}",
+        ran.finding().notes
+    );
+    // HTTPS_PROXY as the source: no such note.
+    let ran = run_from_env(
+        through(&forbidden, None).env("HTTPS_PROXY", PROXY_URL),
+        json!(["registry.acme.test:443"]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert!(!ran.finding().notes.iter().any(|n| n.contains("read from")));
+
+    // The 407 fix names the variable the proxy came from.
+    for (var, want) in [
+        ("HTTP_PROXY", "`HTTP_PROXY`"),
+        ("https_proxy", "`https_proxy`"),
+    ] {
+        let denied = ConnectProxy::start(ProxyMode::Basic407)
+            .await
+            .expect("proxy");
+        let ran = run_from_env(
+            through(&denied, None).env(var, PROXY_URL),
+            json!(["registry.acme.test:443"]),
+            json!({}),
+            NET,
+        )
+        .await;
+        let fix = ran.finding().fix.as_deref().expect("a fix");
+        assert!(fix.contains(want), "{var}: {fix}");
+        assert_secrets_absent(&ran);
+    }
+}
+
+#[tokio::test]
+async fn a_redirect_to_a_plain_http_host_suggests_port_80() {
+    let server = HttpServer::start(
+        HttpOptions::plain().reply(Reply::Redirect("http://old.acme.example/x".to_owned())),
+    )
+    .await
+    .expect("server");
+    let replay = Replay::new()
+        .host("www.acme.test", ["127.0.0.1".parse().expect("ip")])
+        .tcp(server.addr(), TcpScript::Serve("web".to_owned()))
+        .serve_tcp("web", server.addr());
+    let target = format!("http://www.acme.test:{}/", server.addr().port());
+    let ran = run_on(replay, json!([target]), json!({}), NET).await;
+    assert!(
+        ran.finding()
+            .notes
+            .iter()
+            .any(|n| n.contains("Add old.acme.example:80 to the endpoints")),
+        "{:?}",
+        ran.finding().notes
+    );
 }

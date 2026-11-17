@@ -111,6 +111,11 @@ fn spec(dir: &Path) -> PathBuf {
     spec
 }
 
+/// Whether an action entry is the run-level read of the proxy variables.
+fn has_proxy_names(action: &Value) -> bool {
+    action.to_string().contains("HTTPS_PROXY")
+}
+
 fn args<'a>(spec: &'a str, out: &'a str) -> Vec<&'a str> {
     vec!["run", spec, "--allow-unsigned", "--json", "--out-dir", out]
 }
@@ -160,9 +165,23 @@ fn a_proxied_run_reads_each_variable_sets_the_proxy_in_time_and_hides_the_passwo
         // Exit 0 and a report: the proxy was set before the privilege snapshot, so it did not hit
         // `TooLate` (which would be exit 70 before the spec is read).
         assert_eq!(ran.code, 0, "{name}: {}", ran.stderr);
-        assert!(!ran.stderr.contains("after the run had started"), "{name}");
         let doc: Value = serde_json::from_str(&ran.stdout)
             .unwrap_or_else(|e| panic!("{name}: stdout is not JSON ({e}): {}", ran.stdout));
+        // The proxy was read before the privilege snapshot: its set-up entry comes before the first
+        // read of the run.
+        let actions = doc["actions"].as_array().cloned().unwrap_or_default();
+        let setup = actions
+            .iter()
+            .find(|a| a["kind"] == "env" && a["check"].is_null() && has_proxy_names(a))
+            .unwrap_or_else(|| panic!("{name}: no proxy set-up entry in {actions:?}"));
+        let first_read = actions
+            .iter()
+            .find(|a| a["kind"] == "read")
+            .unwrap_or_else(|| panic!("{name}: no read entry"));
+        assert!(
+            setup["seq"].as_u64() < first_read["seq"].as_u64(),
+            "{name}: {setup} {first_read}"
+        );
         let check = &doc["checks"][0];
         assert_eq!(check["status"], "pass", "{name}: {check}");
         let endpoint = &check["observed"]["endpoints"][0];
@@ -184,23 +203,37 @@ fn a_proxied_run_reads_each_variable_sets_the_proxy_in_time_and_hides_the_passwo
 }
 
 #[test]
-fn a_run_with_no_proxy_variable_goes_direct_and_sets_no_proxy() {
+fn a_blank_proxy_variable_is_no_proxy_and_the_run_goes_direct() {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let spec = spec(dir.path());
     let out = dir.path().join("out");
     std::fs::create_dir(&out).unwrap_or_else(|e| panic!("cannot make the out dir: {e}"));
     let heads = Arc::new(Mutex::new(Vec::new()));
-    // A blank value is not a proxy. The endpoint has no script, so the direct connect has no answer and
-    // the check ends in its own way; the point is that no proxy was used.
+    // The endpoint answers over a direct, scripted connection.
+    let machine = machine("HTTPS_PROXY", "   ", &heads)
+        .host(
+            "web.acme.test",
+            ["192.0.2.1"
+                .parse()
+                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))],
+        )
+        .tcp(
+            "192.0.2.1:8080"
+                .parse()
+                .unwrap_or_else(|e| panic!("addr: {e}")),
+            TcpScript::Serve("direct".to_owned()),
+        )
+        .serve_duplex("direct", |_server| async {});
     let ran = call(
-        machine("HTTPS_PROXY", "   ", &heads),
+        machine,
         &args(&spec.to_string_lossy(), &out.to_string_lossy()),
     );
-    assert!(
-        ran.code == 0 || ran.code == 2 || ran.code == 70,
-        "{}",
-        ran.stderr
-    );
+    assert_eq!(ran.code, 0, "{}", ran.stderr);
+    let doc: Value = serde_json::from_str(&ran.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {}", ran.stdout));
+    let endpoint = &doc["checks"][0]["observed"]["endpoints"][0];
+    assert_eq!(endpoint["result"], "reached", "{endpoint}");
+    assert!(endpoint.get("route").is_none(), "{endpoint}");
     assert!(
         heads
             .lock()
@@ -208,6 +241,58 @@ fn a_run_with_no_proxy_variable_goes_direct_and_sets_no_proxy() {
             .is_empty(),
         "the proxy was used"
     );
+    // No variable was set, so the run wrote no proxy set-up entry.
+    let actions = doc["actions"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| a["kind"] == "env" && a["check"].is_null() && has_proxy_names(a)),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn under_no_network_a_bad_proxy_url_is_a_note_and_a_refused_password_is_still_exit_70() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = spec(dir.path());
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("cannot make the out dir: {e}"));
+    let out_arg = out.to_string_lossy().into_owned();
+    let spec_arg = spec.to_string_lossy().into_owned();
+    let mut offline = args(&spec_arg, &out_arg);
+    offline.push("--no-network");
+
+    let heads = Arc::new(Mutex::new(Vec::new()));
+    let ran = call(
+        machine(
+            "HTTPS_PROXY",
+            "socks5://svc:Canary-pw-1@proxy.acme.test:1080",
+            &heads,
+        ),
+        &offline,
+    );
+    assert_ne!(ran.code, 64, "{}", ran.stderr);
+    assert_ne!(ran.code, 70, "{}", ran.stderr);
+    assert!(
+        ran.stderr.contains(
+            "note: HTTPS_PROXY is not a usable proxy URL. It is ignored because --no-network is set."
+        ),
+        "{}",
+        ran.stderr
+    );
+    for haystack in [&ran.stdout, &ran.stderr] {
+        assert!(!haystack.contains("Canary"), "the password was printed");
+    }
+
+    let ran = call(
+        machine(
+            "HTTPS_PROXY",
+            "http://svc:pw5ab@proxy.acme.test:3128",
+            &heads,
+        ),
+        &offline,
+    );
+    assert_eq!(ran.code, 70, "{}", ran.stderr);
 }
 
 #[test]
@@ -300,11 +385,14 @@ fn a_proxy_url_that_does_not_parse_is_exit_64_with_a_fix_and_never_echoes_the_va
 
 #[test]
 fn rdy_commands_other_than_run_do_not_read_the_proxy() {
-    // `rdy version` with a bad proxy variable is not affected: only `rdy run` reads it.
+    // `rdy trust list` ends the same way with a bad proxy variable as without one: only `rdy run`
+    // reads it.
     let heads = Arc::new(Mutex::new(Vec::new()));
-    let ran = call(
+    let with = call(
         machine("HTTPS_PROXY", "socks5://nope", &heads),
-        &["version"],
+        &["trust", "list"],
     );
-    assert_eq!(ran.code, 0, "{}", ran.stderr);
+    let without = call(machine("HTTPS_PROXY", "", &heads), &["trust", "list"]);
+    assert_eq!(with.code, without.code, "{}", with.stderr);
+    assert!(!with.stderr.contains("proxy"), "{}", with.stderr);
 }

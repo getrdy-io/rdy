@@ -690,6 +690,8 @@ pub struct ProbeHub {
     log: ActionLog,
     /// The run's proxy, set once before the checks start. Clones of the hub share it.
     proxy: Arc<OnceLock<ProxyUrl>>,
+    /// The environment variable the proxy was read from, when it came from `set_proxy_from_env`.
+    proxy_source: Arc<OnceLock<&'static str>>,
     /// Whether sockets are allowed. `false` is `--no-network`: the facade refuses every lookup, TCP,
     /// UDP and network command. A new hub starts with `false`. Clones of the hub share it.
     network: Arc<AtomicBool>,
@@ -719,6 +721,7 @@ impl ProbeHub {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
+            proxy_source: Arc::new(OnceLock::new()),
             network: Arc::new(AtomicBool::new(false)),
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
@@ -914,6 +917,9 @@ impl ProbeHub {
     /// run-level `env` entry; with none set it records nothing. That entry is a set-up entry: it does not
     /// count for the `TooLate` rule of [`ProbeHub::set_proxy`].
     ///
+    /// Every other variable that is set and parses has its password added to the known-secret set too,
+    /// whether or not it is the one used; one the set refuses is an error for that variable.
+    ///
     /// Returns the name of the variable the proxy came from, or `None` when none is set.
     ///
     /// # Errors
@@ -921,23 +927,49 @@ impl ProbeHub {
     /// [`ProxyEnvError`] names the variable and holds the [`ProxyError`]. No error holds any part of the
     /// value.
     pub fn set_proxy_from_env(&self) -> Result<Option<&'static str>, ProxyEnvError> {
-        let found = PROXY_ENV.iter().find_map(|name| {
-            self.backend
-                .env(name)
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| (*name, value))
-        });
+        let set: Vec<(&'static str, String)> = PROXY_ENV
+            .iter()
+            .filter_map(|name| {
+                self.backend
+                    .env(name)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| (*name, value))
+            })
+            .collect();
         // A run with no proxy variable writes no entry, so its log is the same as before.
-        let Some((var, value)) = found else {
+        let Some((var, value)) = set.first().cloned() else {
             return Ok(None);
         };
         let mut fields = Map::new();
         fields.insert("name".to_owned(), cut_names(&PROXY_ENV).into());
         let setup = self.log.begin_setup(ActionKind::Env, fields);
-        let result = self
+        let mut result = self
             .set_proxy_text(&value)
             .map(|()| Some(var))
             .map_err(|error| ProxyEnvError { var, error });
+        if result.is_ok() {
+            let _ = self.proxy_source.set(var);
+        }
+        // Every other variable that is set may reach output too (`net.proxy` reports them), so the
+        // secrets of each one that parses go into the set as well. One that does not parse is left
+        // alone: only the variable the run uses is an error. A refusal is an error for its variable.
+        for (other, text) in set.iter().skip(1) {
+            if text == &value {
+                continue;
+            }
+            if let Ok(parsed) = ProxyUrl::parse(text) {
+                let mut accepted = true;
+                for secret in parsed.secrets() {
+                    accepted &= self.add_known_secret(&secret);
+                }
+                if !accepted && result.is_ok() {
+                    result = Err(ProxyEnvError {
+                        var: other,
+                        error: ProxyError::SecretRefused,
+                    });
+                }
+            }
+        }
         setup.finish(if result.is_ok() {
             ActionOutcome::Ok
         } else {

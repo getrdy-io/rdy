@@ -99,7 +99,8 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     },
     reads: &[],
     statfs: &[],
-    env: &[],
+    // `NO_PROXY` is read to say that it is not applied yet (M1-098 applies it). Neither name is secret.
+    env: &["NO_PROXY", "no_proxy"],
     commands: &[],
     peers: &[PeerClass::SpecHosts, PeerClass::Proxy],
 };
@@ -147,31 +148,54 @@ impl Check for EgressCheck {
             let trust = self.params.trust;
             let total = self.params.endpoints.len();
             let proxy = ctx.probe().proxy_origin();
-            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> =
-                self.params
-                    .endpoints
-                    .iter()
-                    .enumerate()
-                    .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
-                        // Rounds of endpoints that wait behind this one, for the budget of its extra call.
-                        let queued = (total - at - 1) / PARALLEL;
-                        match route_of(spec, entry_route, proxy.as_deref()) {
-                            Routing::Direct => Box::pin(probe(ctx, spec, trust, queued, None)),
-                            Routing::Proxy(origin) => {
-                                Box::pin(probe(ctx, spec, trust, queued, Some(origin.to_owned())))
-                            }
-                            Routing::NoProxy => Box::pin(std::future::ready(Ok(
-                                Probed::not_tried(spec, NO_PROXY_SET),
-                            ))),
-                        }
-                    })
-                    .collect();
+            let proxy_var = ctx.probe().proxy_source();
+            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> = self
+                .params
+                .endpoints
+                .iter()
+                .enumerate()
+                .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
+                    // Rounds of endpoints that wait behind this one, for the budget of its extra call.
+                    let queued = (total - at - 1) / PARALLEL;
+                    match route_of(spec, entry_route, proxy.as_deref()) {
+                        Routing::Direct => Box::pin(probe(ctx, spec, trust, queued, None, None)),
+                        Routing::Proxy(origin) => Box::pin(probe(
+                            ctx,
+                            spec,
+                            trust,
+                            queued,
+                            Some(origin.to_owned()),
+                            proxy_var,
+                        )),
+                        Routing::NoProxy => Box::pin(std::future::ready(Ok(Probed::not_tried(
+                            spec,
+                            NO_PROXY_SET,
+                        )))),
+                    }
+                })
+                .collect();
             let probed: Vec<Result<Probed, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let probed: Vec<Probed> = probed.into_iter().collect::<Result<_, _>>()?;
-            Ok(self.judge(ctx.os(), &probed))
+            let mut finding = self.judge(ctx.os(), &probed);
+            // `auto` takes the proxy for every endpoint until M1-098 applies `NO_PROXY`. Say so, once and
+            // without the value (a `NO_PROXY` list can name internal hosts).
+            if proxy.is_some() && no_proxy_is_set(ctx) {
+                finding = finding.with_note(NO_PROXY_NOTE);
+            }
+            Ok(finding)
         })
     }
+}
+
+/// The note when `NO_PROXY` is set and a proxy is in use.
+const NO_PROXY_NOTE: &str = "NO_PROXY is set, and this build of rdy does not apply it: every endpoint of this run went through the proxy, including hosts NO_PROXY lists. The product may reach those hosts directly.";
+
+/// Whether `NO_PROXY` or `no_proxy` has a non-blank value. The value is never kept.
+fn no_proxy_is_set(ctx: &CheckContext) -> bool {
+    ["NO_PROXY", "no_proxy"]
+        .iter()
+        .any(|name| matches!(ctx.probe().env(name), Ok(Some(value)) if !value.trim().is_empty()))
 }
 
 /// Why a proxy-only endpoint is not tried when the run has no proxy.
@@ -241,11 +265,13 @@ impl EgressCheck {
                             notes.push(text);
                         }
                     }
-                    if let Some(host) = p.http.as_ref().and_then(|h| h.location_host.as_deref())
+                    if let Some(http) = &p.http
+                        && let Some(host) = http.location_host.as_deref()
                         && !listed(&self.params, host)
                     {
+                        let port = http.location_port.unwrap_or(443);
                         notes.push(format!(
-                            "{} redirects to {host}, which rdy did not follow. Add {host}:443 to the endpoints to test it.",
+                            "{} redirects to {host}, which rdy did not follow. Add {host}:{port} to the endpoints to test it.",
                             p.label()
                         ));
                     }
@@ -275,10 +301,28 @@ impl EgressCheck {
             }
         }
 
-        if let Some(origin) = probed.iter().find_map(|p| p.via_proxy.as_deref()) {
+        let proxied =
+            |p: &&Probed| p.via_proxy.is_some() && !matches!(p.ending, Ending::NotTried(_));
+        if let Some(origin) = probed
+            .iter()
+            .filter(proxied)
+            .find_map(|p| p.via_proxy.as_deref())
+        {
             notes.push(format!(
-                "{} endpoint(s) were tried through the proxy {origin}. A name resolves at the proxy, not on this machine.",
-                probed.iter().filter(|p| p.via_proxy.is_some()).count()
+                "{} endpoint(s) went through the proxy {origin}. A name resolves at the proxy, not on this machine.",
+                probed.iter().filter(proxied).count()
+            ));
+        }
+        // One proxy serves the whole run. When it came from `HTTP_PROXY`, a tunnelled endpoint used it
+        // although the usual tool would have taken `HTTPS_PROXY` for it.
+        if let Some(var) = probed
+            .iter()
+            .filter(proxied)
+            .filter(|p| p.tls_wanted)
+            .find_map(|p| p.proxy_var.filter(|v| v.eq_ignore_ascii_case("http_proxy")))
+        {
+            notes.push(format!(
+                "An https endpoint went through a proxy read from {var}, because rdy uses one proxy for the whole run and {var} was the only proxy variable set. Set HTTPS_PROXY if the product uses a different proxy for https."
             ));
         }
         let total = probed.len();

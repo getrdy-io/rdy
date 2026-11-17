@@ -287,6 +287,14 @@ impl Probe {
         self.hub.as_ref()?.proxy.get().map(ProxyUrl::origin)
     }
 
+    /// The environment variable the run's proxy was read from (`HTTPS_PROXY`, `HTTP_PROXY`, either
+    /// case), or `None` when the run has no proxy or it was set another way. A check names it in a fix
+    /// and a note, because the proxy of one variable serves every endpoint of the run.
+    #[must_use]
+    pub fn proxy_source(&self) -> Option<&'static str> {
+        self.hub.as_ref()?.proxy_source.get().copied()
+    }
+
     /// The policy before any lookup or connection.
     fn admit_tcp(&self, target: &Target, route: Route) -> Result<(), &'static str> {
         let declared = |class: PeerClass| {

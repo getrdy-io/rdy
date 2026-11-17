@@ -1048,6 +1048,51 @@ async fn plain_http_through_the_proxy_uses_the_absolute_form_and_no_connect() {
 }
 
 #[tokio::test]
+async fn a_direct_http_call_with_a_proxy_set_sends_no_proxy_credential_to_the_origin() {
+    let server = plain_server(Reply::Ok).await;
+    let at = hosts_of(&server);
+    let proxy = ConnectProxy::start_forwarding(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let hub = hub_over(
+        proxied(proxy.addr(), None)
+            .host("web.acme.test", [ip("127.0.0.1")])
+            .tcp(server.addr(), TcpScript::Serve("web".to_owned()))
+            .serve_tcp("web", server.addr()),
+    );
+    hub.set_proxy_text("http://svc:longer-canary-pw@proxy.acme.test:3128")
+        .expect("proxy");
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")))
+        .await
+        .expect("direct");
+    assert_eq!(outcome.status, 200);
+    assert!(!outcome.connect.via_proxy);
+    let seen = server.requests();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].header("proxy-authorization"), None);
+    assert!(!format!("{seen:?}").contains("longer-canary-pw"));
+    assert_eq!(proxy.accepted(), 0, "the proxy was not used");
+}
+
+#[test]
+fn a_location_gives_its_host_and_the_default_port_of_its_scheme() {
+    assert_eq!(
+        location_parts("http://a.acme.example/x?t=1"),
+        Some((80, "a.acme.example".to_owned()))
+    );
+    assert_eq!(
+        location_parts("https://a.acme.example:8443/x"),
+        Some((443, "a.acme.example".to_owned()))
+    );
+    assert_eq!(
+        location_parts("//a.acme.example/x"),
+        Some((443, "a.acme.example".to_owned()))
+    );
+    assert_eq!(location_parts("/relative"), None);
+}
+
+#[tokio::test]
 async fn a_407_to_the_absolute_form_is_typed_with_its_challenge() {
     for (mode, challenge, sent) in [
         (ProxyMode::Basic407, ProxyChallenge::Basic, true),

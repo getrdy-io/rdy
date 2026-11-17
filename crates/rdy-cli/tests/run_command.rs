@@ -14,6 +14,7 @@ use rdy_engine::testing::Replay;
 use serde_json::Value;
 
 mod common;
+use common::NoProxyEnv;
 
 const ACME: &str = "../../examples/specs/acme-platform.yaml";
 
@@ -380,6 +381,7 @@ fn rdy(args: &[&str]) -> Output {
             .args(args)
             .args(offline.then_some("--no-network"))
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("RUST_LOG")
             .env_remove("CLICOLOR_FORCE")
             .output()
@@ -460,6 +462,7 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
+                .no_proxy_env()
                 .env_remove("RUST_LOG")
                 .output()
                 .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
@@ -601,6 +604,7 @@ fn a_signed_spec_prints_no_unsigned_warning() {
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
+                .no_proxy_env()
                 .env_remove("RUST_LOG")
                 .output()
                 .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),

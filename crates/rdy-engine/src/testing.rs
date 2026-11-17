@@ -133,6 +133,20 @@ impl TestRun {
         self
     }
 
+    /// The same run with the proxy read from the machine's environment, as `rdy run` reads it
+    /// ([`ProbeHub::set_proxy_from_env`]). The variable it came from is then known to the checks.
+    ///
+    /// # Panics
+    ///
+    /// If the variable is not a usable proxy URL or its password is refused.
+    #[must_use]
+    pub fn with_proxy_from_env(self) -> Self {
+        self.hub
+            .set_proxy_from_env()
+            .unwrap_or_else(|e| panic!("the test proxy variable is not usable: {e}"));
+        self
+    }
+
     /// A run over the machine of a loaded fixture (08 section 2).
     #[must_use]
     pub fn for_fixture(fixture: &Fixture) -> Self {

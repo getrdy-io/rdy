@@ -1549,3 +1549,54 @@ async fn the_environment_errors_name_the_variable_and_never_the_value() {
     let error = hub.set_proxy_from_env().expect_err("too late");
     assert_eq!(error.error, ProxyError::TooLate);
 }
+
+#[tokio::test]
+async fn after_the_privilege_snapshot_the_proxy_can_no_longer_be_set() {
+    // The snapshot is the first probe read of a run. The order in `rdy run` (proxy first) is what keeps
+    // the proxy from being `TooLate`, and this is the proof that the other order fails.
+    let hub = hub_over(Replay::new().env("HTTPS_PROXY", &proxy_url(true)));
+    let _ = crate::privilege::Privilege::snapshot(&hub.run_probe()).await;
+    let error = hub.set_proxy_from_env().expect_err("too late");
+    assert_eq!(error.error, ProxyError::TooLate);
+
+    let hub = hub_over(Replay::new().env("HTTPS_PROXY", &proxy_url(true)));
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let _ = crate::privilege::Privilege::snapshot(&hub.run_probe()).await;
+}
+
+#[tokio::test]
+async fn the_source_variable_is_kept_and_every_variable_that_parses_has_its_secrets_hidden() {
+    let other = "http://admin:Other-canary-pw@other.acme.test:8080";
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(true))
+            .env("http_proxy", other),
+    );
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let probe = hub.check_probe("net.egress", Os::Linux, Some(egress()));
+    assert_eq!(probe.proxy_source(), Some("HTTPS_PROXY"));
+    let shown = hub
+        .run_probe()
+        .file_text(&FileBytes::new(b"x Other-canary-pw y".to_vec()))
+        .expect("text")
+        .to_string();
+    assert!(!shown.contains("Other-canary-pw"), "{shown}");
+
+    // A loser that does not parse is not an error. One whose password the set refuses is.
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(false))
+            .env("HTTP_PROXY", "socks5://x:y@z:1"),
+    );
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(false))
+            .env("HTTP_PROXY", "http://svc:pw@z.acme.test:1"),
+    );
+    let error = hub.set_proxy_from_env().expect_err("refused");
+    assert_eq!(
+        (error.var, error.error),
+        ("HTTP_PROXY", ProxyError::SecretRefused)
+    );
+}

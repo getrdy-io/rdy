@@ -229,6 +229,9 @@ pub struct HttpOutcome {
     /// The host of the `Location` header, when it is an absolute URL: no scheme, port, path, query or
     /// user info. The facade did not follow it.
     pub location_host: Option<String>,
+    /// The default port of the `Location` scheme, 80 for `http` and 443 for `https`, for the same
+    /// redirect as [`HttpOutcome::location_host`]. A check uses it to suggest `host:port`.
+    pub location_port: Option<u16>,
     /// What the reply's `Proxy-Authenticate` headers offer. [`ProxyChallenge::None`] when there are
     /// none. Only a reply that came through the proxy can carry one that means anything.
     pub proxy_challenge: ProxyChallenge,
@@ -265,8 +268,7 @@ impl Probe {
     ///
     /// # Errors
     ///
-    /// - [`ProbeError::Denied`] as for `tcp`, for a target that is not a URL, and for a plain `http://`
-    ///   target through the proxy.
+    /// - [`ProbeError::Denied`] as for `tcp`, and for a target that is not a URL.
     /// - [`ProbeError::Net`] for a name that did not resolve, a proxy that refused, a connection that
     ///   could not be made ([`NetFailure::NotConnected`]), a TLS failure, a certificate the roots did not
     ///   accept ([`NetFailure::TlsUntrusted`]), no roots to check against and an HTTP exchange that
@@ -389,6 +391,7 @@ impl Probe {
             proxy_challenge: reply.proxy_challenge,
             headers: reply.headers,
             location_host: reply.location_host,
+            location_port: reply.location_port,
             body_bytes: reply.body_bytes,
             body_cut: reply.body_cut,
             tls,
@@ -409,6 +412,7 @@ struct Reply {
     proxy_challenge: ProxyChallenge,
     headers: Vec<(&'static str, String)>,
     location_host: Option<String>,
+    location_port: Option<u16>,
     body_bytes: usize,
     body_cut: bool,
     first_byte: Duration,
@@ -448,17 +452,19 @@ async fn converse(
                 .iter()
                 .filter_map(|value| value.to_str().ok()),
         );
-        let location_host = response
+        let (location_port, location_host) = response
             .headers()
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok())
-            .and_then(location_host);
+            .and_then(location_parts)
+            .map_or((None, None), |(port, host)| (Some(port), Some(host)));
         let (body_bytes, body_cut) = discard(response.into_body(), body_limit).await;
         Ok(Reply {
             status,
             proxy_challenge,
             headers,
             location_host,
+            location_port,
             body_bytes,
             body_cut,
             first_byte,
@@ -620,7 +626,13 @@ fn printable(bytes: &[u8]) -> String {
 /// Only `scheme://authority` is parsed. The scheme is matched without regard to case, and the text is
 /// cut at the first `/`, `?` or `#` after the `//`, so the path, the query and the fragment (a signed
 /// redirect can run to a thousand characters of them) are never read or judged.
+#[cfg(test)]
 fn location_host(value: &str) -> Option<String> {
+    location_parts(value).map(|(_, host)| host)
+}
+
+/// The default port of the scheme and the host of an absolute `Location`, read as `location_host` is.
+fn location_parts(value: &str) -> Option<(u16, String)> {
     if value.len() > MAX_LOCATION {
         return None;
     }
@@ -643,9 +655,10 @@ fn location_host(value: &str) -> Option<String> {
     let parsed = Target::parse(&format!("{scheme}://{authority}"))
         .ok()
         .filter(Target::is_url)?;
+    let port = if scheme == "http" { 80 } else { 443 };
     match parsed.host() {
-        Host::Name(name) => Some(name.clone()),
-        other => Some(other.to_string()),
+        Host::Name(name) => Some((port, name.clone())),
+        other => Some((port, other.to_string())),
     }
 }
 

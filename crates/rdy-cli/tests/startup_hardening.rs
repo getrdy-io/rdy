@@ -30,6 +30,7 @@ mod unix {
     use std::path::Path;
     use std::process::{Command, Output};
 
+    use super::common::NoProxyEnv;
     use super::{common, listed};
 
     const SPEC: &str = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-platform\nchecks:\n  - id: host.cpu\n    min: 8\n    severity: block\n    fix: Use a node with at least 8 vCPUs.\n";
@@ -41,6 +42,7 @@ mod unix {
             .arg(env!("CARGO_BIN_EXE_rdy"))
             .args(args)
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .output()
             .unwrap_or_else(|e| panic!("sh did not start rdy: {e}"))
     }
@@ -141,6 +143,7 @@ mod unix {
                     .args(args)
                     .current_dir(dir.path())
                     .env_remove("RDY_PROGRESS")
+                    .no_proxy_env()
                     .env_remove("RDY_KEY_PASSWORD")
                     .output()
                     .unwrap_or_else(|e| panic!("sh did not start rdy: {e}")),
@@ -181,6 +184,7 @@ mod windows {
         let out = Command::new(env!("CARGO_BIN_EXE_rdy"))
             .arg("version")
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .output()
             .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"));
         let stderr = String::from_utf8_lossy(&out.stderr);

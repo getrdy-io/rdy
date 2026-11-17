@@ -310,20 +310,38 @@ impl Class {
                     )
                 }
             }
-            Self::ProxyAuthRequired => match detail {
-                Some("negotiate") => format!(
-                    "The proxy wants integrated sign-in (Negotiate or NTLM) for {at}, which rdy does not attempt. Ask the proxy team to allow {host} without sign-in from this machine."
-                ),
-                Some("rejected") => "The proxy rejected the user name or password in the proxy URL (407). Check them, and write special characters as percent escapes (an at sign is %40). Then run rdy again with the corrected `HTTPS_PROXY`.".to_owned(),
-                _ => "The proxy wants a user name and password (407). Put them in the proxy URL, as in `HTTPS_PROXY=http://user:password@proxy.example:3128`, then run rdy again.".to_owned(),
-            },
+            Self::ProxyAuthRequired => {
+                // The detail is a word and the variable the proxy was read from, as `rejected HTTPS_PROXY`.
+                let (word, var) = detail
+                    .and_then(|d| d.split_once(' '))
+                    .or(detail.map(|d| (d, "HTTPS_PROXY")))
+                    .unwrap_or(("needed", "HTTPS_PROXY"));
+                match word {
+                    "negotiate" => format!(
+                        "The proxy wants integrated sign-in (Negotiate or NTLM) for {at}, which rdy does not attempt. Ask the proxy team to allow {host} without sign-in from this machine."
+                    ),
+                    "rejected" => format!(
+                        "The proxy rejected the user name or password in the proxy URL (407). Check them, and write special characters as percent escapes (an at sign is %40). Then run rdy again with the corrected `{var}`."
+                    ),
+                    _ => format!(
+                        "The proxy wants a user name and password (407). Put them in the proxy URL, as in `{var}=http://user:password@proxy.example:3128`, then run rdy again."
+                    ),
+                }
+            }
             Self::ProxyRefused => {
                 let status = detail.unwrap_or("an error status");
                 format!(
                     "The proxy answered {status} to the tunnel for {at}. Ask the proxy team why it will not open it. 502 and 504 usually mean the proxy cannot reach {host}, so check DNS and the route on the proxy."
                 )
             }
-            Self::ProxyBadReply => "The proxy address did not answer like an HTTP proxy. Check that `HTTPS_PROXY` points at the proxy's HTTP port, not a TLS, SOCKS or other port.".to_owned(),
+            Self::ProxyBadReply => {
+                let var = detail
+                    .filter(|d| rdy_engine::probe::PROXY_ENV.contains(d))
+                    .unwrap_or("HTTPS_PROXY");
+                format!(
+                    "The proxy address did not answer like an HTTP proxy. Check that `{var}` points at the proxy's HTTP port, not a TLS, SOCKS or other port."
+                )
+            }
             Self::ProxyUnreachable => "rdy could not connect to the proxy. Check the host and port in `HTTPS_PROXY` or `HTTP_PROXY`, and that a firewall lets this machine reach the proxy. If the product does not use a proxy here, unset both variables.".to_owned(),
             Self::Timeout => format!(
                 "A step for {at} ran out of time. Run again, and if it repeats check the nameservers this machine uses and the path to {host}."

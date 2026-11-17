@@ -145,10 +145,14 @@ pub(super) struct HttpView {
     pub(super) total: Duration,
     /// The statuses the spec accepts, or empty for the default (see [`HttpView::accepted`]).
     pub(super) expected: Vec<u16>,
-    /// `true` when the request went through the proxy.
-    pub(super) via_proxy: bool,
+    /// `true` when an `http://` request went to the proxy in the absolute form. A 403 to that request is
+    /// the proxy's own answer (no tunnel exists to say otherwise). A 403 inside a `CONNECT` tunnel is the
+    /// server's, and the direct rule applies.
+    pub(super) absolute_form: bool,
     /// The host a redirect points at, from its `Location`: host only, never followed.
     pub(super) location_host: Option<String>,
+    /// The default port of the redirect's scheme.
+    pub(super) location_port: Option<u16>,
 }
 
 impl HttpView {
@@ -157,11 +161,11 @@ impl HttpView {
     /// the direct route, and a 5xx says the server or a proxy in front is failing, so both fail.
     pub(super) fn accepted(&self) -> bool {
         if self.expected.is_empty() {
-            // A 403 through the proxy is most likely the proxy's own allow list: it fails, as
+            // A 403 to an absolute-form request is most likely the proxy's own allow list: it fails, as
             // `proxy_403`, unless the spec lists 403 (the server really answers it).
             (200..500).contains(&self.status)
                 && self.status != 407
-                && !(self.via_proxy && self.status == 403)
+                && !(self.absolute_form && self.status == 403)
         } else {
             self.expected.contains(&self.status)
         }
@@ -209,6 +213,8 @@ pub(super) struct Probed {
     /// The proxy the endpoint was tried through, as `http://host:port` with no user info. `None` for a
     /// direct endpoint.
     pub(super) via_proxy: Option<String>,
+    /// The environment variable the proxy was read from, when known.
+    pub(super) proxy_var: Option<&'static str>,
     pub(super) ending: Ending,
 }
 
@@ -225,6 +231,7 @@ impl Probed {
             tls: None,
             http: None,
             via_proxy: None,
+            proxy_var: None,
             ending: Ending::NotTried("not started"),
         }
     }
@@ -374,10 +381,12 @@ pub(super) async fn probe(
     trust: Trust,
     queued: usize,
     proxy: Option<String>,
+    proxy_var: Option<&'static str>,
 ) -> Result<Probed, CheckError> {
     let tls_wanted = wants_tls(spec);
     let mut out = Probed::new(spec, tls_wanted);
     out.via_proxy = proxy;
+    out.proxy_var = proxy_var;
     let left = ctx.remaining();
     if left < RESERVE + MIN_TO_START {
         out.ending = Ending::NotTried(OUT_OF_TIME);
@@ -437,7 +446,7 @@ async fn http_stage(
         .route(route);
     match ctx.probe().http(request).await {
         Ok(reply) => finish_http(out, spec, method, &reply),
-        Err(error) => out.ending = failed(error)?,
+        Err(error) => out.ending = failed(error, out)?,
     }
     Ok(())
 }
@@ -454,12 +463,13 @@ fn finish_http(out: &mut Probed, spec: &Endpoint, method: HttpMethod, reply: &Ht
             .as_ref()
             .map(|list| list.iter().map(|s| s.get()).collect())
             .unwrap_or_default(),
-        via_proxy: out.via_proxy.is_some(),
+        absolute_form: out.via_proxy.is_some() && spec.target.scheme() == Some("http"),
         location_host: reply.location_host.clone(),
+        location_port: reply.location_port,
     };
     out.ending = if view.accepted() {
         Ending::Reached
-    } else if view.via_proxy && view.status == 403 {
+    } else if view.absolute_form && view.status == 403 {
         // The proxy's allow list is the likely cause. The fix says what to do if it was the server.
         Ending::Failed(Class::ProxyForbidden, Some("request".to_owned()))
     } else {
@@ -477,9 +487,25 @@ fn route_of(out: &Probed) -> Route {
     }
 }
 
-/// How an endpoint ends when a probe call fails.
-fn failed(error: ProbeError) -> Result<Ending, CheckError> {
+/// How an endpoint ends when a probe call fails. Through the proxy a failure to connect or to resolve
+/// is the proxy's (the endpoint's name resolves at the proxy), never `refused`, `blackhole` or `dns` for
+/// the endpoint. The proxy classes that name a variable carry the one the proxy was read from.
+fn failed(error: ProbeError, out: &Probed) -> Result<Ending, CheckError> {
+    if out.via_proxy.is_some()
+        && matches!(
+            error,
+            ProbeError::Net(NetFailure::NotConnected { .. } | NetFailure::Dns { .. })
+        )
+    {
+        return Ok(Ending::Failed(Class::ProxyUnreachable, None));
+    }
     let (class, detail) = Class::of_error(error)?;
+    let var = out.proxy_var.unwrap_or("HTTPS_PROXY");
+    let detail = match (class, detail) {
+        (Class::ProxyAuthRequired, Some(word)) => Some(format!("{word} {var}")),
+        (Class::ProxyBadReply, _) => Some(var.to_owned()),
+        (_, detail) => detail,
+    };
     Ok(Ending::Failed(class, detail))
 }
 
@@ -511,7 +537,7 @@ async fn stages(
                 out.lookup = Some((took, ips.len() - v6, v6));
             }
             Err(error) => {
-                out.ending = failed(error)?;
+                out.ending = failed(error, out)?;
                 return Ok(());
             }
         }
@@ -544,14 +570,14 @@ async fn stages(
                 }
                 out.ending = Ending::Failed(Class::of_connect(outcome), first_silent(out));
             }
-            Err(error) => out.ending = failed(error)?,
+            Err(error) => out.ending = failed(error, out)?,
         }
         return Ok(());
     }
 
     match ctx.probe().tcp(target, route).await {
         Ok(report) => finish_tcp(out, &report),
-        Err(error) => out.ending = failed(error)?,
+        Err(error) => out.ending = failed(error, out)?,
     }
     Ok(())
 }
