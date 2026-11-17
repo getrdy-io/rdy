@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-limit-default-low"
+summary = "A default limit of 512Mi under a container max of 64Gi"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

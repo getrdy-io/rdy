@@ -1,0 +1,12 @@
+schema = 1
+name = "containerd-v3-snapshotter"
+summary = "containerd 2.0.1 with a version 3 config on the native snapshotter; the spec wants overlay2"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

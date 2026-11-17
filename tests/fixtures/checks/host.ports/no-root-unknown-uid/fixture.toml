@@ -1,0 +1,12 @@
+schema = 1
+name = "no-root-unknown-uid"
+summary = "A non-root run that cannot read /proc/self/status: rdy lists no process and the owner is unknown"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = false
+network = false
+kube = false

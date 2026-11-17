@@ -2,9 +2,6 @@
 # Kubernetes. The customer runs rdy, copies the report file out on a USB
 # stick, and sends it to the vendor by hand. Nothing here needs network
 # access to the public internet. The only endpoint is an internal mirror.
-#
-# host.kernel and host.cgroups are not built yet, so a run
-# reports them as not run and the verdict is NOT READY until they ship.
 apiVersion: rdy/v1
 kind: Readiness
 metadata:

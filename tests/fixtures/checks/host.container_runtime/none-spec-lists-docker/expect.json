@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker",
+      "containerd"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker",
+        "containerd"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Install docker or containerd with your package manager, then run `systemctl enable --now docker`.",
+    "level": "fail",
+    "message": "No allowed container runtime was found. The spec needs docker or containerd.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": []
+    },
+    "partial": null
+  }
+}

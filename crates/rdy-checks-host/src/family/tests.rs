@@ -208,15 +208,7 @@ fn build_refuses_an_id_the_family_does_not_have() {
 #[test]
 fn these_ids_are_still_stubs_and_the_planner_skips_them() {
     // Delete an id here in the ticket that writes its real check.
-    assert_eq!(
-        HostFamily::stub_ids(),
-        [
-            "host.ports",
-            "host.container_runtime",
-            "host.cgroups",
-            "host.kernel",
-        ]
-    );
+    assert!(HostFamily::stub_ids().is_empty());
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
@@ -273,6 +265,46 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_kernel_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.kernel",
+        "min": "5.4",
+        "distro_min": {"rhel": "4.18.0-305"},
+        "modules": ["overlay", "br_netfilter"],
+        "btf": true
+    }))
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.kernel");
+    assert_eq!(built.check.info().summary, "Kernel version and modules");
+    assert!(!HostFamily::stub_ids().contains(&"host.kernel"));
+    // A stub reports an error on Linux. Only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.kernel/pass",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.kernel",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
 }
 
 #[test]
@@ -385,38 +417,6 @@ fn host_security_agents_builds_the_real_check_from_a_spec_entry() {
 }
 
 #[test]
-fn host_time_sync_builds_the_real_check_with_the_ntp_servers_as_its_hosts() {
-    let entry: CheckSpec = serde_json::from_value(json!({
-        "id": "host.time_sync",
-        "ntp_servers": ["192.0.2.10", "time.acme.example:1123"],
-    }))
-    .expect("an entry");
-    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
-    let built = HostFamily
-        .build(&entry, entry.decode_params(), &spec)
-        .expect("the entry builds");
-    assert_eq!(built.check.info().id, "host.time_sync");
-    assert_eq!(
-        built.check.info().peers,
-        [rdy_engine::check::PeerClass::NtpServers]
-    );
-    let hosts: Vec<String> = built
-        .hosts
-        .iter()
-        .map(|t| format!("{}:{}", t.host(), t.port()))
-        .collect();
-    assert_eq!(hosts, ["192.0.2.10:123", "time.acme.example:1123"]);
-    // Without ntp_servers the host set is empty.
-    let plain: CheckSpec =
-        serde_json::from_value(json!({"id": "host.time_sync", "max_skew": "2s"})).expect("entry");
-    let built = HostFamily
-        .build(&plain, plain.decode_params(), &spec)
-        .expect("the entry builds");
-    assert!(built.hosts.is_empty());
-    assert!(!HostFamily::stub_ids().contains(&"host.time_sync"));
-}
-
-#[test]
 fn host_sysctl_builds_the_real_check_and_it_gives_a_finding() {
     let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
     let entry: CheckSpec = serde_json::from_value(
@@ -457,4 +457,113 @@ fn host_sysctl_builds_the_real_check_and_it_gives_a_finding() {
         "{}",
         finding.message
     );
+}
+
+#[test]
+fn host_ports_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.ports",
+        "free": [6443, {"port": 9100, "bind": "loopback"}, 6443],
+        "udp_free": [8472],
+        "allow_owner": ["acme-controller-manager"]
+    }))
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.ports");
+    assert_eq!(built.check.info().summary, "Required ports free");
+    assert!(!HostFamily::stub_ids().contains(&"host.ports"));
+    // The only check that walks the fd directories of other processes (ADR 0040).
+    assert!(
+        built
+            .check
+            .info()
+            .reads
+            .contains(&rdy_engine::check::FD_WALK)
+    );
+    let ports = Ports::from_params(match &entry.decode_params() {
+        CheckParams::HostPorts(p) => p,
+        other => panic!("not host.ports: {other:?}"),
+    });
+    assert_eq!(ports.tcp_ports(), [6443, 9100]);
+    assert_eq!(ports.udp_ports(), [8472]);
+}
+
+#[test]
+fn host_cgroups_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.cgroups", "version": "v2", "controllers": ["cpu", "memory"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.cgroups");
+    assert_eq!(built.check.info().summary, "cgroup version and controllers");
+    assert!(!HostFamily::stub_ids().contains(&"host.cgroups"));
+    // The helper's reads are declared, or the cgroup files would be refused at run time.
+    for path in crate::cgroup::READS {
+        assert!(built.check.info().reads.contains(&path), "{path}");
+    }
+
+    // A stub reports the same id, so run it: only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.cgroups/v2-ok",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.cgroups",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
+    assert_eq!(
+        finding.message,
+        "cgroup v2 in use, controllers `cpu` and `memory` available"
+    );
+}
+
+#[test]
+fn host_time_sync_builds_the_real_check_with_the_ntp_servers_as_its_hosts() {
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.time_sync",
+        "ntp_servers": ["192.0.2.10", "time.acme.example:1123"],
+    }))
+    .expect("an entry");
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.time_sync");
+    assert_eq!(
+        built.check.info().peers,
+        [rdy_engine::check::PeerClass::NtpServers]
+    );
+    let hosts: Vec<String> = built
+        .hosts
+        .iter()
+        .map(|t| format!("{}:{}", t.host(), t.port()))
+        .collect();
+    assert_eq!(hosts, ["192.0.2.10:123", "time.acme.example:1123"]);
+    // Without ntp_servers the host set is empty.
+    let plain: CheckSpec =
+        serde_json::from_value(json!({"id": "host.time_sync", "max_skew": "2s"})).expect("entry");
+    let built = HostFamily
+        .build(&plain, plain.decode_params(), &spec)
+        .expect("the entry builds");
+    assert!(built.hosts.is_empty());
+    assert!(!HostFamily::stub_ids().contains(&"host.time_sync"));
 }
