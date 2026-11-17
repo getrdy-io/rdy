@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/policies.kyverno.io/v1/validatingpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "policies.kyverno.io/v1",
+    "kind": "ValidatingPolicyList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": []
+  }
+}
