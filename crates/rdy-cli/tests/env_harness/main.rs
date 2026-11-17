@@ -10,8 +10,8 @@
 //! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
-//! Not here yet: `report.html` (M1-077 built the renderer; the run does not write it yet). `driver` says
-//! what else the run does not do.
+//! `report.html` is rendered here from the normalised report for the envs in `HTML_ENVS` (the run does not
+//! write it with `--no-report`). `driver` says what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
@@ -38,6 +38,9 @@ use families::Row;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
+/// The envs that have a `golden/report.html` (08 section 3). Add the name when the env lands.
+const HTML_ENVS: &[&str] = &["all-pass", "warnings-only", "all-block"];
+
 // ---- environments -------------------------------------------------------------------------------
 
 /// The result schema, rooted at the report.
@@ -56,6 +59,42 @@ fn host_min_is_found() -> TestResult {
     assert!(
         names.iter().any(|name| name == "host-min"),
         "env_names found {names:?}"
+    );
+    Ok(())
+}
+
+/// 31.3 GiB against `min: 32Gi` passes with the tolerance note (M1-117 exit test), and every check of the
+/// all-pass env passes: no skip, no partial result, so the golden cannot hide a check that did not run.
+#[test]
+fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
+    let run = driver::run_env("all-pass", 1)?;
+    assert_eq!(run.report.exit_code, 0);
+    let ids: Vec<&str> = run.report.checks.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids.len(), 14, "checks that ran: {ids:?}");
+    for check in &run.report.checks {
+        assert_eq!(
+            check.status,
+            rdy_spec::result::Status::Pass,
+            "{}: {}",
+            check.key,
+            check.message
+        );
+        assert!(check.partial.is_none(), "{} is partial", check.key);
+    }
+    let memory = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "host.memory")
+        .ok_or("host.memory did not run")?;
+    assert_eq!(
+        memory.message,
+        "31.3 GiB found, 32 GiB needed, inside the 5% tolerance"
+    );
+    assert!(
+        memory.notes.iter().any(|n| n.contains("tolerance_percent")),
+        "{:?}",
+        memory.notes
     );
     Ok(())
 }
@@ -135,14 +174,29 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
             fixtures_dir().join(format!("envs/{env}/golden/terminal.txt")),
             &one.terminal,
         );
+        // 08 section 3: HTML goldens exist for these envs only. The page is rendered from the normalised
+        // report, as `render_html` gets it in a run, through a redactor with a fixed tag key.
+        if HTML_ENVS.contains(&env.as_str()) {
+            assert_golden(
+                fixtures_dir().join(format!("envs/{env}/golden/report.html")),
+                driver::report_html(&golden)?,
+            );
+        } else {
+            assert!(
+                !fixtures_dir()
+                    .join(format!("envs/{env}/golden/report.html"))
+                    .exists(),
+                "env {env} has a report.html golden, and 08 section 3 gives one to {HTML_ENVS:?} only"
+            );
+        }
         assert_eq!(
             one.terminal.lines().last(),
             Some(last_line(&one.report.checks).as_str()),
             "env {env}: the verdict is the last line"
         );
 
-        // The same environment at one job and at eight gives the same report. With one check this proves
-        // little; M1-117's all-pass env is what gives it something to order.
+        // The same environment at one job and at eight gives the same report. Host-min has one check;
+        // all-pass has fourteen, so the order of completion has something to change.
         let mut serial = driver::run_env(&env, 1)?.report;
         let mut parallel = driver::run_env(&env, 8)?.report;
         normalize_across_jobs(&mut serial);

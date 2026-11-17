@@ -22,6 +22,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rdy_cli::RunHooks;
 use rdy_engine::check::Os;
 use rdy_engine::probe::{NativeCall, NativeValue, UnameInfo};
+use rdy_engine::redact::{Redactor, TagKey};
+use rdy_engine::report::render_html;
 use rdy_engine::testing::{Fixture, Replay, TestRun, fixtures_dir, manifest_violations};
 use rdy_spec::result::Report;
 use serde_json::Value;
@@ -189,7 +191,8 @@ fn machine(fixture: &Fixture, env: &str) -> Replay {
                 "/proc/self/status",
                 format!(
                     "Name:\trdy\nUid:\t{id}\t{id}\t{id}\t{id}\nGid:\t{id}\t{id}\t{id}\t{id}\n\
-                     CapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\n"
+                     CapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\n{}",
+                    own_status_lines(env)
                 ),
             )
             .file("/proc/self/auxv", auxv()),
@@ -199,12 +202,29 @@ fn machine(fixture: &Fixture, env: &str) -> Replay {
     "5.14.0-362.el9.x86_64".clone_into(&mut uname.release);
     "#1 SMP".clone_into(&mut uname.version);
     manifest.arch.clone_into(&mut uname.machine);
+    // `web` is the server a scripted `serve: web` address in an env's `net.json` opens: it accepts and
+    // says nothing, in process, so no socket is opened and all five legs agree.
     replay
+        .serve_duplex("web", |_server| async {})
         .native(
             NativeCall::Hostname,
             NativeValue::Hostname(format!("{env}.example")),
         )
         .native(NativeCall::Uname, NativeValue::Uname(uname))
+}
+
+/// The lines of the env's own `root/proc/self/status` that are not about who the process is: the CPU and
+/// memory-node affinity that `host.cpu` reads. The identity lines always come from the manifest's `root`,
+/// so a fixture cannot disagree with its own caps.
+fn own_status_lines(env: &str) -> String {
+    let path = fixtures_dir().join(format!("envs/{env}/root/proc/self/status"));
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    text.lines()
+        .filter(|line| line.starts_with("Cpus_allowed") || line.starts_with("Mems_allowed"))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 /// An auxiliary vector with `AT_PHDR`, `AT_SECURE` off, and `AT_NULL`.
@@ -253,6 +273,15 @@ pub fn report_json(report: &Report) -> Result<String, String> {
     let mut text = serde_json::to_string_pretty(&sorted(value)).map_err(|e| e.to_string())?;
     text.push('\n');
     Ok(text)
+}
+
+/// The HTML page of a normalised report, as the golden `report.html` holds it. The redactor's tag key is
+/// fixed, so the page is the same on every run.
+pub fn report_html(report: &Report) -> Result<String, String> {
+    let redacted = Redactor::new(TagKey::fixed([5; 32]))
+        .redact_report(report.clone())
+        .map_err(|e| e.to_string())?;
+    render_html(&redacted).map_err(|e| e.to_string())
 }
 
 fn sorted(value: Value) -> Value {

@@ -1,0 +1,27 @@
+schema = 1
+name = "all-pass"
+summary = "RHEL 9 VM with 32 GiB nominal memory showing 31.3 GiB, xfs and direct egress, with every registered check in order"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = [
+  "host.os", "host.memory", "host.cpu", "host.disk", "host.kernel", "host.cgroups", "host.sysctl",
+  "host.lsm", "host.time_sync", "host.ports", "host.security_agents", "host.container_runtime",
+  "net.egress", "net.mtu",
+]
+spec = "spec.yaml"
+
+[caps]
+root = true
+network = true
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000002"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "ready"
+exit_code = 0
