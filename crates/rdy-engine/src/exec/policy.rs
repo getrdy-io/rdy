@@ -493,6 +493,14 @@ impl Cmd {
         self
     }
 
+    /// Lowers the wall-clock limit to `limit` if that is shorter. It never raises it, so a check can
+    /// cut a command to the time it has left but cannot give it more than its table form allows.
+    #[must_use]
+    pub fn at_most(mut self, limit: Duration) -> Self {
+        self.timeout = self.timeout.min(limit);
+        self
+    }
+
     /// Sets how many bytes of stdout to keep. At most [`MAX_STDOUT_CAP`].
     #[must_use]
     pub fn stdout_cap(mut self, bytes: usize) -> Self {

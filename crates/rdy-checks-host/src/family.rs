@@ -1,12 +1,10 @@
 //! The host family: the OS support table, one static [`CheckInfo`] per check, and a stub check.
 
-use std::time::Duration;
-
 use rdy_engine::check::{
-    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
-    OsSupport, Support, Want,
+    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckOutcome, Need, OsSupport, Support,
+    Want,
 };
-use rdy_engine::family::{BuildError, Built, Family};
+use rdy_engine::family::{BuildError, Built, Family, HostSet};
 use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
@@ -23,6 +21,7 @@ use crate::os::{self, OsCheck};
 use crate::ports::{self, Ports};
 use crate::security_agents::{self, SecurityAgents};
 use crate::sysctl::{self, Sysctl};
+use crate::time_sync::{self, TimeSync};
 
 #[cfg(test)]
 mod tests;
@@ -49,45 +48,6 @@ pub(crate) const ROOT: &[Want] = &[Want {
     evidence_only: false,
 }];
 
-/// A host check's static facts. The manifest fields stay empty until the real check declares them.
-const fn info(
-    id: &'static str,
-    summary: &'static str,
-    meta: CheckMeta,
-    secs: u64,
-    wants: &'static [Want],
-) -> CheckInfo {
-    CheckInfo {
-        id,
-        family: "host",
-        summary,
-        meta,
-        needs: &[],
-        wants,
-        default_timeout: Some(Duration::from_secs(secs)),
-        os: OS,
-        reads: &[],
-        statfs: &[],
-        env: &[],
-        commands: &[],
-        peers: &[],
-    }
-}
-
-// Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
-// The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
-
-static TIME_SYNC: CheckInfo = info(
-    "host.time_sync",
-    "Clock sync state and offset",
-    CheckMeta {
-        title: "Clock sync",
-        remediation: "Turn on time sync with `timedatectl set-ntp true`, or install chrony with `dnf install chrony && systemctl enable --now chronyd`, then run `chronyc makestep`. On VMs also enable host time sync (VMware Tools, Hyper-V integration services).",
-    },
-    5,
-    &[],
-);
-
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &disk::INFO,
@@ -96,7 +56,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &lsm::INFO,
     &security_agents::INFO,
     &firewall::INFO,
-    &TIME_SYNC,
+    &time_sync::INFO,
     &cpu::INFO,
     &sysctl::INFO,
     &container_runtime::INFO,
@@ -111,7 +71,7 @@ static CHECKS: [&CheckInfo; 13] = [
 ///
 /// `host.cgroups` ([`CgroupsCheck`]), `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.kernel` ([`Kernel`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.ports` ([`Ports`]), `host.security_agents` ([`SecurityAgents`]) and
-/// `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.sysctl` ([`Sysctl`]) and `host.time_sync` ([`TimeSync`]) are real. No check is a stub now ([`HostFamily::stub_ids`] is empty), and the mechanism stays for the next check that lands late.
 ///
 /// On Linux a stub that ran would report `error` with `check_failed`, which reads as a fault on the
 /// customer's machine. So the family lists its stubs in [`Family::not_built`] and the planner skips each
@@ -132,7 +92,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 1] = ["host.time_sync"];
+static STUBS: [&str; 0] = [];
 
 impl Family for HostFamily {
     fn name(&self) -> &'static str {
@@ -181,6 +141,13 @@ impl Family for HostFamily {
         }
         if let CheckParams::HostMemory(memory) = params {
             return Ok(Built::new(Box::new(Memory::from_params(&memory))));
+        }
+        if let CheckParams::HostTimeSync(time_sync) = &params {
+            // The time servers are the only hosts the check reaches, and they count toward the 64 host
+            // limit of the spec (INV-11). Nothing else feeds the host set.
+            let check = TimeSync::from_params(time_sync);
+            let hosts = HostSet::new(check.servers().iter().cloned());
+            return Ok(Built::new(Box::new(check)).with_hosts(hosts));
         }
         if let CheckParams::HostSysctl(sysctl) = &params {
             return Ok(Built::new(Box::new(Sysctl::new(sysctl))));
