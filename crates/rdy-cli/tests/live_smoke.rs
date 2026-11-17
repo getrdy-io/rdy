@@ -7,28 +7,37 @@
 //! `--allow-unsigned`.
 //!
 //! How it stays safe and fast:
-//! - The key is `--unencrypted` (no 1 GiB key derivation) and is trusted with `--key`, so the real user
-//!   and system trust stores are never read or written. `HOME` and the other profile variables point at a
-//!   temp folder anyway.
+//! - The key is `--unencrypted` (no 1 GiB key derivation) and is trusted with `--key`, and `--key` runs
+//!   read no trust store. `HOME`, `ProgramData` and the other profile variables point at a temp folder
+//!   anyway, so no run can reach a real store.
 //! - The only destination is `127.0.0.1`. The proxy variables are removed.
-//! - The closed port is a port this test bound and then released. Nothing listens on it, and the
-//!   kernel answers a connect with a refusal on all three OSes.
+//! - The closed port is held by a socket that is bound but never listens, for the whole test. Nothing else
+//!   can take it, and the kernel refuses a connect to it on all three OSes.
 //! - No cargo runs here: the binary is the one cargo built for this test target.
 // Helper functions in tests/ are not covered by clippy.toml, and a failed spawn must fail the test.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::net::TcpListener;
+use std::io::Read;
+use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod common;
 
-/// A live run on the slowest leg (a Windows refusal, a cold macOS runner) finishes well inside this.
-const RUN_LIMIT: Duration = Duration::from_secs(90);
+/// One call. A live run on the slowest leg (a Windows refusal, a cold macOS runner) takes a few seconds.
+const RUN_LIMIT: Duration = Duration::from_secs(30);
 
-/// Runs `rdy` in `dir` with a scrubbed environment and no terminal, and fails the test on a hang.
+/// Reads a pipe to its end on its own thread, so a full pipe never stalls the child.
+fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = pipe.read_to_end(&mut buf);
+        buf
+    })
+}
+
+/// Runs `rdy` in `dir` with a scrubbed environment and no terminal. A hung run is killed and fails the test.
 fn rdy(dir: &Path, args: &[&str]) -> Output {
     let home = dir.join("home");
     std::fs::create_dir_all(&home).expect("home dir");
@@ -39,6 +48,7 @@ fn rdy(dir: &Path, args: &[&str]) -> Output {
         .env("USERPROFILE", &home)
         .env("APPDATA", &home)
         .env("LOCALAPPDATA", &home)
+        .env("ProgramData", &home)
         .env("XDG_CONFIG_HOME", &home)
         .env("XDG_DATA_HOME", &home)
         .env("NO_COLOR", "1")
@@ -52,19 +62,30 @@ fn rdy(dir: &Path, args: &[&str]) -> Output {
         .env_remove("all_proxy")
         .env_remove("RDY_KEY_PASSWORD")
         .env_remove("RDY_PROGRESS")
+        .env_remove("RUST_LOG")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let child = cmd.spawn().expect("the rdy binary starts");
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-    let out = rx
-        .recv_timeout(RUN_LIMIT)
-        .unwrap_or_else(|_| panic!("rdy {args:?} did not finish in {RUN_LIMIT:?}"))
-        .expect("rdy finishes");
-    common::quiet(out)
+    let mut child = cmd.spawn().expect("the rdy binary starts");
+    let out_reader = drain(child.stdout.take().expect("stdout pipe"));
+    let err_reader = drain(child.stderr.take().expect("stderr pipe"));
+    let deadline = Instant::now() + RUN_LIMIT;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("wait for rdy") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("rdy {args:?} did not finish in {RUN_LIMIT:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    common::quiet(Output {
+        status,
+        stdout: out_reader.join().expect("stdout reader"),
+        stderr: err_reader.join().expect("stderr reader"),
+    })
 }
 
 fn code(out: &Output) -> i32 {
@@ -73,6 +94,12 @@ fn code(out: &Output) -> i32 {
 
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// The JSON document on stdout.
+fn json(out: &Output) -> serde_json::Value {
+    serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is JSON ({e}): {}", stderr(out)))
 }
 
 /// A spec with one `net.egress` check on a loopback port: TCP connect only, no proxy.
@@ -95,15 +122,27 @@ fn sign(dir: &Path, name: &str, body: &str) -> PathBuf {
     dir.join("smoke.pub")
 }
 
-/// A port nothing listens on: bound, noted and released. A connect to it is refused.
-fn closed_port() -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
-    let port = listener.local_addr().expect("local addr").port();
-    drop(listener);
-    port
+/// A port nothing listens on: a socket bound to it and never put into listening. The caller keeps it
+/// alive, so no other process can take the port, and a connect to it is refused.
+fn closed_port() -> (socket2::Socket, u16) {
+    let socket = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .expect("socket");
+    let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
+    socket.bind(&addr.into()).expect("bind a loopback port");
+    let port = socket
+        .local_addr()
+        .expect("local addr")
+        .as_socket()
+        .expect("an ip address")
+        .port();
+    (socket, port)
 }
 
-/// Runs a spec with `--key` and no report files. `extra` is added to the arguments.
+/// Runs a spec with `--key`, `--json` and no report files. `extra` is added to the arguments.
 fn run_with_key(dir: &Path, name: &str, key: &Path, extra: &[&str]) -> Output {
     let mut args = vec![
         "run",
@@ -111,9 +150,25 @@ fn run_with_key(dir: &Path, name: &str, key: &Path, extra: &[&str]) -> Output {
         "--key",
         key.to_str().expect("utf-8 path"),
         "--no-report",
+        "--json",
     ];
     args.extend_from_slice(extra);
     rdy(dir, &args)
+}
+
+/// Asserts the first check is `net.egress` with this status and a refused first endpoint. Windows may
+/// retry a refused loopback connect until the attempt times out, so `blackhole` is accepted there only.
+fn assert_refused(doc: &serde_json::Value, status: &str) {
+    let check = &doc["checks"][0];
+    assert_eq!(check["id"], "net.egress", "{doc}");
+    assert_eq!(check["status"], status, "{doc}");
+    let class = check["observed"]["endpoints"][0]["class"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        class == "refused" || (cfg!(windows) && class == "blackhole"),
+        "class {class}: {doc}"
+    );
 }
 
 #[test]
@@ -125,7 +180,7 @@ fn live_exit_codes_0_1_2_and_64() {
     // handshake from the backlog, and a connect that completes is all the check measures.
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
     let open = listener.local_addr().expect("local addr").port();
-    let closed = closed_port();
+    let (closed_socket, closed) = closed_port();
     assert_ne!(open, closed);
 
     let key = sign(dir, "open", &spec_text(open, "block"));
@@ -133,23 +188,27 @@ fn live_exit_codes_0_1_2_and_64() {
     sign(dir, "block", &spec_text(closed, "block"));
 
     // An open port: READY.
-    let out = run_with_key(dir, "open.yaml", &key, &["--json"]);
+    let out = run_with_key(dir, "open.yaml", &key, &[]);
     assert_eq!(code(&out), 0, "{}", stderr(&out));
-    let json = String::from_utf8_lossy(&out.stdout);
-    assert!(json.contains("net.egress"), "{json}");
+    let doc = json(&out);
+    assert_eq!(doc["checks"][0]["id"], "net.egress", "{doc}");
+    assert_eq!(doc["checks"][0]["status"], "pass", "{doc}");
 
     // A closed port with severity warn: READY with warnings.
     let out = run_with_key(dir, "warn.yaml", &key, &[]);
     assert_eq!(code(&out), 1, "{}", stderr(&out));
+    assert_refused(&json(&out), "warn");
 
     // A closed port with severity block: NOT READY.
     let out = run_with_key(dir, "block.yaml", &key, &[]);
     assert_eq!(code(&out), 2, "{}", stderr(&out));
+    assert_refused(&json(&out), "block");
 
     // An unsigned spec is refused.
     std::fs::write(dir.join("unsigned.yaml"), spec_text(open, "block")).expect("write");
     let out = run_with_key(dir, "unsigned.yaml", &key, &[]);
     assert_eq!(code(&out), 64, "{}", stderr(&out));
+    assert_eq!(json(&out)["error"]["code"], "spec_unsigned");
 
     // One byte flipped after signing is refused, and --allow-unsigned does not change that.
     let mut bytes = std::fs::read(dir.join("open.yaml")).expect("read");
@@ -159,14 +218,15 @@ fn live_exit_codes_0_1_2_and_64() {
         .expect("the fix text");
     bytes[at] ^= 0x20; // 'O' becomes 'o': still valid YAML, different bytes
     std::fs::write(dir.join("open.yaml"), bytes).expect("write");
-    let out = run_with_key(dir, "open.yaml", &key, &[]);
-    assert_eq!(code(&out), 64, "{}", stderr(&out));
-    let out = run_with_key(dir, "open.yaml", &key, &["--allow-unsigned"]);
-    assert_eq!(code(&out), 64, "{}", stderr(&out));
-    let out = rdy(
-        dir,
-        &["run", "open.yaml", "--allow-unsigned", "--no-report"],
-    );
-    assert_eq!(code(&out), 64, "{}", stderr(&out));
+    for extra in [&[][..], &["--allow-unsigned"][..]] {
+        let out = run_with_key(dir, "open.yaml", &key, extra);
+        assert_eq!(code(&out), 64, "{extra:?}: {}", stderr(&out));
+        assert_eq!(
+            json(&out)["error"]["code"],
+            "spec_signature_invalid",
+            "{extra:?}"
+        );
+    }
+    drop(closed_socket);
     drop(listener);
 }
