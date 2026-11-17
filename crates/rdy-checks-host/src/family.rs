@@ -11,6 +11,7 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::cgroups::{self, CgroupsCheck};
 use crate::container_runtime::{self, ContainerRuntimeCheck};
 use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
@@ -86,16 +87,6 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static CGROUPS: CheckInfo = info(
-    "host.cgroups",
-    "cgroup version and controllers",
-    CheckMeta {
-        title: "cgroups",
-        remediation: "Boot with the cgroup version the vendor needs. On the RHEL family, run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot. On Debian and Ubuntu, add the argument to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, run `update-grub` and reboot.",
-    },
-    2,
-    &[],
-);
 
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
@@ -109,7 +100,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &cpu::INFO,
     &sysctl::INFO,
     &container_runtime::INFO,
-    &CGROUPS,
+    &cgroups::INFO,
     &os::INFO,
     &kernel::INFO,
 ];
@@ -118,7 +109,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.kernel` ([`Kernel`]), `host.lsm` ([`Lsm`]),
+/// `host.cgroups` ([`CgroupsCheck`]), `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.kernel` ([`Kernel`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.ports` ([`Ports`]), `host.security_agents` ([`SecurityAgents`]) and
 /// `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
@@ -141,7 +132,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 2] = ["host.time_sync", "host.cgroups"];
+static STUBS: [&str; 1] = ["host.time_sync"];
 
 impl Family for HostFamily {
     fn name(&self) -> &'static str {
@@ -175,6 +166,9 @@ impl Family for HostFamily {
             return Ok(Built::new(Box::new(ContainerRuntimeCheck::from_params(
                 runtime,
             ))));
+        }
+        if let CheckParams::HostCgroups(cgroups) = &params {
+            return Ok(Built::new(Box::new(CgroupsCheck::from_params(cgroups))));
         }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
