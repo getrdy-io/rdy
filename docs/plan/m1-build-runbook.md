@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-50: M1 181 tickets, 400.5 h, 336 h core; M2 130 tickets, 465.5 h; all milestones 411 tickets,
-1379.5 h, 1315 h core.
+correction-52: M1 182 tickets, 402.5 h, 338 h core; M2 136 tickets, 476 h; all milestones 418 tickets,
+1392 h, 1327.5 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -251,6 +251,13 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   `--allow-unsigned` page is M1-181's. 05 Surface 2 lists the `--key` file swap for M1-132. M1-098 builds
   the `auto` "direct works, proxy fails" sentence. M1-107 never uses an `HTTP_PROXY` proxy for https and
   takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation tests (4 h).
+- 51: new core M1-182: host.container_runtime stores a proxy as `ProxyUrl::origin`, so a password in a URL
+  with no scheme never reaches the report, plus a `url_userinfo` form for it; M1-138 depends on it. 05 INV-11
+  names the proxy lookup, `proxy_reach` and the direct retry. M1-107 checks `proxy_source` itself. 03 net.proxy
+  reads `daemon.json`.
+- 52: no new M1 ticket. M1-100 pins match the leaf only, and its net.tls_intercept `PENDING` row moves to
+  M1-179 as `Timeout`. 05 T3 gains the JSON control rule. New M2-131 to M2-136: JSON escapes, the fix
+  `<bdi>` override, `FixText` controls, the Java and Node stores, the verified path, the real anchor.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -264,7 +271,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-182 and M2-131, and the next correction is 51 (49 is in #85).
+- The next ticket ids are M1-183 and M2-137, and the next correction is 53 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -401,6 +408,16 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       `cni.toml` entries still marked `verified = false` against a live cluster (#78 reviews).
   - Follow-ups that correction-48 gave ids:
     - M2-130: a `RunHooks` OS override, so the env harness runs every env on every leg (#80 review).
+  - Follow-ups that correction-52 gave ids:
+    - M2-131: the JSON writer writes Cc, Cf and zero-width characters as `\u` escapes (#89 security F3).
+    - M2-132: `unicode-bidi: isolate-override` on the fix `<bdi>` (#89 security F5).
+    - M2-133: `FixText` refuses control characters at parse (#89 security F1).
+    - M2-134: net.tls_intercept reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores (#91).
+    - M2-135: the recording verifier keeps the verified path, so a pin matches any certificate on it
+      (#91 SEC-100-1).
+    - M2-136: the real trust anchor through `TrustStore` root subjects (#91 review).
+  - #91 (M1-100) and #70 (M1-179): add "backlog corrected 2026-11-17 (correction-52)" to their progress
+    lines. The second to merge deletes the net.tls_intercept `PENDING` row.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,
