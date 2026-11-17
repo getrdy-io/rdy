@@ -7,7 +7,9 @@
 //! The fields so far are the ones `rdy run` reads (M1-057): the wall clock of the run record and of
 //! the report folder name, the run id, the run deadline and the check families. None of them reaches
 //! the spec loader, so a pinned clock cannot defeat `metadata.expires`, and none touches the privilege
-//! gate, the redactor or the output folder rules. The watchdog needs no field: the binary starts it in
+//! gate, the redactor or the output folder rules. `fail_files` only turns the write of the report files
+//! into a "disk full" failure after the verdict exists: it skips a write and never loosens a folder
+//! rule, and it writes nothing the run would not write. The watchdog needs no field: the binary starts it in
 //! `entry`, and a test that calls `run` gets one that is disarmed when `run` returns (M1-176). The
 //! privilege ids need no field: the privilege snapshot reads them through the backend, so a replay backend that
 //! records `/proc/self/status` supplies them (02, "Privilege and needs").
@@ -56,8 +58,8 @@ pub struct RunHooks {
 mod tests {
     use super::RunHooks;
 
-    /// The default is "no hook": every field is `None` or `false`, so the shipped binary (which passes the default
-    /// and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
+    /// The default is "no hook": every field is `None` or `false`, so the shipped binary (which passes
+    /// the default and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
     /// one does not compile until it is listed here.
     #[test]
     fn every_field_of_the_default_hooks_is_none() {

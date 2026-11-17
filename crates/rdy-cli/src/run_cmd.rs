@@ -56,7 +56,7 @@ use rdy_spec::result::{
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes};
 
 use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
-use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
+use crate::error::{CliError, InternalKind, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
 use crate::redaction;
@@ -291,11 +291,15 @@ async fn execute(
     };
     state.claim_or_park();
     let files = match &dir {
-        Some(dir) if hooks.fail_files => Err(CliError::ReportWrite {
-            step: ReportStep::WriteFiles,
-            path: dir.path().display().to_string(),
-            reason: IoReason::DiskFull.into(),
-        }),
+        Some(dir) if hooks.fail_files => Err(report_error(
+            ReportStep::WriteFiles,
+            dir.path(),
+            ReportError::Io {
+                action: "write the report files",
+                path: dir.path().to_path_buf(),
+                source: std::io::ErrorKind::StorageFull.into(),
+            },
+        )),
         Some(dir) => write_files(dir, &loaded, &redacted),
         None => Ok(Vec::new()),
     };
