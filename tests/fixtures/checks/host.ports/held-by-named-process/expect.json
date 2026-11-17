@@ -1,0 +1,73 @@
+{
+  "entry": {
+    "free": [
+      6443,
+      10250
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        },
+        {
+          "bind": "public",
+          "port": 10250
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Port 6443/tcp is held by `kube-apiserver` (pid 812). Stop it with `systemctl stop kube-apiserver.service`, or change the product's port setting.",
+    "level": "fail",
+    "message": "Port 6443/tcp is held by `kube-apiserver` (pid 812).",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 3,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": {
+                "name": "kube-apiserver",
+                "pid": 812,
+                "unit": "kube-apiserver.service"
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 10250,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

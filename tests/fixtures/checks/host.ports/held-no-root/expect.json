@@ -1,0 +1,74 @@
+{
+  "entry": {
+    "free": [
+      6443,
+      10250
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        },
+        {
+          "bind": "public",
+          "port": 10250
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Run rdy as root to see the holder, or run `ss -ltnp 'sport = :6443'` as root.",
+    "level": "fail",
+    "message": "Port 6443/tcp is in use on 0.0.0.0. rdy could not identify the holder: it belongs to another user and rdy is not root.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": null,
+              "owner_unknown": "it belongs to another user and rdy is not root"
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 10250,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "rdy could not identify the process that holds a port."
+    }
+  }
+}

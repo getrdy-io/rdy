@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-quota-unused"
+summary = "A quota the controller has not filled in yet: no status"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

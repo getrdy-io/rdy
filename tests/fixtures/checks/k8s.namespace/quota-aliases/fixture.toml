@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-quota-aliases"
+summary = "A quota written with the short names cpu and memory"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

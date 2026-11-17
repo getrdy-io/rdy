@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v2-named-v1"
+summary = "RHEL 9 on cgroup v2 with the named name=systemd v1 hierarchy mounted beside it, which holds no controller"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

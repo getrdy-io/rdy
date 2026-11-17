@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-missing-apis-forbidden"
+summary = "A missing namespace; the group list may not be read, so OpenShift is not known"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

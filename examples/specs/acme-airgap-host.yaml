@@ -3,7 +3,7 @@
 # stick, and sends it to the vendor by hand. Nothing here needs network
 # access to the public internet. The only endpoint is an internal mirror.
 #
-# host.kernel, host.cgroups and host.time_sync are not built yet, so a run
+# host.kernel and host.time_sync are not built yet, so a run
 # reports them as not run and the verdict is NOT READY until they ship.
 apiVersion: rdy/v1
 kind: Readiness

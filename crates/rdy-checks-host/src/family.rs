@@ -11,12 +11,16 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::cgroups::{self, CgroupsCheck};
+use crate::container_runtime::{self, ContainerRuntimeCheck};
 use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::kernel::{self, Kernel};
 use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
+use crate::ports::{self, Ports};
 use crate::security_agents::{self, SecurityAgents};
 use crate::sysctl::{self, Sysctl};
 
@@ -73,16 +77,6 @@ const fn info(
 // Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
 // The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
 
-static PORTS: CheckInfo = info(
-    "host.ports",
-    "Required ports free",
-    CheckMeta {
-        title: "Free ports",
-        remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
-    },
-    5,
-    ROOT,
-);
 static TIME_SYNC: CheckInfo = info(
     "host.time_sync",
     "Clock sync state and offset",
@@ -93,61 +87,30 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static CONTAINER_RUNTIME: CheckInfo = info(
-    "host.container_runtime",
-    "Docker, containerd, Podman, CRI-O",
-    CheckMeta {
-        title: "Container runtime",
-        remediation: "Install a container runtime the vendor supports, and make its socket readable by adding the user to the `docker` group or by running as root. The runtime and the kubelet must use the same cgroup driver. For containerd, set `SystemdCgroup = true` in `/etc/containerd/config.toml`, then run `systemctl restart containerd`.",
-    },
-    5,
-    ROOT,
-);
-static CGROUPS: CheckInfo = info(
-    "host.cgroups",
-    "cgroup version and controllers",
-    CheckMeta {
-        title: "cgroups",
-        remediation: "Boot with the cgroup version the vendor needs. On the RHEL family, run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot. On Debian and Ubuntu, add the argument to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, run `update-grub` and reboot.",
-    },
-    2,
-    &[],
-);
-
-static KERNEL: CheckInfo = info(
-    "host.kernel",
-    "Kernel version and modules",
-    CheckMeta {
-        title: "Kernel",
-        remediation: "Use a kernel at or above the minimum. Load a missing module now and at boot with `modprobe br_netfilter && echo br_netfilter | sudo tee /etc/modules-load.d/vendor.conf`, using the module from the result.",
-    },
-    2,
-    &[],
-);
 
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &disk::INFO,
     &memory::INFO,
-    &PORTS,
+    &ports::INFO,
     &lsm::INFO,
     &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
     &cpu::INFO,
     &sysctl::INFO,
-    &CONTAINER_RUNTIME,
-    &CGROUPS,
+    &container_runtime::INFO,
+    &cgroups::INFO,
     &os::INFO,
-    &KERNEL,
+    &kernel::INFO,
 ];
 
 /// The `host` family: `host.disk`, `host.memory`, `host.ports`, `host.lsm`, `host.security_agents`,
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
-/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.security_agents` ([`SecurityAgents`]) and
+/// `host.cgroups` ([`CgroupsCheck`]), `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.kernel` ([`Kernel`]), `host.lsm` ([`Lsm`]),
+/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.ports` ([`Ports`]), `host.security_agents` ([`SecurityAgents`]) and
 /// `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// On Linux a stub that ran would report `error` with `check_failed`, which reads as a fault on the
@@ -169,13 +132,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 5] = [
-    "host.ports",
-    "host.time_sync",
-    "host.container_runtime",
-    "host.cgroups",
-    "host.kernel",
-];
+static STUBS: [&str; 1] = ["host.time_sync"];
 
 impl Family for HostFamily {
     fn name(&self) -> &'static str {
@@ -202,8 +159,22 @@ impl Family for HostFamily {
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
         }
+        if let CheckParams::HostPorts(ports) = &params {
+            return Ok(Built::new(Box::new(Ports::from_params(ports))));
+        }
+        if let CheckParams::HostContainerRuntime(runtime) = &params {
+            return Ok(Built::new(Box::new(ContainerRuntimeCheck::from_params(
+                runtime,
+            ))));
+        }
+        if let CheckParams::HostCgroups(cgroups) = &params {
+            return Ok(Built::new(Box::new(CgroupsCheck::from_params(cgroups))));
+        }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
+        }
+        if let CheckParams::HostKernel(kernel) = &params {
+            return Ok(Built::new(Box::new(Kernel::from_params(kernel))));
         }
         if let CheckParams::HostLsm(lsm) = &params {
             return Ok(Built::new(Box::new(Lsm::new(lsm))));

@@ -2,15 +2,16 @@
 //! (correction-21).
 //!
 //! Environments. Every directory under `tests/fixtures/envs` that has a `spec` in its `fixture.toml` is
-//! run through the engine (`driver::run_env`) with the clock, run id and environment pinned by its
-//! `[run]` table. The test compares the exit code and verdict with `[expect]`, the report with
-//! `golden/report.json` through `assert_golden`, and the report at `jobs = 1` with the report at
-//! `jobs = 8`. Adding a directory adds a run, with no code change. A directory with no `spec` is a base
-//! that other environments build on and is skipped.
+//! run through `rdy_cli::run` (`driver::run_env`, M1-086) with the clock, run id and environment pinned by
+//! its `[run]` table. The test compares the exit code and verdict with `[expect]`, the report (read from
+//! the `--json` stdout) with `golden/report.json`, the human output on stderr with `golden/terminal.txt`,
+//! both through `assert_golden`, and the report at `jobs = 1` with the report at `jobs = 8`. Adding a
+//! directory adds a run, with no code change. A directory with no `spec` is a base that other
+//! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
+//! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
-//! Not here yet: `terminal.txt` (the human renderer, M1-086), `report.html` (M1-077) and the call to
-//! `rdy_cli::run` itself (M1-086, which also regenerates the golden from `--json` stdout). `driver` says
-//! where they plug in.
+//! Not here yet: `report.html` (M1-077 built the renderer; the run does not write it yet). `driver` says
+//! what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
@@ -24,8 +25,9 @@ use std::path::Path;
 
 use completeness::{Class, Pending, findings};
 use jsonschema::Validator;
-use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want};
+use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want, current_os};
 use rdy_engine::family::{BuildError, Built, Family};
+use rdy_engine::summary::last_line;
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, fixtures_dir, normalize, normalize_across_jobs};
 use rdy_spec::check::CheckParams;
@@ -81,6 +83,16 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
     let validator = report_validator()?;
     for env in driver::env_names(&fixtures_dir())? {
         let fixture = Fixture::load(&fixtures_dir(), &format!("envs/{env}"))?;
+        // `rdy_cli::run` plans for the OS it runs on (`current_os()`), and has no hook to change that on
+        // purpose, so an environment of another OS cannot run here. Say so and move on.
+        if fixture.os() != current_os() {
+            eprintln!(
+                "env_harness: skipping env {env}: it is a {:?} machine and this is {:?}",
+                fixture.os(),
+                current_os()
+            );
+            continue;
+        }
         let manifest = fixture.manifest();
         let jobs = manifest.run.jobs.map_or(1, |jobs| jobs as usize);
 
@@ -118,6 +130,15 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
         assert_golden(
             fixtures_dir().join(format!("envs/{env}/golden/report.json")),
             text,
+        );
+        assert_golden(
+            fixtures_dir().join(format!("envs/{env}/golden/terminal.txt")),
+            &one.terminal,
+        );
+        assert_eq!(
+            one.terminal.lines().last(),
+            Some(last_line(&one.report.checks).as_str()),
+            "env {env}: the verdict is the last line"
         );
 
         // The same environment at one job and at eight gives the same report. With one check this proves
