@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-issuer-match"
+summary = "A public chain whose issuer matches expected_issuer"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

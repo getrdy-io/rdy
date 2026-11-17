@@ -15,9 +15,13 @@
 //! environment when M1-117, PR #80, lands) and checks the written page against the structure rules of
 //! M1-082. `driver` says what else the run does not do.
 //!
+//! Generated chains. `chains` runs every case of `net.tls_intercept` through `NetFamily` and the real
+//! scheduler, building the certificate chain a case's `chain.json` names with rcgen at test time (M1-100).
+//!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
 
+mod chains;
 mod completeness;
 mod driver;
 mod families;
@@ -243,9 +247,9 @@ const PENDING: &[Pending] = &[
     },
     Pending {
         check: "net.tls_intercept",
-        classes: &[Class::Pass, Class::NonPass, Class::Timeout],
-        owner: "M1-100",
-        why: "M1-099 merged the classes and tests them against loopback servers with chains generated at test time, which a static fixture file cannot hold. M1-100 adds the evidence (issuer, root hash as a placeholder, store location), the generated-chain fixture rig and the reviewed expect.json files for the classes and the timeout",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-100 added the generated-chain cases and the handshake-never-completes case (an in-memory peer that never answers the ClientHello). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget (5 s for the handshake) and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class (correction-52 adds net.tls_intercept to its row; the case needs a hang marker M1-179 accepts), and the stale-row finding then forces this row out",
     },
     Pending {
         check: "host.time_sync",
@@ -254,6 +258,82 @@ const PENDING: &[Pending] = &[
         why: "M1-179 makes the harness accept a hang the check survived (a delay or blackhole at least the check timeout in the case files, and an expect.json that holds a finding) as the Timeout class. By design (correction-37) no hang ends host.time_sync in a Timeout: each step is cut to the budget left, so a hung timedatectl or chronyc gives a bounded finding. The hung-chronyc, hung-timedatectl and silent-server-and-hung-tools cases prove that",
     },
 ];
+
+/// The level each case of `net.tls_intercept` must end at. This is the review of the `expect.json` files
+/// in one place: a golden can be regenerated with `UPDATE_GOLDENS=1`, this table cannot.
+const TLS_LEVELS: &[(&str, &str)] = &[
+    ("empty-os-store", "fail"),
+    ("env-store-canary-user", "warn"),
+    ("expired-inside-window", "warn"),
+    ("expired-pinned-clock", "fail"),
+    ("handshake-never-completes", "warn"),
+    ("issuer-match", "pass"),
+    ("issuer-mismatch", "fail"),
+    ("machine-only", "warn"),
+    ("machine-only-forbidden", "fail"),
+    ("pin-ca-only", "warn"),
+    ("pin-match", "pass"),
+    ("pin-mismatch", "fail"),
+    ("pin-root-not-sent", "fail"),
+    ("public", "pass"),
+    ("refused", "warn"),
+    ("unknown-ca", "fail"),
+];
+
+#[test]
+fn every_tls_intercept_case_matches_its_expect_json_with_the_chain_it_names() -> TestResult {
+    let root = fixtures_dir();
+    let names = chains::case_names(&root)?;
+    let listed: Vec<&str> = TLS_LEVELS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names.iter().map(String::as_str).collect::<Vec<_>>(),
+        listed,
+        "a case was added or removed: list its level in TLS_LEVELS"
+    );
+    let mut failures = Vec::new();
+    for (case, level) in TLS_LEVELS {
+        let ran = std::panic::catch_unwind(|| chains::run_case(&root, case));
+        match ran {
+            Ok(Ok(result)) => {
+                if result["level"] != *level {
+                    failures.push(format!(
+                        "{case}: ended {}, expected {level}",
+                        result["level"]
+                    ));
+                }
+            }
+            Ok(Err(error)) => failures.push(format!("{case}: {error}")),
+            Err(payload) => {
+                let text = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("a panic with no message");
+                failures.push(format!("{case}: {text}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n---\n"));
+    Ok(())
+}
+
+#[test]
+fn the_canary_user_name_is_in_the_case_and_in_no_golden() -> TestResult {
+    let dir = fixtures_dir().join("checks/net.tls_intercept/env-store-canary-user");
+    let chain = std::fs::read_to_string(dir.join("chain.json"))?;
+    assert!(
+        chain.contains("canary-user-7f3a"),
+        "the case must hold the canary"
+    );
+    let golden = std::fs::read_to_string(dir.join("expect.json"))?;
+    assert!(
+        !golden.contains("canary-user"),
+        "the canary reached the golden:\n{golden}"
+    );
+    assert!(golden.contains("~/certs/inspection.pem"), "{golden}");
+    assert!(golden.contains("SSL_CERT_FILE"), "{golden}");
+    Ok(())
+}
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {
