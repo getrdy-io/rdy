@@ -197,6 +197,12 @@ impl Layout {
         }
     }
 
+    /// True for a root run on Unix. Such a run has no user store (INV-04).
+    #[must_use]
+    pub fn is_root(&self) -> bool {
+        self.euid == 0
+    }
+
     /// The store that `rdy trust add` writes: the system store for euid 0 on Unix and for Windows (which
     /// has no user store), the user store otherwise.
     #[must_use]

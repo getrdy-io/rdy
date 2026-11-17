@@ -97,7 +97,18 @@ fn every_signature_error_has_its_own_code_a_fix_and_exit_64() {
         assert_ne!(cli.code(), ErrorCode::SpecInvalid, "{error:?}");
         assert_eq!(cli.exit_code().code(), 64, "{error:?}");
         // The fix is the one that knows the product, not the placeholder.
-        assert_eq!(cli.hint(), error.fix(), "{error:?}");
+        // A missing signature names the sidecar file in the fix; every other fix is the library's.
+        // On Windows an unknown key points at the docs page, because M1 has no `rdy trust add` there
+        // (ADR 0027).
+        if cfg!(windows) && matches!(error, SignatureError::UnknownKey { .. }) {
+            assert_eq!(
+                cli.hint(),
+                "see https://docs.getrdy.io/unsigned",
+                "{error:?}"
+            );
+        } else if error != SignatureError::Missing {
+            assert_eq!(cli.hint(), error.fix(), "{error:?}");
+        }
         assert!(!cli.hint().is_empty());
         assert!(!cli.hint().contains("<product>"), "{}", cli.hint());
         // Neither line names a flag that weakens the check.
@@ -115,12 +126,13 @@ fn an_unknown_key_fix_names_the_product_to_pin() {
         product: slug("acme-platform"),
     };
     let cli = CliError::spec("acme-platform.yaml", SpecError::Signature(error));
-    assert!(
-        cli.hint()
-            .contains("rdy trust add acme-platform --key <file>"),
-        "{}",
-        cli.hint()
-    );
+    // Windows has no `rdy trust add` in M1, so the fix points at the docs page instead (ADR 0027).
+    let want = if cfg!(windows) {
+        "https://docs.getrdy.io/unsigned"
+    } else {
+        "rdy trust add acme-platform --key <file>"
+    };
+    assert!(cli.hint().contains(want), "{}", cli.hint());
 }
 
 /// A signature error is not a parse error: no position, and the code is not `spec_parse`.
@@ -132,7 +144,14 @@ fn a_signature_error_has_no_position() {
     );
     let r = cli.render();
     assert_eq!((r.line, r.column), (None, None));
+    // The file is named inside the sentence, so the terminal has no `file:` prefix. The JSON keeps `file`
+    // (01 section 4.8, ADR 0008 decision 7).
     assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
+    assert!(r.named);
+    assert_eq!(
+        r.message,
+        "no signature found at acme-platform.yaml.minisig"
+    );
 }
 
 fn load_error(spec: &[u8], sig: Option<&[u8]>, store: &TrustStore, policy: Policy) -> CliError {

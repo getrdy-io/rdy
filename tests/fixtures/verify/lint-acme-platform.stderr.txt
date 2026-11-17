@@ -1,0 +1,6 @@
+acme-platform.yaml:45:9: warning: gpu.cuda: this version of rdy has no gpu checks yet
+  fix: customers will see this check as not run, and NOT READY while it is required. Keep it if that is what you want.
+acme-platform.yaml:50:9: warning: aws.iam: this version of rdy has no aws checks yet
+  fix: customers will see this check as not run, and NOT READY while it is required. Keep it if that is what you want.
+
+acme-platform.yaml: 0 errors, 2 warnings
