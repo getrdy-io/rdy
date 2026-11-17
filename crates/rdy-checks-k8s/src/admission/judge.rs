@@ -62,29 +62,75 @@ impl SyncLabel {
     }
 }
 
-/// The system `openshift-*` namespaces the controller never syncs, even with the label `true` (the
-/// upstream `isNSControlled` exemption). `openshift-operators` is not one of them.
+/// The system `openshift-*` namespaces the controller never syncs, even with the label `true`. This is the
+/// exact set `systemNSSyncExemptions` of `pkg/psalabelsyncer/nsexemptions/nsexemptions.go` in
+/// `github.com/openshift/cluster-policy-controller` (read 2026-11-17), which `isNSControlled` consults
+/// first. It is a set of names, not prefixes. `openshift-operators` is not in it. `default`, `kube-*` and
+/// `openshift` of that set are handled by the caller.
 fn is_system(name: &str) -> bool {
-    const PREFIXES: [&str; 17] = [
-        "openshift-kube-",
-        "openshift-config",
-        "openshift-monitoring",
-        "openshift-ingress",
-        "openshift-etcd",
-        "openshift-infra",
-        "openshift-dns",
-        "openshift-authentication",
+    const NAMES: [&str; 60] = [
         "openshift-apiserver",
-        "openshift-controller-manager",
-        "openshift-cluster-",
-        "openshift-operator-lifecycle-manager",
-        "openshift-network-",
-        "openshift-ovn-kubernetes",
-        "openshift-sdn",
-        "openshift-image-registry",
+        "openshift-apiserver-operator",
+        "openshift-authentication",
+        "openshift-authentication-operator",
+        "openshift-cloud-controller-manager",
+        "openshift-cloud-controller-manager-operator",
+        "openshift-cloud-credential-operator",
+        "openshift-cloud-network-config-controller",
+        "openshift-cluster-csi-drivers",
+        "openshift-cluster-machine-approver",
+        "openshift-cluster-node-tuning-operator",
+        "openshift-cluster-samples-operator",
+        "openshift-cluster-storage-operator",
+        "openshift-cluster-version",
+        "openshift-config",
+        "openshift-config-managed",
+        "openshift-config-operator",
         "openshift-console",
+        "openshift-console-operator",
+        "openshift-console-user-settings",
+        "openshift-controller-manager",
+        "openshift-controller-manager-operator",
+        "openshift-dns",
+        "openshift-dns-operator",
+        "openshift-etcd",
+        "openshift-etcd-operator",
+        "openshift-host-network",
+        "openshift-image-registry",
+        "openshift-infra",
+        "openshift-ingress",
+        "openshift-ingress-canary",
+        "openshift-ingress-operator",
+        "openshift-insights",
+        "openshift-kni-infra",
+        "openshift-kube-apiserver",
+        "openshift-kube-apiserver-operator",
+        "openshift-kube-controller-manager",
+        "openshift-kube-controller-manager-operator",
+        "openshift-kube-scheduler",
+        "openshift-kube-scheduler-operator",
+        "openshift-kube-storage-version-migrator",
+        "openshift-kube-storage-version-migrator-operator",
+        "openshift-machine-api",
+        "openshift-machine-config-operator",
+        "openshift-marketplace",
+        "openshift-monitoring",
+        "openshift-multus",
+        "openshift-network-diagnostics",
+        "openshift-network-operator",
+        "openshift-node",
+        "openshift-nutanix-infra",
+        "openshift-oauth-apiserver",
+        "openshift-openstack-infra",
+        "openshift-operator-lifecycle-manager",
+        "openshift-ovirt-infra",
+        "openshift-sdn",
+        "openshift-service-ca",
+        "openshift-service-ca-operator",
+        "openshift-user-workload-monitoring",
+        "openshift-vsphere-infra",
     ];
-    PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+    NAMES.contains(&name)
 }
 
 /// Whether OpenShift writes the `warn` and `audit` labels of namespace `name` from the SCCs.
