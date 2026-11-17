@@ -1,0 +1,33 @@
+{
+  "entry": {
+    "distro_min": {
+      "rhel": "4.18.0-305"
+    },
+    "id": "host.kernel",
+    "min": "5.4"
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "distro": "rhel",
+        "source": "distro_min",
+        "version": "4.18.0-305"
+      },
+      "distro_min": {
+        "rhel": "4.18.0-305"
+      },
+      "min": "5.4"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Kernel `4.18.0-348.el8.x86_64` meets the minimum of 4.18.0-305 on `rhel`.",
+    "notes": [],
+    "observed": {
+      "base": "4.18.0",
+      "build": "348",
+      "distro": "rhel",
+      "release": "4.18.0-348.el8.x86_64"
+    },
+    "partial": null
+  }
+}
