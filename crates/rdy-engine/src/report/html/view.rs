@@ -825,3 +825,50 @@ fn details(report: &Report) -> Vec<Row> {
     }
     rows
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/reports/not-ready-7.2.json");
+        let text = std::fs::read_to_string(path).expect("the sample report is in the repo");
+        serde_json::from_str(&text).expect("the sample is JSON")
+    }
+
+    /// The print rule puts `print_mark` in a CSS string. The template escapes HTML but does not escape
+    /// CSS, so every banner title must be capitals, spaces and colons, and nothing else.
+    #[test]
+    fn every_banner_title_is_capitals_spaces_and_colons() {
+        let mut titles = Vec::new();
+        for (unsigned, complete) in [(true, true), (false, true), (false, false), (true, false)] {
+            let mut doc = sample();
+            if unsigned {
+                doc["signature"] = serde_json::json!({"state": "unsigned"});
+            } else {
+                // Verified with a key given for one run: the not-pinned banner.
+                doc["signature"]["trust_source"] = serde_json::json!("flag");
+            }
+            doc["complete"] = serde_json::json!(complete);
+            let report: Report = serde_json::from_value(doc).expect("a report");
+            titles.extend(banners(&report).iter().map(|banner| banner.title));
+        }
+        for expected in [
+            "WARNING: UNSIGNED SPEC",
+            "WARNING: KEY NOT PINNED",
+            "INCOMPLETE",
+        ] {
+            assert!(titles.contains(&expected), "{expected} is not a title");
+        }
+        for title in titles {
+            assert!(
+                !title.is_empty()
+                    && title
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c == ' ' || c == ':'),
+                "{title:?} is not safe in a CSS string"
+            );
+        }
+    }
+}

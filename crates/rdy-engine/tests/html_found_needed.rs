@@ -179,6 +179,17 @@ fn the_banners_stay_in_the_flow_in_print() -> TestResult {
         rule.contains("WARNING: UNSIGNED SPEC") && !rule.contains("evil"),
         "{rule}"
     );
+    // A key given for one run, alone: its own title. An incomplete run, alone: its own title.
+    let mut doc = sample()?;
+    doc["signature"]["trust_source"] = json!("flag");
+    let page = html_of(doc)?;
+    assert!(page.contains("content: \"WARNING: KEY NOT PINNED\";"));
+    assert!(!page.contains("INCOMPLETE"));
+    let mut doc = sample()?;
+    doc["complete"] = json!(false);
+    let page = html_of(doc)?;
+    assert!(page.contains("content: \"INCOMPLETE\";"));
+    assert!(!page.contains("WARNING: "));
     // No banner, no rule.
     assert!(!html_of(sample()?)?.contains("@page"));
     Ok(())
@@ -205,7 +216,8 @@ const CANARIES: [&str; 8] = [
 fn canaries_planted_in_observed_and_expected_render_as_redacted_text() -> TestResult {
     let mut doc = sample()?;
     // The input is shared with the raw-map control in `view/facts.rs`.
-    let planted: Value = serde_json::from_str(include_str!("data/found-canaries.json"))?;
+    let planted: Value =
+        serde_json::from_str(include_str!("../src/report/html/view/found-canaries.json"))?;
     doc["checks"][0]["observed"] = planted["observed"].clone();
     doc["checks"][0]["expected"] = planted["expected"].clone();
 

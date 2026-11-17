@@ -277,9 +277,8 @@ mod tests {
     /// the fields out.
     #[test]
     fn without_redaction_every_canary_shows_on_its_line() {
-        let planted: Value =
-            serde_json::from_str(include_str!("../../../../tests/data/found-canaries.json"))
-                .expect("the shared canary input is JSON");
+        let planted: Value = serde_json::from_str(include_str!("found-canaries.json"))
+            .expect("the shared canary input is JSON");
         let all: Vec<String> = facts(planted["observed"].as_object())
             .iter()
             .flat_map(|fact| {
