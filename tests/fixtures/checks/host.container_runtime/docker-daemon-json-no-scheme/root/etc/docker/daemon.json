@@ -1,0 +1,7 @@
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "storage-driver": "overlay2",
+  "proxies": {
+    "http-proxy": "canary-svc:NOSCHEME-CANARY-PW@proxy.acme.example:3128"
+  }
+}
