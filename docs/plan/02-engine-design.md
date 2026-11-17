@@ -330,7 +330,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
   (`check: null`).
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
-  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
+  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01, added by
+  M2-138. Until then rdy-spec has no such value, so M1-107 writes the plugin's own outcome and a
+  `form: delegated` field.)
 - Coalescing (past 200 per check, per directory) folds only `read`, `read_dir`, `read_link` and `stat` entries with
   outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
   entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
@@ -595,7 +597,7 @@ tests policy.
   clock.
 - System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
   facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
-  store. No revocation check, and the report says so.
+  store. No revocation check, and from M1-184 the report says so.
 - PAC is reported, never fetched, in M1.
 - UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
   in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
