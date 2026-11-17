@@ -969,6 +969,15 @@ fn a_bare_plugin_name_is_the_file_found_on_path_for_the_exec_entry() {
         "get-token"
     };
     std::fs::write(dir.path().join(name), "x").expect("write");
+    // A file without an execute bit is not found on Unix: the OS would not start it either.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.path().join(name);
+        let found = resolve_plugin("get-token", Some(dir.path().as_os_str()), None);
+        assert_eq!(found, "get-token", "no execute bit, so not a plugin");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
     let path = std::env::join_paths([other.path(), dir.path()]).expect("join");
     let pathext = std::ffi::OsString::from(".exe;.cmd");
 
