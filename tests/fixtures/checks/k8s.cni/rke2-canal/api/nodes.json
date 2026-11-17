@@ -79,7 +79,6 @@
           ],
           "nodeInfo": {
             "kubeletVersion": "v1.30.4+rke2r1",
-            "containerRuntimeVersion": "containerd://1.7.20",
             "osImage": "Ubuntu 22.04.4 LTS",
             "architecture": "amd64",
             "operatingSystem": "linux"
@@ -153,7 +152,6 @@
           ],
           "nodeInfo": {
             "kubeletVersion": "v1.30.4+rke2r1",
-            "containerRuntimeVersion": "containerd://1.7.20",
             "osImage": "Ubuntu 22.04.4 LTS",
             "architecture": "amd64",
             "operatingSystem": "linux"
@@ -227,7 +225,6 @@
           ],
           "nodeInfo": {
             "kubeletVersion": "v1.30.4+rke2r1",
-            "containerRuntimeVersion": "containerd://1.7.20",
             "osImage": "Ubuntu 22.04.4 LTS",
             "architecture": "amd64",
             "operatingSystem": "linux"

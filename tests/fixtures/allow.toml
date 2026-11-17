@@ -88,6 +88,31 @@ value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
 
 [[allow]]
+rule = "host"
+value = "cilium.io"
+reason = "An API group name of the Cilium network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.projectcalico.org"
+reason = "An API group name of the Calico network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.antrea.io"
+reason = "An API group name of the Antrea network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.ovn.org"
+reason = "An API group name of the OVN-Kubernetes network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.cni.cncf.io"
+reason = "An API group name of the Multus network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
 rule = "ip"
 path = "tests/fixtures/checks/host.time_sync/refused-range/expect.json"
 value = "169.254.169.123"

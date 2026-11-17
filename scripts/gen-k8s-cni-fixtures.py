@@ -317,7 +317,7 @@ def node(name, kind=None, kubelet="v1.30.2", cidrs=(), unavailable=False, reason
         "spec": spec,
         "status": {
             "conditions": conditions,
-            "nodeInfo": {"kubeletVersion": kubelet, "containerRuntimeVersion": "containerd://1.7.20", "osImage": "Ubuntu 22.04.4 LTS",
+            "nodeInfo": {"kubeletVersion": kubelet, "osImage": "Ubuntu 22.04.4 LTS",
                          "architecture": "amd64", "operatingSystem": "linux"},
         },
     }
@@ -453,7 +453,7 @@ def policy(name, selector=None, types=None, egress=None, ingress=None, labels=No
 
 DENY_EGRESS = policy("default-deny-egress", types=["Egress"])
 DENY_ALL = policy("default-deny-all", types=["Ingress", "Egress"])
-ALLOW_DNS = policy("allow-dns", types=["Egress"], egress=[{"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}}}],
+ALLOW_DNS = policy("allow-dns", types=["Egress"], egress=[{"to": [{"namespaceSelector": {"matchLabels": {"name": "kube-system"}}}],
                                                            "ports": [{"protocol": "UDP", "port": 53}]}])
 APP_ONLY = policy("acme-web", selector={"matchLabels": {"app": "acme-web"}}, types=["Egress"])
 
