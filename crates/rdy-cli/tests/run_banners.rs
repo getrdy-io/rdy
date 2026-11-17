@@ -207,7 +207,7 @@ fn an_unsigned_run_prints_its_banner_before_the_first_check_and_again_above_the_
         &banner,
         "WARNING: UNSIGNED SPEC",
     );
-    // The page of the same report carries it too (the file path is M1-181's).
+    // The page of the same report carries it too (the written file is tested below, M1-181).
     let page = page_of(report_of(&ran.stdout));
     assert!(page.contains("WARNING: UNSIGNED SPEC"), "{page}");
     assert!(page.contains("This report is marked UNSIGNED SPEC."));
@@ -232,6 +232,42 @@ fn a_key_run_prints_key_not_pinned_exactly_before_the_first_check_and_again_abov
     let page = page_of(report_of(&ran.stdout));
     assert!(page.contains("WARNING: KEY NOT PINNED"), "{page}");
     assert!(page.contains("This report is marked KEY NOT PINNED."));
+    assert!(!page.contains("UNSIGNED SPEC"));
+}
+
+/// The `.html` file that `rdy run` writes carries the banner of the signature state (M1-181).
+#[test]
+fn the_written_page_carries_key_not_pinned() {
+    let dir = signed();
+    let (spec, key) = (spec_text(&dir), key_text(&dir));
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let out_arg = out.path().to_string_lossy().into_owned();
+    let ran = call(&[
+        "run",
+        &spec,
+        "--key",
+        &key,
+        "--no-network",
+        "--out-dir",
+        &out_arg,
+    ]);
+    assert!(matches!(ran.code, 0..=2), "{}", ran.stderr);
+    let folder = std::fs::read_dir(out.path())
+        .unwrap_or_else(|e| panic!("{e}"))
+        .map(|e| e.unwrap_or_else(|e| panic!("{e}")).path())
+        .next()
+        .unwrap_or_else(|| panic!("no report folder"));
+    let html = std::fs::read_dir(&folder)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .map(|e| e.unwrap_or_else(|e| panic!("{e}")).path())
+        .find(|path| path.extension().is_some_and(|x| x == "html"))
+        .unwrap_or_else(|| panic!("no .html file in {}", folder.display()));
+    let page = std::fs::read_to_string(&html).unwrap_or_else(|e| panic!("{e}"));
+    assert!(page.contains("WARNING: KEY NOT PINNED"), "title");
+    assert!(
+        page.contains("This report is marked KEY NOT PINNED."),
+        "line"
+    );
     assert!(!page.contains("UNSIGNED SPEC"));
 }
 
