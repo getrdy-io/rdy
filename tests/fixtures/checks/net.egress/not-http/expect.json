@@ -1,0 +1,47 @@
+{
+  "entry": {
+    "endpoints": [
+      {
+        "target": "http://api.acme.test:8080/"
+      }
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "api.acme.test:8080 accepted the connection and did not answer HTTP correctly. Check that the port serves HTTP and not another protocol, and that the scheme in the spec (http or https) matches it. A TLS port reached with `http://` gives this.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: api.acme.test:8080 (http_failed)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.35",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 0
+            }
+          ],
+          "class": "http_failed",
+          "connect_ms": 0,
+          "endpoint": "api.acme.test:8080",
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

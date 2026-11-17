@@ -19,7 +19,7 @@ use rdy_engine::family::{Family, HostSet};
 use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::{NativeCall, NativeValue};
 use rdy_engine::testing::loopback::{
-    HttpOptions, HttpServer, ResetAfterClientHello, TestCa, Validity,
+    HttpOptions, HttpServer, Reply, ResetAfterClientHello, TestCa, Validity,
 };
 use rdy_engine::testing::{
     Fixture, Replay, TcpScript, TestRun, assert_within_manifest, fixtures_dir,
@@ -661,7 +661,7 @@ async fn an_all_blackhole_tls_endpoint_names_the_silent_address_from_the_attempt
 // ---- secrets, bounds, ordering ------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_query_string_token_and_a_path_never_reach_the_result_or_the_log() {
+async fn a_query_string_token_never_reaches_the_result_or_the_log_and_the_path_only_the_log() {
     let ca = TestCa::root("Acme Test Root");
     let server = tls_server(&ca, "web.acme.test", Validity::Always).await;
     let port = server.addr().port();
@@ -676,7 +676,24 @@ async fn a_query_string_token_and_a_path_never_reach_the_result_or_the_log() {
     );
     let text = ran.everything_text();
     assert!(!text.contains("hunter2-canary-token"), "{text}");
-    assert!(!text.contains("/v2/private/path"), "{text}");
+    // The facade logs the path of an http call and never its query (M1-093). The result holds neither.
+    let finding = ran.finding();
+    let result_text = format!(
+        "{} {} {:?} {:?}",
+        finding.message, finding.observed, finding.fix, finding.notes
+    );
+    assert!(!result_text.contains("/v2/private/path"), "{result_text}");
+    let written = serde_json::to_string(&ran.result()).expect("the result serialises");
+    assert!(!written.contains("hunter2-canary-token"), "{written}");
+    assert!(!written.contains("/v2/private/path"), "{written}");
+    // The request itself carried them, so the server did see the path and query.
+    let seen = server.requests();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(
+        seen[0].target,
+        "/v2/private/path?token=hunter2-canary-token"
+    );
+    assert_eq!(ran.endpoint(0)["http_stage"]["status"], 200);
     assert!(text.contains(&format!("web.acme.test:{port}")));
 }
 
@@ -726,10 +743,147 @@ async fn many_endpoints_are_reported_in_spec_order_and_the_message_is_bounded() 
 }
 
 #[tokio::test(start_paused = true)]
-async fn expect_status_is_noted_as_not_checked_yet() {
+async fn expect_status_on_a_host_port_endpoint_is_ignored_and_says_so() {
     let ran = run_on(
         case("pass-plain"),
-        json!([{"target": "http://web.acme.test:8080/health", "expect_status": [200]}]),
+        json!([{"target": "web.acme.test:8080", "expect_status": [200]}]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Pass);
+    assert!(ran.endpoint(0).get("http_stage").is_none());
+    assert!(
+        ran.finding()
+            .notes
+            .iter()
+            .any(|n| n.contains("expect_status is ignored for 1 endpoint(s) written as host:port")),
+        "{:?}",
+        ran.finding().notes
+    );
+}
+
+// ---- the HTTP stage ------------------------------------------------------------------------------
+
+/// A TLS server with `reply`, and a machine whose OS store trusts its CA.
+async fn https_machine(name: &str, reply: Reply) -> (Replay, HttpServer) {
+    let ca = TestCa::root("Acme Test Root");
+    let options = HttpOptions::tls(&ca.issue(&[name], Validity::Always))
+        .alpn(&["h2", "http/1.1"])
+        .reply(reply);
+    let server = HttpServer::start(options).await.expect("a server");
+    (machine(name, server.addr(), Some(vec![der(&ca)])), server)
+}
+
+fn url(name: &str, server: &HttpServer, path: &str) -> String {
+    format!("https://{name}:{}{path}", server.addr().port())
+}
+
+#[tokio::test]
+async fn a_url_gets_one_head_and_a_200_passes_with_the_stage_timings() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Ok).await;
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/health")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(
+        ran.finding().level,
+        Level::Pass,
+        "{}",
+        ran.finding().message
+    );
+    let http = &ran.endpoint(0)["http_stage"];
+    assert_eq!(http["method"], "HEAD");
+    assert_eq!(http["status"], 200);
+    assert_eq!(http["expect_status"], json!([]));
+    assert!(http["first_byte_ms"].is_u64() && http["total_ms"].is_u64());
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests[0].method, "HEAD");
+    assert_eq!(requests[0].target, "/health");
+    assert_eq!(ran.result().status, Status::Pass);
+}
+
+#[tokio::test]
+async fn the_method_of_the_spec_is_sent() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Ok).await;
+    let endpoints = json!([{"target": url("api.acme.test", &server, "/"), "method": "GET"}]);
+    let ran = run_on(replay, endpoints, json!({}), NET).await;
+    assert_eq!(ran.finding().level, Level::Pass);
+    assert_eq!(ran.endpoint(0)["http_stage"]["method"], "GET");
+    assert_eq!(server.requests()[0].method, "GET");
+}
+
+#[tokio::test]
+async fn a_5xx_is_http_status_with_the_status_in_the_message_and_a_fix() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Status(503)).await;
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    let finding = ran.finding();
+    assert_eq!(finding.level, Level::Fail);
+    assert!(
+        finding.message.contains("(http_status 503)"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(ran.endpoint(0)["class"], "http_status");
+    assert_eq!(ran.endpoint(0)["http_stage"]["status"], 503);
+    let fix = finding.fix.as_deref().expect("a fix");
+    assert!(fix.contains("answered 503"), "{fix}");
+    assert!(fix.contains("is failing"), "{fix}");
+    assert_eq!(ran.result().status, Status::Block);
+}
+
+#[tokio::test]
+async fn a_status_outside_expect_status_fails_and_one_inside_passes() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Status(401)).await;
+    let target = url("api.acme.test", &server, "/v2/");
+    let ran = run_on(
+        replay.clone(),
+        json!([{"target": target, "expect_status": [200]}]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Fail);
+    assert_eq!(ran.endpoint(0)["class"], "http_status");
+    assert!(
+        ran.finding()
+            .fix
+            .as_deref()
+            .expect("fix")
+            .contains("add the status to `expect_status`")
+    );
+
+    let ran = run_on(
+        replay,
+        json!([{"target": target, "expect_status": [200, 401]}]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Pass);
+    assert_eq!(
+        ran.endpoint(0)["http_stage"]["expect_status"],
+        json!([200, 401])
+    );
+    assert!(ran.finding().notes.is_empty(), "{:?}", ran.finding().notes);
+}
+
+#[tokio::test]
+async fn a_4xx_with_no_expect_status_counts_as_reachable_and_is_noted() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Status(404)).await;
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
         json!({}),
         NET,
     )
@@ -739,8 +893,163 @@ async fn expect_status_is_noted_as_not_checked_yet() {
         ran.finding()
             .notes
             .iter()
-            .any(|n| n.contains("expect_status is not checked yet"))
+            .any(|n| n.contains("answered 404 and the spec lists no expect_status")),
+        "{:?}",
+        ran.finding().notes
     );
+}
+
+#[tokio::test]
+async fn a_redirect_is_not_followed_and_its_status_is_the_answer() {
+    let (replay, server) = https_machine(
+        "api.acme.test",
+        Reply::Redirect("https://other.acme.test/x?token=canary-redirect".to_owned()),
+    )
+    .await;
+    let ran = run_on(
+        replay.clone(),
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Pass, "a 302 is below 500");
+    assert_eq!(ran.endpoint(0)["http_stage"]["status"], 302);
+    assert_eq!(server.requests().len(), 1, "no second request");
+    assert!(!ran.everything_text().contains("canary-redirect"));
+    let ran = run_on(
+        replay,
+        json!([{"target": url("api.acme.test", &server, "/"), "expect_status": [200]}]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "http_status");
+}
+
+#[tokio::test]
+async fn a_reply_that_is_not_http_is_http_failed() {
+    let (replay, server) = https_machine(
+        "api.acme.test",
+        Reply::Raw(b"SSH-2.0-OpenSSH_9.6\r\n".to_vec()),
+    )
+    .await;
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "http_failed");
+    assert_eq!(ran.finding().level, Level::Fail);
+    let fix = ran.finding().fix.as_deref().expect("a fix");
+    assert!(fix.contains("did not answer HTTP correctly"), "{fix}");
+    assert!(
+        !ran.everything_text().contains("OpenSSH"),
+        "a reply is never echoed"
+    );
+}
+
+#[tokio::test]
+async fn an_optional_url_that_answers_5xx_warns() {
+    let (replay, server) = https_machine("api.acme.test", Reply::Status(502)).await;
+    let ran = run_on(
+        replay,
+        json!([{"target": url("api.acme.test", &server, "/"), "optional": true}]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.finding().level, Level::Warn);
+    assert!(
+        ran.finding()
+            .message
+            .contains("optional, unreachable: http_status 502"),
+        "{}",
+        ran.finding().message
+    );
+}
+
+#[tokio::test]
+async fn an_untrusted_issuer_stops_before_any_request_is_sent() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, "api.acme.test", Validity::Always).await;
+    // The OS store does not hold the CA.
+    let replay = machine("api.acme.test", server.addr(), Some(vec![]));
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "tls_unknown_issuer");
+    assert!(ran.endpoint(0).get("http_stage").is_none());
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(
+        server.requests().is_empty(),
+        "no HTTP over an untrusted chain"
+    );
+    assert_eq!(server.application_bytes(), 0);
+}
+
+#[tokio::test]
+async fn an_expired_certificate_on_a_url_is_clock_or_expiry_and_no_request_is_sent() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, "api.acme.test", Validity::Expired).await;
+    let replay = machine("api.acme.test", server.addr(), Some(vec![der(&ca)]));
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "clock_or_expiry");
+    assert!(server.requests().is_empty());
+}
+
+#[tokio::test]
+async fn a_reset_after_hello_on_a_url_is_reset_after_hello() {
+    let server = ResetAfterClientHello::start().await.expect("a server");
+    let replay = machine("filtered.acme.test", server.addr(), Some(vec![]));
+    let endpoints = json!([format!(
+        "https://filtered.acme.test:{}/",
+        server.addr().port()
+    )]);
+    let ran = run_on(replay, endpoints, json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["class"], "reset_after_hello");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_closed_port_on_a_url_is_refused() {
+    let ran = run_on(
+        case("refused"),
+        json!(["http://closed.acme.test:8080/health"]),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "refused");
+    assert!(ran.endpoint(0).get("http_stage").is_none());
+}
+
+#[tokio::test]
+async fn trust_bundled_judges_the_request_by_the_bundled_roots() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, "api.acme.test", Validity::Always).await;
+    let replay = machine("api.acme.test", server.addr(), Some(vec![der(&ca)]));
+    let ran = run_on(
+        replay,
+        json!([url("api.acme.test", &server, "/")]),
+        json!({"trust": "bundled"}),
+        NET,
+    )
+    .await;
+    // The bundled public roots do not hold the test CA: the TLS stage says so and no request goes out.
+    assert_eq!(ran.endpoint(0)["class"], "tls_unknown_issuer");
+    assert!(server.requests().is_empty());
 }
 
 // ---- the family ---------------------------------------------------------------------------------

@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "endpoints": [
+      "hole.acme.test:8080"
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "No reply to SYN from 192.0.2.9:8080 in 3s, a firewall is dropping it. Ask the network team to allow tcp/8080 to hole.acme.test from this machine.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: hole.acme.test:8080 (blackhole)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.9",
+              "elapsed_ms": 3000,
+              "family": "ipv4",
+              "outcome": "timed_out",
+              "started_ms": 0
+            }
+          ],
+          "class": "blackhole",
+          "endpoint": "hole.acme.test:8080",
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

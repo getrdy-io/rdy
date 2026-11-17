@@ -26,8 +26,9 @@ use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
 use super::golden::assert_golden;
-use super::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
+use super::{Fixture, Replay, TestRun, assert_within_manifest, fixtures_dir};
 use crate::check::{Check, Level};
+use crate::family::{Built, HostSet};
 use crate::sched::{End, Planned};
 
 /// The result as `expect.json` holds it.
@@ -110,15 +111,34 @@ pub fn expect_bytes(entry: &Value, end: &End) -> String {
 /// When the runtime cannot start or the check goes beyond its manifest.
 #[must_use]
 pub fn run_case(fixture: &Fixture, check: Arc<dyn Check>) -> End {
+    run_case_on(fixture, fixture.replay().clone(), check, HostSet::empty())
+}
+
+/// Like [`run_case`], on `replay`, which a caller built from the machine of `fixture` and gave the servers
+/// that its `net.json` names (`Replay::serve_duplex`). A `serve` entry needs one, and a fixture file
+/// cannot register it. `hosts` are the hosts the check may reach, from `Built::hosts`, as in a real run
+/// (INV-11): a check that names a host in its spec and gets none here is refused by policy.
+///
+/// # Panics
+///
+/// See [`run_case`].
+#[must_use]
+pub fn run_case_on(
+    fixture: &Fixture,
+    replay: Replay,
+    check: Arc<dyn Check>,
+    hosts: HostSet,
+) -> End {
     let info = check.info();
-    let test_run = TestRun::for_fixture(fixture);
+    let test_run = TestRun::new(replay);
     let scheduler = test_run.scheduler(1, fixture.os(), fixture.available_needs());
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
         .build()
         .unwrap_or_else(|e| panic!("a runtime: {e}"));
-    let mut ran = runtime.block_on(scheduler.run(vec![Planned::new(check, info.id)]));
+    let mut ran =
+        runtime.block_on(scheduler.run(vec![Planned::new(check, info.id).with_hosts(hosts)]));
     assert_within_manifest(fixture.name(), info, &test_run.action_log());
     ran.remove(0).end
 }
@@ -154,6 +174,42 @@ pub fn assert_cases_in(
     id: &str,
     build: impl Fn(&CheckSpec) -> Arc<dyn Check>,
 ) -> Vec<String> {
+    assert_cases_serving(
+        root,
+        id,
+        |entry| (build(entry), HostSet::empty()),
+        |replay| replay,
+    )
+}
+
+/// Like [`assert_cases`], for a check that reaches hosts and whose cases script a `serve` entry in
+/// `net.json`. `build` returns the check with the hosts its entry names, as a family does
+/// ([`Built`]), and `serve` gets the replay of each case and registers the servers the entries name
+/// (`Replay::serve_duplex`).
+///
+/// # Panics
+///
+/// See [`assert_cases_in`].
+#[must_use]
+pub fn assert_cases_with(
+    id: &str,
+    build: impl Fn(&CheckSpec) -> Built,
+    serve: impl Fn(Replay) -> Replay,
+) -> Vec<String> {
+    let built = |entry: &CheckSpec| {
+        let built = build(entry);
+        (Arc::from(built.check), built.hosts)
+    };
+    assert_cases_serving(&fixtures_dir(), id, built, serve)
+}
+
+/// [`assert_cases_in`] with the servers of [`assert_cases_with`].
+fn assert_cases_serving(
+    root: &Path,
+    id: &str,
+    build: impl Fn(&CheckSpec) -> (Arc<dyn Check>, HostSet),
+    serve: impl Fn(Replay) -> Replay,
+) -> Vec<String> {
     let dir = root.join("checks").join(id);
     let mut names: Vec<String> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
@@ -164,7 +220,9 @@ pub fn assert_cases_in(
     names.sort();
     let mut failures = Vec::new();
     for case in &names {
-        let ran = catch_unwind(AssertUnwindSafe(|| assert_case(root, id, case, &build)));
+        let ran = catch_unwind(AssertUnwindSafe(|| {
+            assert_case(root, id, case, &build, &serve)
+        }));
         if let Err(payload) = ran {
             let text = payload
                 .downcast_ref::<String>()
@@ -185,7 +243,13 @@ pub fn assert_cases_in(
 }
 
 /// One case of [`assert_cases_in`].
-fn assert_case(root: &Path, id: &str, case: &str, build: &impl Fn(&CheckSpec) -> Arc<dyn Check>) {
+fn assert_case(
+    root: &Path,
+    id: &str,
+    case: &str,
+    build: &impl Fn(&CheckSpec) -> (Arc<dyn Check>, HostSet),
+    serve: &impl Fn(Replay) -> Replay,
+) {
     let name = format!("checks/{id}/{case}");
     let fixture =
         Fixture::load(root, &name).unwrap_or_else(|e| panic!("{name} does not load: {e}"));
@@ -211,7 +275,8 @@ fn assert_case(root: &Path, id: &str, case: &str, build: &impl Fn(&CheckSpec) ->
     );
     let spec: CheckSpec = serde_json::from_value(entry.clone())
         .unwrap_or_else(|e| panic!("{name}/expect.json `entry` is not a check entry: {e}"));
-    let end = run_case(&fixture, build(&spec));
+    let (check, hosts) = build(&spec);
+    let end = run_case_on(&fixture, serve(fixture.replay().clone()), check, hosts);
     assert_golden(&path, expect_bytes(entry, &end));
 }
 

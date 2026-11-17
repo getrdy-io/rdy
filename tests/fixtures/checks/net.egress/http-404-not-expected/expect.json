@@ -1,0 +1,59 @@
+{
+  "entry": {
+    "endpoints": [
+      {
+        "expect_status": [
+          200
+        ],
+        "target": "http://api.acme.test:8080/v2/"
+      }
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "api.acme.test:8080 answered 404: the path does not exist there. Check the URL in the spec.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: api.acme.test:8080 (http_status 404)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.34",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 0
+            }
+          ],
+          "class": "http_status",
+          "connect_ms": 0,
+          "endpoint": "api.acme.test:8080",
+          "http_stage": {
+            "expect_status": [
+              200
+            ],
+            "first_byte_ms": 0,
+            "method": "HEAD",
+            "status": 404,
+            "total_ms": 0
+          },
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

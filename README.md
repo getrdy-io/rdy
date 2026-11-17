@@ -165,8 +165,8 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
 - Host checks on Linux (CPU, memory, disk, OS, SELinux and AppArmor), and Kubernetes version, storage
   class and RBAC checks. These are tested against recorded fixtures. They are not reachable from the
   command line yet.
-- The `net.egress` check (name lookup, connect to every address, TLS and ALPN, direct). It is wired
-  into `rdy run`.
+- The `net.egress` check (name lookup, connect to every address, TLS and ALPN, and the HTTP status of a
+  URL endpoint, direct). It is wired into `rdy run`.
 
 **Next**
 

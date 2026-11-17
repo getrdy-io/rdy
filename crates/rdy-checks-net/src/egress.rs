@@ -10,9 +10,16 @@
 //! 3. **TLS** for port 443, an `https` URL or `tls: true`: one handshake, the protocol, the ALPN the
 //!    server chose, the handshake time, the chain depth, and a verdict against the roots the spec chose.
 //!
-//! What this version does not do yet: the HTTP request and `expect_status` (M1-096), the proxy path
-//! (M1-097), redirect and `Date` evidence. An endpoint whose `via_proxy` is `proxy_only` is not tried,
-//! and the result says so and is partial.
+//! 4. **HTTP** for a URL endpoint (`http://` or `https://`) that connected and, for https, that the
+//!    roots accepted: one `HEAD` (or `GET`, by the spec) with no redirect followed. The status is judged
+//!    against `expect_status`. With none listed, any status below 500 counts as reachable (a 4xx proves
+//!    the path works and gets a note), and a 5xx fails as `http_status`. A reply that is not HTTP is
+//!    `http_failed`. A `host:port` endpoint gets no request, and an `expect_status` on it is noted as
+//!    ignored. The URL's path and query go to the facade and never into the result.
+//!
+//! What this version does not do yet: the proxy path (M1-097), redirect and `Date` evidence, issuer
+//! names (M1-099). An endpoint whose `via_proxy` is `proxy_only` is not tried, and the result says so
+//! and is partial.
 //!
 //! **Levels.** An endpoint that cannot be reached fails the check, or warns when it is `optional`. A
 //! connect slower than `max_latency` (2 s by default) warns. A dead address of one family in front of a
@@ -59,7 +66,7 @@ const FIXES: usize = 3;
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "net.egress",
     family: "net",
-    summary: "Each endpoint resolves, connects on every address family, and completes TLS",
+    summary: "Each endpoint resolves, connects on every address family, completes TLS and answers HTTP",
     meta: CheckMeta {
         title: "Egress",
         remediation: "Ask the network team to allow the endpoint from this machine: the TCP port to the host named in the result. If the name does not resolve, fix DNS or add a temporary hosts file entry. If the certificate is not trusted, a TLS-inspecting proxy is the usual cause: bypass inspection for the host, or install the proxy's CA in the OS trust store. Where openssl is installed, run `openssl s_client -connect <host>:<port> -servername <host>` to see what the server sends.",
@@ -185,6 +192,13 @@ impl EgressCheck {
                             p.label()
                         ));
                     }
+                    if let Some(http) = p.http.as_ref().filter(|h| h.accepted_by_default_4xx()) {
+                        notes.push(format!(
+                            "{} answered {} and the spec lists no expect_status, so it counts as reachable",
+                            p.label(),
+                            http.status
+                        ));
+                    }
                     let fell = p.fell_through();
                     if let Some((family, why)) = fell.first() {
                         warns.push(format!(
@@ -267,15 +281,16 @@ impl EgressCheck {
                 .join("; ");
             finding = finding.with_partial(rdy_engine::check::Partial::new(Vec::new(), note));
         }
-        if self
+        let ignored = self
             .params
             .endpoints
             .iter()
-            .any(|e| e.expect_status.is_some())
-        {
-            finding = finding.with_note(
-                "expect_status is not checked yet: this version of rdy stops after the TLS handshake and sends no HTTP request",
-            );
+            .filter(|e| e.expect_status.is_some() && !e.target.is_url())
+            .count();
+        if ignored > 0 {
+            finding = finding.with_note(format!(
+                "expect_status is ignored for {ignored} endpoint(s) written as host:port: rdy sends an HTTP request only to an http:// or https:// URL"
+            ));
         }
         finding
     }
@@ -289,8 +304,12 @@ fn names(list: &[&Probed], tag: &str) -> Vec<String> {
         .take(NAMED)
         .map(|p| {
             let class = match &p.ending {
-                Ending::Failed(class, _) => class.id(),
-                _ => "not tried",
+                Ending::Failed(Class::HttpStatus, _) => match &p.http {
+                    Some(http) => format!("http_status {}", http.status),
+                    None => Class::HttpStatus.id().to_owned(),
+                },
+                Ending::Failed(class, _) => class.id().to_owned(),
+                _ => "not tried".to_owned(),
             };
             if tag.is_empty() {
                 format!("{} ({class})", p.label())

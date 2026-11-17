@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-http-401-default"
+summary = "A URL that answers 401 with no expect_status"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

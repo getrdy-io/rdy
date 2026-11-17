@@ -160,15 +160,15 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
+/// Every implemented check has its cases, each with a reviewed `expect.json`, except the Timeout class of the checks that cut a hang themselves (M1-179). A
 /// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
 /// forces the row out when they land.
 const PENDING: &[Pending] = &[
     Pending {
         check: "net.egress",
-        classes: &[Class::Pass, Class::NonPass, Class::Timeout],
-        owner: "M1-096",
-        why: "M1-095 merged the staged connector with six scripted net.json cases and no reviewed expect.json. M1-096 completes the result (HTTP stage and failure classes), so it adds the expect.json files and reviews the levels once",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-096 added the reviewed expect.json for Pass and NonPass (11 cases). By design no hang ends net.egress in a Timeout: every endpoint is cut to its own budget (10 s, then 15 s for HTTP) and leaves 2 s of the check's time for the result, so a blackhole or a stalled server gives a bounded finding with class `blackhole` or `timeout`, never `timed_out_ms`. M1-179 counts that as the Timeout class and deletes this row with the host.time_sync one",
     },
     Pending {
         check: "host.time_sync",

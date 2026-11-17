@@ -43,12 +43,16 @@ pub(crate) enum Class {
     RefusedByPolicy,
     /// A stage ran out of time.
     Timeout,
+    /// The server answered HTTP with a status the spec does not accept.
+    HttpStatus,
+    /// The server accepted the connection and did not answer HTTP.
+    HttpFailed,
 }
 
 impl Class {
     /// Every class, for the tests that audit all the words.
     #[cfg(test)]
-    pub(crate) const ALL: [Class; 16] = [
+    pub(crate) const ALL: [Class; 18] = [
         Self::Dns,
         Self::Refused,
         Self::Blackhole,
@@ -65,6 +69,8 @@ impl Class {
         Self::NoTrustStore,
         Self::RefusedByPolicy,
         Self::Timeout,
+        Self::HttpStatus,
+        Self::HttpFailed,
     ];
 
     /// The id written to the report.
@@ -86,6 +92,8 @@ impl Class {
             Self::NoTrustStore => "no_trust_store",
             Self::RefusedByPolicy => "refused_by_policy",
             Self::Timeout => "timeout",
+            Self::HttpStatus => "http_status",
+            Self::HttpFailed => "http_failed",
         }
     }
 
@@ -124,6 +132,7 @@ impl Class {
                 NetFailure::TlsReset { .. } => Self::ResetAfterHello,
                 NetFailure::TlsAlert { .. } => Self::TlsAlert,
                 NetFailure::TlsUntrusted { failure, .. } => Self::of_trust(failure),
+                NetFailure::HttpFailed { .. } => Self::HttpFailed,
                 NetFailure::NoTrustRoots { .. } => Self::NoTrustStore,
                 _ => Self::TlsFailed,
             },
@@ -135,9 +144,9 @@ impl Class {
         })
     }
 
-    /// The `Fix:` text for `host` and `port` on `os`. `ip` is the address that did not answer, when one is
-    /// known. Every command in it is on the fix-text allow-list (a test audits all of them).
-    pub(crate) fn fix(self, os: Os, host: &str, port: u16, ip: Option<&str>) -> String {
+    /// The `Fix:` text for `host` and `port` on `os`. `detail` is the address that did not answer for a blackhole, or the status for
+    /// `http_status`, when one is known. Every command in it is on the fix-text allow-list (a test audits all of them).
+    pub(crate) fn fix(self, os: Os, host: &str, port: u16, detail: Option<&str>) -> String {
         let at = format!("{host}:{port}");
         let hosts_file = match os {
             Os::Windows => "`%SystemRoot%\\System32\\drivers\\etc\\hosts`",
@@ -163,7 +172,7 @@ impl Class {
             // text says "from this machine" (03 "Built in M1-095").
             Self::Blackhole => format!(
                 "No reply to SYN from {} in 3s, a firewall is dropping it. Ask the network team to allow tcp/{port} to {host} from this machine.",
-                ip.unwrap_or(&at)
+                detail.unwrap_or(&at)
             ),
             Self::Unreachable => {
                 let routes = match os {
@@ -219,6 +228,21 @@ impl Class {
             },
             Self::RefusedByPolicy => format!(
                 "rdy will not contact {at}: the name or address is link-local, metadata, unspecified, multicast or broadcast. Put the real endpoint address in the spec."
+            ),
+            Self::HttpStatus => {
+                let status = detail.unwrap_or("an unexpected status");
+                let why = match detail.and_then(|d| d.parse::<u16>().ok()) {
+                    Some(401 | 407) => "it wants credentials rdy does not send. If that is normal for this URL, add the status to `expect_status`.",
+                    Some(403) => "a firewall, a proxy allow list or the server refuses this machine. Ask the owner of the proxy or the server to allow it, or add 403 to `expect_status` if that is normal.",
+                    Some(404 | 410) => "the path does not exist there. Check the URL in the spec.",
+                    Some(429) => "the server is rate limiting. Run again later.",
+                    Some(500..=599) => "the server, or a proxy in front of it, is failing. Run again; if it repeats, ask the owner of the server.",
+                    _ => "that is not a status the spec accepts. Check the URL, or list the status in `expect_status`.",
+                };
+                format!("{at} answered {status}: {why}")
+            }
+            Self::HttpFailed => format!(
+                "{at} accepted the connection and did not answer HTTP correctly. Check that the port serves HTTP and not another protocol, and that the scheme in the spec (http or https) matches it. A TLS port reached with `http://` gives this."
             ),
             Self::Timeout => format!(
                 "A step for {at} ran out of time. Run again, and if it repeats check the nameservers this machine uses and the path to {host}."

@@ -28,6 +28,8 @@
 #![warn(missing_docs)]
 
 mod egress;
+#[cfg(test)]
+mod expect_cases;
 mod family;
 mod mtu;
 mod text;

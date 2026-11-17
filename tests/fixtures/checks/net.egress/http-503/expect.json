@@ -1,0 +1,54 @@
+{
+  "entry": {
+    "endpoints": [
+      {
+        "target": "http://api.acme.test:8080/health"
+      }
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "api.acme.test:8080 answered 503: the server, or a proxy in front of it, is failing. Run again; if it repeats, ask the owner of the server.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: api.acme.test:8080 (http_status 503)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.32",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 0
+            }
+          ],
+          "class": "http_status",
+          "connect_ms": 0,
+          "endpoint": "api.acme.test:8080",
+          "http_stage": {
+            "expect_status": [],
+            "first_byte_ms": 0,
+            "method": "HEAD",
+            "status": 503,
+            "total_ms": 0
+          },
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}
