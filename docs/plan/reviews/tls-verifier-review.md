@@ -30,7 +30,8 @@ on PR #143), the proxy route (M1-097), and the Java and Node stores (M2-134).
 not merged). The branch `m1/101-tls-verifier-review` is stacked on that head. PR #91 does not change
 `crates/rdy-engine/src/probe/net/`, `crates/rdy-engine/src/exec/` or 03 Appendix A, so the verifier and
 the table are as M1-092 to M1-099 merged them to main. If PR #91 changes again before it merges, the
-`net.tls_intercept` lines cited below must be checked again.
+`net.tls_intercept` lines cited below must be checked again. The branch has main merged (8757283f); no
+file cited below changed in that merge.
 
 ## Method
 
@@ -63,7 +64,7 @@ check that the pin rule depends on.
 | ID | Severity | Where | One line | Status | Owner |
 | --- | --- | --- | --- | --- | --- |
 | SF-01 | Should fix | `crates/rdy-engine/src/probe/net/tls.rs:76`; `crates/rdy-checks-net/src/tls_intercept.rs:497` to `:504` | No report says "no revocation check", which ADR 0014, 02 and 05 promise | open | M1-096 (fold) |
-| SF-02 | Should fix | `crates/rdy-engine/src/probe/net/tls/record.rs:275` to `:291`; `crates/rdy-engine/src/probe/net/tls/tests.rs:322` | No test proves the recording handshake checks the server's signature against the leaf | open | M1-184 (new, proposed) |
+| SF-02 | Should fix | `crates/rdy-engine/src/probe/net/tls/record.rs:275` to `:291`; `crates/rdy-engine/src/probe/net/tls/tests.rs:322` | No test proves the recording handshake checks the server's signature against the leaf | open | M1-184 (new, proposed; an M1-138 dependency, correction 55) |
 | N-01 | Nit | `crates/rdy-checks-net/src/tls_intercept/evidence.rs:221` to `:229` | A doubled separator after the home prefix shows the user name | open | M2-134 (fold) |
 | N-02 | Nit | `crates/rdy-checks-net/src/tls_intercept/evidence.rs:57`, `:71`, `:111` | "Self-signed" is a name equality, not a signature check | open | M2-136 (fold) |
 | N-03 | Nit | `crates/rdy-checks-net/src/tls_intercept.rs:734` to `:737` | `root_in_os_store` is `false`, not `null`, when the store could not be read | open | M2-136 (fold) |
@@ -84,8 +85,9 @@ None.
   uses it. `net.tls_intercept` passes a `public` chain and `net.egress` passes a TLS stage with no note,
   so a reader can take a pass to mean the leaf is not revoked. This is a disclosure gap, not a hole: a
   revoked certificate with a valid chain is outside what M1 promises to detect.
-- Fix: every `net.egress` endpoint result with a TLS stage, and every `net.tls_intercept` result with at
-  least one chain, carries the note `REVOCATION_NOTE` once. A test asserts it on a public chain for each.
+- Fix: every `net.egress` result with at least one TLS stage, and every `net.tls_intercept` result with
+  at least one chain, carries the note `REVOCATION_NOTE` once per result, not once per endpoint or host.
+  A test asserts it on a public chain for each.
 - Owner: fold into M1-096 (check-author), which already opens the `net.egress` result. Add M1-100 to its
   dependencies for the `net.tls_intercept` half.
 
@@ -96,15 +98,18 @@ None.
   `leaf` passes because the leaf is "the one certificate the server proves it holds the key of"
   (`evidence.rs:78`). The code is right today. But if either method returned
   `HandshakeSignatureValid::assertion()`, every test would still pass, and any server could replay a
-  pinned vendor leaf and pass the pin. The zero-application-bytes test also runs only on a chain the
-  system roots validate (`tests.rs:322`), not on the unknown-CA chain where the recording verifier and
-  the strict one disagree.
+  pinned vendor leaf and pass the pin. The facade asserts zero application bytes on a trusted chain
+  (`tests.rs:322`) and on an unknown-CA chain
+  (`the_live_backend_handshakes_on_loopback_and_reads_the_real_store`, `tests.rs:764` to `:813`), but
+  `net.tls_intercept`'s unknown-CA case (`tls_intercept/tests.rs:351`) does not.
 - Fix: a loopback server mode that presents a generated chain but signs with another key (a
   `ResolvesServerCert` that returns a `CertifiedKey` of leaf A and key B), on TLS 1.2 and on TLS 1.3.
   `Probe::tls_chain` returns `NetFailure::TlsFailed` and no chain, and `net.tls_intercept` with that
   leaf pinned gives `not_tested`, never `leaf`. Add the zero-application-bytes assertion to the
-  unknown-CA case of `tls_intercept/tests.rs` and to a facade test of an untrusted chain.
-- Owner: new M1-184 (rust-engineer, 1 h, proposed below). Not an M1-138 dependency.
+  unknown-CA case of `tls_intercept/tests.rs`.
+- Owner: new M1-184 (rust-engineer, 1 h, proposed below), an M1-138 dependency (correction 55). It stays
+  should-fix, because the code is right today, but the leaf pin is now the advice for blocking (AR-01)
+  and the one property it rests on has no test, so 0.1.0 does not ship without it.
 
 ## Nits
 
@@ -131,9 +136,11 @@ was found. Fold into M2-136.
 "issuer could not be read" wording does not apply. Fix: treat that case as `None`. Fold into M2-136.
 
 **N-05. The Appendix A test does not compare the Check column.** `command_table.rs` compares program,
-arguments, OS, timeout, exit codes, cap and path, not `CommandEntry::checks`. By hand all 14 rows match
-(`gpu.*` covers `gpu.fabric` and `gpu.devices`). Fix: compare them, with `gpu.*` as a wildcard. Fold into
-M2-006, which next edits the table.
+arguments, OS, timeout, exit codes, cap and path, not `CommandEntry::checks`. By hand all 14 rows match,
+with two aliases: `gpu.*` covers `gpu.fabric` and `gpu.devices`, and the Check cell of row 14, "engine
+Root probe (02)", is `engine.root` in the table (`table.rs:875`). Fix: compare them, with `gpu.*` as a
+wildcard and "engine Root probe (02)" mapped to `engine.root`. Fold into M2-006, which next edits the
+table.
 
 ## Accepted residuals
 
@@ -241,24 +248,25 @@ unauthenticated name match and only the pin proves anything. Accepted.
   warning, and a middlebox this machine trusts can append the pinned CA, so pin the leaf or set
   `forbid_interception` to block." (AR-01)
 - docs/plan/11-backlog.md, M1-096 row: add the SF-01 clause (Folds, below) and M1-100 to its dependencies.
-- docs/plan/11-backlog.md: add M1-184 (below).
+- docs/plan/11-backlog.md: add M1-184 (below), and add it to the dependencies of M1-138 (correction 55).
 - docs/plan/11-backlog.md, M1-116 row: the network page says the AR-01 sentence (Folds, below).
 - docs/plan/05-threat-model.md (mine), "TLS" bullet: AR-01 is recorded, and "the report says so" now says
   "from M1-096" (SF-01), on this branch.
 
 ## Tickets implied
 
-- [M1] M1-184 The recording handshake refuses a server without the leaf's key, and an untrusted chain gets zero application bytes | rust-engineer | 1h | M1-100 | a loopback server that presents a generated chain but signs with another key fails `Probe::tls_chain` with `NetFailure::TlsFailed` and returns no chain, on TLS 1.2 and on TLS 1.3; `net.tls_intercept` with that leaf pinned gives `not_tested`, never `leaf`; and an unknown-CA chain costs the loopback server zero application bytes, in the facade tests and in `net.tls_intercept`'s unknown-CA case. (M1-184 is the next free id on 2026-11-17; the coordinator assigns the final one.)
+- [M1] M1-184 The recording handshake refuses a server without the leaf's key, and an untrusted chain gets zero application bytes | rust-engineer | 1h | M1-100 | a loopback server that presents a generated chain but signs with another key fails `Probe::tls_chain` with `NetFailure::TlsFailed` and returns no chain, on TLS 1.2 and on TLS 1.3; `net.tls_intercept` with that leaf pinned gives `not_tested`, never `leaf`; and an unknown-CA chain costs the loopback server zero application bytes in `net.tls_intercept`'s unknown-CA case. An M1-138 dependency (correction 55). (M1-184 is the next free id on 2026-11-17; the coordinator assigns the final one.)
 
 Folds (extra exit-test clauses on existing tickets):
 
 | Existing ticket | Added clause | +h |
 | --- | --- | --- |
-| [M1] M1-096 net.egress HTTP stage and failure classes | SF-01: every `net.egress` endpoint with a TLS stage and every `net.tls_intercept` result with a chain carries the note `no revocation check` (`REVOCATION_NOTE`) once, and a test asserts it for each on a public chain (adds M1-100 as a dependency) | 0.25 |
+| [M1] M1-096 net.egress HTTP stage and failure classes | SF-01: every `net.egress` result with a TLS stage and every `net.tls_intercept` result with a chain carries the note `no revocation check` (`REVOCATION_NOTE`) once per result, not once per endpoint or host, and a test asserts it for each on a public chain (adds M1-100 as a dependency) | 0.25 |
+| [M1] M1-138 Tag and release 0.1.0 | SF-02: M1-184 joins the dependencies (correction 55). The leaf pin is now the advice for blocking, and the signature check it rests on has no test until M1-184 lands | 0 |
 | [M1] M1-116 Check family renderer and the host, network and Kubernetes pages | AR-01: the network page says a CA pin is at best a warning until M2-135, so pin the leaf or set `forbid_interception` to block | 0.1 |
 | [M2] M2-134 net.tls_intercept reports the Java and Node stores | N-01: a doubled separator after any usual home prefix does not show the user name | 0.1 |
 | [M2] M2-136 net.tls_intercept finds the real trust anchor | N-02: "self-issued" wording; N-03: `root_in_os_store` is null unless the store was found; N-04: an issuer x509-parser cannot render is `None` | 0.25 |
-| [M2] M2-006 Windows job objects | N-05: the Appendix A test also compares the Check column with `CommandEntry::checks` | 0.1 |
+| [M2] M2-006 Windows job objects | N-05: the Appendix A test also compares the Check column with `CommandEntry::checks`, with `gpu.*` as a wildcard and "engine Root probe (02)" as `engine.root` | 0.1 |
 
 ## Residuals already recorded elsewhere
 
@@ -275,6 +283,7 @@ Folds (extra exit-test clauses on existing tickets):
 | A host behind a proxy is not tried. | 03 M1-099 build note | M1-097 |
 | The env harness `Timeout` class for `net.tls_intercept`. | 12-progress M1-100, correction 52 | M1-179 |
 
-Must fix: 0 open. Should fix: 2 open (SF-01, SF-02). Nits: 5 (N-01 to N-05). Accepted residuals: 2 (AR-01,
+Must fix: 0 open. Should fix: 2 open (SF-01, SF-02; M1-184 for SF-02 is an M1-138 dependency). Nits: 5
+(N-01 to N-05). Accepted residuals: 2 (AR-01,
 AR-02). Appendix A matches the command table. The review is of the PR #91 head, so the M1-101 exit test
 holds once PR #91 merges unchanged.
