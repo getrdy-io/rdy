@@ -94,8 +94,8 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
-`checks/k8s.crds/` holds 28 clusters (the definition cases `crds-present`, `crd-group-missing`, `crd-version-old`, `crd-not-in-group`,
-`crd-any-version`, `crd-discovery-forbidden`, `crd-document-forbidden`, `crd-document-gone`, the operator cases `operator-ready`,
+`checks/k8s.crds/` holds 29 clusters (the definition cases `crds-present`, `crd-group-missing`, `crd-version-old`, `crd-not-in-group`,
+`crd-any-version`, `crd-aggregated`, `crd-discovery-forbidden`, `crd-document-forbidden`, `crd-document-gone`, the operator cases `operator-ready`,
 `operator-not-ready`, `operator-partly-ready`, `operator-scaled-to-zero`, `operator-missing`, `operator-forbidden`, `operator-old`,
 `operator-prerelease`, `operator-equal`, `operator-digest-label`, `operator-label-differs`, `operator-latest`, `operator-sidecar`,
 `operator-ambiguous`, `operator-registry-port`, `operator-hostile`, and `everything-wrong`, `warn-only`, `two-groups`, `namespace-secrets`),

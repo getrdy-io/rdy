@@ -38,7 +38,6 @@ use rdy_engine::check::{
 };
 use rdy_spec::check::{CrdRule, K8sCrds, OperatorRule};
 
-use crate::client::guard::RULE_SECRETS;
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
 
@@ -131,9 +130,8 @@ impl Check for CrdsCheck {
 type Mapper<'a> = &'a (dyn Fn(&kube::Error) -> KubeError + Sync);
 
 /// Sorts the result of one request. A refusal for this identity, a missing object and another status of the
-/// server are answers. The guard refusing the path is one too: it can only be a name that is not a path
-/// segment of the shape kube builds, which the server could not have served. Anything else (the network,
-/// the credentials) fails the check.
+/// server are answers. The guard refusing the path is one too, and says nothing about the cluster. Anything
+/// else (the network, the credentials) fails the check.
 fn read<T, U>(
     mapper: Mapper<'_>,
     result: Result<T, kube::Error>,
@@ -144,12 +142,9 @@ fn read<T, U>(
         Err(error) => match mapper(&error) {
             KubeError::Forbidden { .. } => Ok(Fetched::Unread(Unread::Forbidden)),
             KubeError::Api { code: 404, .. } => Ok(Fetched::Missing),
-            KubeError::Refused { rule, .. } if rule == RULE_SECRETS => {
-                Ok(Fetched::Unread(Unread::Refused))
-            }
-            // Any other refusal is the guard's path shape rule on a version that is no API version, which
-            // no server serves.
-            KubeError::Refused { .. } => Ok(Fetched::Missing),
+            // The guard refused the path. Whatever the rule, rdy did not ask, so nothing is known: partial,
+            // never a block.
+            KubeError::Refused { .. } => Ok(Fetched::Unread(Unread::Refused)),
             KubeError::Api { code, .. } => Ok(Fetched::Unread(Unread::Status(code))),
             other => Err(CheckError::Failed {
                 message: other.to_string(),
@@ -274,10 +269,12 @@ impl CrdsCheck {
                     .into_iter()
                     .filter(|group| wanted.contains(&group.name))
                     .map(|group| {
+                        // Only text in the shape of an API version is ever put in a path.
                         let versions = group
                             .versions
                             .into_iter()
                             .map(|version| version.version)
+                            .filter(|version| judge::is_version(version))
                             .collect();
                         (group.name, versions)
                     })

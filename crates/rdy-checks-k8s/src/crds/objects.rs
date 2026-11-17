@@ -253,11 +253,26 @@ pub(super) fn parse_tag(text: &str) -> Option<Tag> {
         return None;
     }
     let version = Version::parse(numbers).ok()?;
-    let lower = rest.to_ascii_lowercase();
-    let pre = ["alpha", "beta", "rc", "pre", "dev", "snapshot", "nightly"]
-        .iter()
-        .any(|word| lower.contains(word));
-    Some(Tag { version, pre })
+    Some(Tag {
+        version,
+        pre: is_pre_release(rest),
+    })
+}
+
+/// True when the suffix of a tag marks a pre-release. Build metadata after a `+` is ignored, the rest is cut
+/// at `-`, `.`, `_` and `+` into tokens, and a token counts only when it is a whole word (`rc`, `alpha`,
+/// `beta`, `pre`, `dev`, `snapshot`, `nightly`) with an optional number after it. So `-rc.1` and `-beta2` are
+/// pre-releases, and `-source`, `-express`, `-devicemapper`, `-arch64` and `-prebuilt` are not.
+fn is_pre_release(suffix: &str) -> bool {
+    let before_build = suffix.split('+').next().unwrap_or(suffix);
+    before_build.split(['-', '.', '_']).any(|token| {
+        let word = token.to_ascii_lowercase();
+        let word = word.trim_end_matches(|c: char| c.is_ascii_digit());
+        matches!(
+            word,
+            "alpha" | "beta" | "rc" | "pre" | "dev" | "snapshot" | "nightly"
+        )
+    })
 }
 
 /// The tag of an image reference: the part after the last `:` of the last path part. A digest is not a tag.

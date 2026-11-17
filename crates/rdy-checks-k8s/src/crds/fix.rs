@@ -30,7 +30,7 @@ pub(super) fn upgrade(group: &str) -> String {
 /// The fix for an operator Deployment that is not found.
 pub(super) fn operator_missing(namespace: &str, deployment: &str) -> String {
     format!(
-        "Deployment `{deployment}` was not found in namespace `{namespace}`. Install the operator from your registry or mirror: `helm install <release> <chart> -n {namespace} --create-namespace`. If it runs under another name, list what is there: `kubectl get deployments -n {namespace}`, and tell the vendor the right name."
+        "No Deployment `{deployment}` was found in namespace `{namespace}`. The operator may be a StatefulSet, or managed by OLM (check with `kubectl get statefulsets,subscriptions -A`). If it is not installed, install the operator from your registry or mirror: `helm install <release> <chart> -n {namespace} --create-namespace`. If it runs under another name, list what is there: `kubectl get deployments -n {namespace}`, and tell the vendor the right name."
     )
 }
 
@@ -67,9 +67,18 @@ pub(super) fn crd_name() -> &'static str {
 
 /// The fix for permissions the identity lacked: what to ask for, and the commands that check each.
 pub(super) fn grants(commands: &[String], wanted: &[String]) -> String {
-    format!(
+    let mut text = format!(
         "Ask the cluster admin to grant this identity: {}. Check each with {}.",
         wanted.join(", "),
         commands.join(", ")
-    )
+    );
+    if wanted
+        .iter()
+        .any(|grant| grant.contains("deployments.apps"))
+    {
+        text.push_str(
+            " The file examples/rbac/rdy-readonly-operator.yaml in the rdy repository is a Role for it, one namespace and one name.",
+        );
+    }
+    text
 }

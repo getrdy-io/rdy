@@ -251,7 +251,7 @@ pub(super) fn judge(params: &K8sCrds, found: &Gathered) -> Finding {
         );
     }
     sink.notes.push(
-        "Definitions are read from API discovery, which lists a CRD only once it is established. One that is still being installed, or whose names conflict, shows as missing. The CustomResourceDefinition objects are not read."
+        "Definitions are read from API discovery, so installed means served: aggregated APIs and built-in groups count (pods.metrics.k8s.io and deployments.apps pass), a CRD that is being deleted stays listed, and storage versions and deprecation are not visible. A CRD that is still being installed, or whose names conflict, shows as missing. The CustomResourceDefinition objects are not read."
             .to_owned(),
     );
 
@@ -452,7 +452,9 @@ fn judge_operator(read: &OperatorRead, sink: &mut Sink, quiet: &mut Vec<String>)
             sink.operator_rows.push(row("missing"));
             sink.issues.push(Issue {
                 level: Level::Warn,
-                message: format!("Operator Deployment {name} was not found in namespace {ns}"),
+                message: format!(
+                    "No Deployment named {name} in {ns}; the operator may be a StatefulSet or OLM-managed"
+                ),
                 fix: fix::operator_missing(ns, name),
             });
         }
@@ -462,8 +464,8 @@ fn judge_operator(read: &OperatorRead, sink: &mut Sink, quiet: &mut Vec<String>)
                 *why,
                 &format!("operator Deployment {name} in namespace {ns}"),
                 Some((
-                    format!("get deployments.apps in {ns}"),
-                    format!("`kubectl auth can-i get deployments.apps -n {ns}`"),
+                    format!("get deployments.apps/{name} in {ns}"),
+                    format!("`kubectl auth can-i get deployments.apps/{name} -n {ns}`"),
                 )),
             );
         }

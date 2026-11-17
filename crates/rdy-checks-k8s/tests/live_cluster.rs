@@ -402,7 +402,6 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
-    ("get", "apps", "deployments", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -561,7 +560,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .await,
     );
     // k8s.crds reads an operator Deployment by name. CoreDNS is a Deployment of every kind cluster, and the
-    // ClusterRole's `get` reaches it without the optional Role.
+    // kind job grants it through the operator template (a Role of kube-system, by name).
     assert_served(
         "deployment by name (k8s.crds)",
         false,
@@ -623,6 +622,13 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         ("list", "", "secrets", None, None),
         // The deployment grant is a get by name, not a list.
         ("list", "apps", "deployments", Some("default"), None),
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("default"),
+            Some("coredns"),
+        ),
         ("delete", "apps", "deployments", Some("default"), None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
@@ -678,8 +684,12 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
                         )
                 })
             };
-            let optional =
-                *namespace == "kube-system" && listed(&[("list", "apps", "deployments", "")]);
+            let optional = *namespace == "kube-system"
+                && listed(&[
+                    ("list", "apps", "deployments", ""),
+                    // The operator template, rendered for CoreDNS by the kind job.
+                    ("get", "apps", "deployments", "coredns"),
+                ]);
             if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
                 unexpected.push(format!("{namespace}: {grant:?}"));
             }

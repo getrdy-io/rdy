@@ -343,6 +343,10 @@ apis("crd-any-version", extra=[(GROUP, ["v1", "v1beta1"])])
 served("crd-any-version", GROUP, "v1", [("issuers", "Issuer", None)])
 served("crd-any-version", GROUP, "v1beta1", CERTS)
 
+case("crd-aggregated", "An aggregated API (metrics.k8s.io) is listed, so a name from it passes: installed means served")
+apis("crd-aggregated", extra=[("metrics.k8s.io", ["v1beta1"])])
+served("crd-aggregated", "metrics.k8s.io", "v1beta1", [("pods", "PodMetrics", None), ("nodes", "NodeMetrics", None)])
+
 case("crd-discovery-forbidden", "The identity may not read the API group list")
 apis("crd-discovery-forbidden", code=403)
 

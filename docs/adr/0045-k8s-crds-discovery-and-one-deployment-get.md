@@ -1,6 +1,6 @@
 # ADR 0045: `k8s.crds` reads definitions from API discovery and operators with one `get deployments` grant
 
-- Status: Proposed (M1-164), for k8s-expert and security-reviewer
+- Status: Proposed, security-reviewed with fixes (PR #64)
 - Date: 2026-11-17
 
 ## Context
@@ -24,8 +24,11 @@ new grant (M1-161 and M1-162 each had to move the guard table, the example role 
 3. **One new grant: `get` on `apps` `deployments` by name, in the namespace the spec names.** The operator
    lives in a namespace the spec chooses, so the guard shape is new: `Access::GetInNamespace(Only)`, a named
    object of a namespaced resource in the namespaces `Only` admits (any, for this entry). It is the one
-   grant this ticket adds. The example role holds it as a cluster role rule, with a comment that says how to
-   move it into a `Role` per operator namespace. A list of deployments outside `kube-system` stays refused.
+   grant this ticket adds. It is not in the cluster role. `examples/rbac/rdy-readonly-operator.yaml` is an
+   optional template: a `Role` and `RoleBinding` in the operator namespace with `resourceNames` of the one
+   Deployment and `get` only, applied once per operator (like the optional `kube-system` Role). Without it the
+   operator is partial with `get deployments.apps/<name> in <namespace>` and a `kubectl auth can-i` hint that
+   names the object. A list of deployments outside `kube-system` stays refused.
 4. **The Deployment is read through a private wire type.** It names the name, namespace, version label,
    `spec.replicas`, `status.readyReplicas` and the name and image of each container (at most 16), and
    nothing else. Environment values, arguments and annotations are skipped by serde while parsing, so they
@@ -40,9 +43,13 @@ new grant (M1-161 and M1-162 each had to move the guard table, the example role 
 
 ## Consequences
 
-- A token holder with the new rule can `get` any Deployment, env values included, in the cluster. rdy drops
-  them while parsing, and the example role says so. The list grant of `k8s.nodes` and `k8s.dns` is already as
-  wide in `kube-system`. A cluster that wants less binds the rule per namespace.
-- The deployment `get` appears in `missing_grants` as `get deployments.apps in <namespace>` when absent.
+- A token holder with the template applied can `get` the named Deployment, env values included. rdy drops
+  them while parsing. The grant is one namespace and one name per operator, so it is narrower than the
+  `kube-system` list of `k8s.nodes`, and the cluster role is unchanged.
+- The deployment `get` appears in `missing_grants` as `get deployments.apps/<name> in <namespace>` when absent.
+- "Installed" means "served". Aggregated APIs and built-in groups count (`pods.metrics.k8s.io` and
+  `deployments.apps` pass), a CRD that is being deleted stays listed, and storage versions and deprecation are
+  not visible. A fixture (`crd-aggregated`) documents it.
+- A 404 on the Deployment is a warn that says the operator may be a StatefulSet or OLM-managed.
 - If a vendor needs `Established` or the storage version later, that is a spec key and a new decision,
   with a `get customresourcedefinitions` grant of its own.

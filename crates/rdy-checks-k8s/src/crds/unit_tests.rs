@@ -28,6 +28,18 @@ fn a_tag_is_read_as_two_to_four_numbers_and_an_optional_suffix() {
         ("1.15.0-beta2", "1.15.0 (a pre-release)"),
         ("1.15.0-ALPHA", "1.15.0 (a pre-release)"),
         ("2.0.0-dev", "2.0.0 (a pre-release)"),
+        ("1.2.3-rc1", "1.2.3 (a pre-release)"),
+        ("1.2.3-pre.4", "1.2.3 (a pre-release)"),
+        ("1.2.3-nightly_20260101", "1.2.3 (a pre-release)"),
+        // Build metadata after a plus is not looked at.
+        ("1.2.3+rc1", "1.2.3"),
+        // A word that merely contains one of the markers is not a pre-release.
+        ("1.2.3-source", "1.2.3"),
+        ("1.2.3-express", "1.2.3"),
+        ("1.2.3-devicemapper", "1.2.3"),
+        ("1.2.3-arch64", "1.2.3"),
+        ("1.2.3-prebuilt", "1.2.3"),
+        ("1.2.3-ubi8-minimal", "1.2.3"),
     ] {
         assert_eq!(text(tag).as_deref(), Some(want), "{tag}");
     }

@@ -351,6 +351,23 @@ async fn a_definition_without_versions_is_found_at_any_version() {
 }
 
 #[tokio::test]
+async fn an_aggregated_api_passes_because_installed_means_served() {
+    let rig = rig("crd-aggregated");
+    let finding = rig
+        .finding(json!({"crds": crds(&["pods.metrics.k8s.io"], Some(&["v1beta1"]))}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(rig.paths(), [APIS, "/apis/metrics.k8s.io/v1beta1"]);
+    assert!(
+        notes(&finding)
+            .contains("installed means served: aggregated APIs and built-in groups count"),
+        "{}",
+        notes(&finding)
+    );
+    rig.audit();
+}
+
+#[tokio::test]
 async fn a_group_list_the_identity_may_not_read_is_partial_never_a_block() {
     let rig = rig("crd-discovery-forbidden");
     let finding = rig
@@ -491,7 +508,7 @@ async fn a_missing_operator_deployment_warns_and_never_blocks() {
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert_eq!(
         finding.message,
-        "Operator Deployment acme-operator was not found in namespace acme-system"
+        "No Deployment named acme-operator in acme-system; the operator may be a StatefulSet or OLM-managed"
     );
     assert!(
         fix_of(&finding).contains("`kubectl get deployments -n acme-system`"),
@@ -509,10 +526,13 @@ async fn a_deployment_the_identity_may_not_get_is_partial_with_the_grant() {
         .finding(json!({"operators": [operator(Some("1.13"))]}))
         .await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
-    assert_eq!(grants(&finding), ["get deployments.apps in acme-system"]);
+    assert_eq!(
+        grants(&finding),
+        ["get deployments.apps/acme-operator in acme-system"]
+    );
     assert_eq!(
         fix_of(&finding),
-        "Ask the cluster admin to grant this identity: get deployments.apps in acme-system. Check each with `kubectl auth can-i get deployments.apps -n acme-system`."
+        "Ask the cluster admin to grant this identity: get deployments.apps/acme-operator in acme-system. Check each with `kubectl auth can-i get deployments.apps/acme-operator -n acme-system`. The file examples/rbac/rdy-readonly-operator.yaml in the rdy repository is a Role for it, one namespace and one name."
     );
     assert_eq!(engine(&rig, finding, None).status, Status::Warn);
     rig.audit();
@@ -767,6 +787,26 @@ async fn a_namespace_called_secrets_is_refused_by_the_guard_and_not_a_block() {
         ["/apis/apps/v1/namespaces/secrets/deployments/acme-operator"]
     );
     rig.audit();
+}
+
+#[tokio::test]
+async fn a_path_the_guard_refuses_is_not_read_as_a_missing_definition() {
+    let rig = rig("crds-present");
+    let client = rig.cluster.harness.client(rig.ctx.probe());
+    let mapper = |error: &kube::Error| rig.cluster.map_error(error);
+    let mut docs = Docs {
+        client: &client,
+        mapper: &mapper,
+        cache: std::collections::BTreeMap::new(),
+        asked: 0,
+    };
+    // `vFOO` has the shape of no API version, so the guard refuses the path before anything is sent.
+    let got = docs
+        .plurals(&rig.ctx, "pki.acme.example", "vFOO")
+        .await
+        .expect("no error");
+    assert_eq!(got, Err(Unread::Refused));
+    assert!(rig.paths().is_empty());
 }
 
 // ---- bounds ---------------------------------------------------------------------------------------------------

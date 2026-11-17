@@ -18,11 +18,19 @@ use serde_json::Value;
 
 /// The documents of the example, parsed.
 fn documents() -> Vec<Value> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/rbac/rdy-readonly.yaml");
-    let text = std::fs::read_to_string(path).expect("examples/rbac/rdy-readonly.yaml exists");
-    text.split("\n---\n")
-        .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML"))
-        .collect()
+    // The main file and the optional operator template, which holds the Role of the `k8s.crds` read.
+    let mut docs = Vec::new();
+    for file in ["rdy-readonly.yaml", "rdy-readonly-operator.yaml"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/rbac")
+            .join(file);
+        let text = std::fs::read_to_string(path).expect("the example file exists");
+        docs.extend(
+            text.split("\n---\n")
+                .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML")),
+        );
+    }
+    docs
 }
 
 /// `group/resource verb` for every rule of the documents of `kind`, and the namespace of the role.
@@ -73,9 +81,13 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::Get(Only::Any) => ("get", None, String::new()),
                 // A get of one name is granted by name, so the role cannot read any other object.
                 Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
-                // A get of any name in a namespace the spec names: a ClusterRole rule (a Role in each
-                // namespace is the narrower choice the example's comment points out).
-                Access::GetInNamespace(Only::Any) => ("get", None, String::new()),
+                // A get of a named object in a namespace the spec names: the optional operator template,
+                // a Role of one namespace and one name.
+                Access::GetInNamespace(Only::Any) => (
+                    "get",
+                    Some("<operator-namespace>".to_owned()),
+                    " name=<operator-deployment>".to_owned(),
+                ),
                 Access::GetInNamespace(Only::Name(ns)) => {
                     ("get", Some((*ns).to_owned()), String::new())
                 }
@@ -153,7 +165,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings.len(), 3);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]
