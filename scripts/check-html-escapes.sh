@@ -149,15 +149,29 @@ tscan() {
 # the tag early and a word inside a string is not a use: `{{ "}}" ~ json }}` counts 1 and
 # `{% let (s, a) = ("%}", json) %}<p title="{{ a }}">` counts 1 (PR #89 security review S2). An unterminated
 # tag or string runs to the end of the file. awk runs under LC_ALL=C, and the sum is taken in END.
+# `{# ... #}` comments are skipped before tags are looked for, so a quote in a comment cannot start a
+# string that hides a later use. A comment inside a comment, or one that never ends, is a failure, and so is
+# any `{% raw %}` block (the templates have none): both fail closed, because the scan cannot tell what
+# askama makes of them. It prints the count, a space and the number of such comments.
 count_json() {
   LC_ALL=C awk '
-    BEGIN { RS = "\001"; total = 0 }
+    BEGIN { RS = "\001"; total = 0; bad = 0 }
     {
       s = $0
       len = length(s)
       i = 1
       while (i <= len) {
         two = substr(s, i, 2)
+        if (two == "{#") {
+          # A comment holds no tags. A comment inside a comment, or one that never ends, is not read:
+          # it is reported, because the scan cannot tell what askama makes of it.
+          rest = substr(s, i + 2)
+          end = index(rest, "#}")
+          if (end == 0) { bad++; break }
+          if (index(substr(rest, 1, end - 1), "{#") > 0) bad++
+          i += 2 + end + 1
+          continue
+        }
         if (two != "{{" && two != "{%") { i++; continue }
         closer = (two == "{{") ? "}}" : "%}"
         i += 2
@@ -181,7 +195,7 @@ count_json() {
         if (word == "json") total++
       }
     }
-    END { print total + 0 }
+    END { print total + 0, bad + 0 }
   '
 }
 JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
@@ -191,8 +205,16 @@ first_template=""
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -n "$first_template" ] || first_template=$file
-  n=$(tr '\n\r\t' '   ' <"$file" | count_json)
+  counted=$(tr '\n\r\t' '   ' <"$file" | count_json)
+  n=${counted%% *}
   n=${n:-0}
+  bad=${counted#* }
+  if [ "${bad:-0}" -gt 0 ] 2>/dev/null; then
+    printf '%s\t%s\t%s\t%s\n' "$file" 0 "a {# comment #} inside a comment, or one that never ends, cannot be read safely" "(comment)" >>"$tmp/hits"
+  fi
+  if tr '\n\r\t' '   ' <"$file" | grep -Eq '[{]%[-+~]?[[:space:]]*raw([^A-Za-z0-9_]|$)'; then
+    printf '%s\t%s\t%s\t%s\n' "$file" 0 "a raw block hides template text from this scan, and the templates do not use one" "{% raw %}" >>"$tmp/hits"
+  fi
   json_uses=$((json_uses + n))
   if grep -Fxq -- "$JSON_LINE" "$file"; then
     json_line_found=$((json_line_found + 1))

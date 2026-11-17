@@ -160,6 +160,33 @@ fresh
 printf '%s\n' '<p>{{ "json" }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: the word json inside a string is not a use" 0 "ok:"
 fresh
+printf '%s\n' "{# {{ ' #}{% let a = json %}{# ' }} #}<p title=\"{{ a }}\">" >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a quote in a comment does not hide a json after it, counts 1" 1 "found 1 use(s) of json"
+fresh
+printf '%s\n' "{% raw %}{{ '{% endraw %}{% let a = json %}{% raw %}' }}{% endraw %}{{ a }}" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a raw block that hides a json fails" 1 "raw block"
+fresh
+printf '%s\n' '{# {{ " #}<p title={{ json }}>{# " #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a double quote in a comment does not hide a json, the allowed line plus this counts 2" 1 "found 2 use(s) of json"
+fresh
+printf '%s\n' '{% raw %}{{ "{% endraw %}<p title={{ json }}>{% raw %}" }}{% endraw %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a raw block with a quote that hides a json fails" 1 "raw block"
+fresh
+printf '%s\n' '{%- raw -%}x{%- endraw -%}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a raw block with trim marks fails" 1 "raw block"
+fresh
+printf '%s\n' '<p>{{ rawness }} {{ x.raw_y }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: names that only start with raw pass" 0 "ok:"
+fresh
+printf '%s\n' '{# a {# b #}{{ json }} #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a comment inside a comment fails" 1 "inside a comment"
+fresh
+printf '%s\n' '{# never ends {{ json }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a comment that never ends fails" 1 "never ends"
+fresh
+printf '%s\n' '<p>{# a comment #}{{ name }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a plain comment passes" 0 "ok:"
+fresh
 printf '%s\n' 'a::b in plain text, and {# askama::filters::Safe in a comment #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: :: outside a tag and inside a comment passes" 0 "ok:"
 fresh
