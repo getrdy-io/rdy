@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-45: M1 181 tickets, 400 h, 335.5 h core; M2 127 tickets, 456.5 h; all milestones 408 tickets,
-1370 h, 1305.5 h core.
+correction-45: M1 181 tickets, 400 h, 335.5 h core; M2 128 tickets, 458.5 h; all milestones 409 tickets,
+1372 h, 1307.5 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -235,6 +235,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   cuts action rows, then Found and Needed lines. M1-175 builds k8s.dns. New M2-121 to M2-125.
 - 43: records and approves the 03 changes of #64 (k8s.crds reads discovery) and #65 (k8s.ingress). M1-175
   builds k8s.crds and k8s.ingress. Two k8s verdicts go to the founder. New M2-126 and M2-127.
+- 44: records #68's decisions (M1-143). The run header prints at the end, so `--verbose` event lines come
+  before it. `--verbose` turns the live line off (M1-142's exit test), in the second of #60 and #68 to merge.
+  A full stderr pipe under `--verbose` ends in the watchdog (07 5.2). New M2-128 moves the header earlier.
 - 45: new core M1-181: `rdy run` writes the HTML report next to the JSON, and M1-138 depends on it. M1-100
   takes #71's deferrals (pins, the generated-chain rig, the Timeout case) and grows to 3.5 h. M1-101 moves
   to week 21.
@@ -380,6 +383,10 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     - M2-126: the guard pins the Service list and the operator Deployment GET to the spec's namespaces
       (#65 security review).
     - M2-127: CI builds the pty probe examples once before nextest (#66 review).
+  - Follow-ups that correction-44 gave ids:
+    - M2-128: the run header prints before progress starts, so 07's M1-142 rule holds (#68 reviews).
+  - Whichever of #60 (M1-142) and #68 (M1-143) merges second passes `quiet or verbose` to
+    `live_line_allowed` and updates the run_cmd.rs docs sentence on `--quiet` and `--verbose`.
 
 ## For the founder
 
