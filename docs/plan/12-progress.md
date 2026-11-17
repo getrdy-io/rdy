@@ -375,7 +375,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-179 | todo | | The env harness counts a hang the check survived as the Timeout class | added 2026-11-06 (correction-38, PR #35 review)
 
-- M1-180 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-11-06 | Live macOS and Windows runs keep the fields null until M2-005
+- M1-180 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-11-06 | Live macOS and Windows runs keep the fields null until M2-005; added 2026-11-06 (correction-41, PR #42 reviews)
 
 ## Summary
 

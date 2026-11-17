@@ -697,7 +697,12 @@ fn host_and_log(machine: Replay) -> (Host, Vec<rdy_spec::result::Action>) {
 
 fn reads_of_os_release(log: &[rdy_spec::result::Action]) -> usize {
     log.iter()
-        .filter(|a| format!("{a:?}").contains("os-release"))
+        .filter(|a| {
+            a.fields
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.ends_with("os-release"))
+        })
         .count()
 }
 
@@ -769,9 +774,21 @@ fn the_header_prints_the_os_id_and_version_from_os_release() {
     assert!(row.contains("   rhel 9.4   "), "{row}");
 }
 
-#[cfg(target_os = "linux")]
 #[test]
 fn the_header_prints_the_family_alone_when_there_is_no_os_release() {
     let row = header_host_row(host_of(Replay::new()));
     assert!(row.contains("   linux   "), "{row}");
+}
+
+#[test]
+fn the_html_report_carries_the_pretty_name_from_os_release() {
+    let host = host_of(Replay::new().file("/etc/os-release", RHEL_94));
+    let mut report = small_report();
+    report.host = host;
+    let redacted = redactor().redact_report(report).expect("redacts");
+    let page = rdy_engine::report::render_html(&redacted).expect("renders");
+    assert!(
+        page.contains("Red Hat Enterprise Linux 9.4 (Plow)"),
+        "pretty name missing"
+    );
 }

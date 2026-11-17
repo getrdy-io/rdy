@@ -341,13 +341,14 @@ impl ReportSink for FolderSink {
 fn stand_in_host() -> Host {
     Host::new(
         "unknown",
-        HostOs::new(host_os_family()),
+        HostOs::new(os_family(current_os())),
         std::env::consts::ARCH,
     )
 }
 
-fn host_os_family() -> HostOsFamily {
-    match current_os() {
+/// The report family for an OS, taken from the probe that reads the facts and not from the build.
+fn os_family(os: Os) -> HostOsFamily {
+    match os {
         Os::Macos => HostOsFamily::Macos,
         Os::Windows => HostOsFamily::Windows,
         _ => HostOsFamily::Linux,
@@ -643,7 +644,7 @@ async fn host_facts(probe: &Probe) -> Host {
         Ok(NativeValue::Uname(info)) => Some(info),
         _ => None,
     };
-    let family = host_os_family();
+    let family = os_family(probe.os());
     let arch = uname
         .as_ref()
         .map_or_else(|| std::env::consts::ARCH.to_owned(), |u| u.machine.clone());
