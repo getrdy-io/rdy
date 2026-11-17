@@ -1,0 +1,73 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory",
+      "io",
+      "pids"
+    ],
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory",
+        "io",
+        "pids"
+      ],
+      "version": "v2"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids` available",
+    "notes": [],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "cpu": "ok",
+        "io": "ok",
+        "memory": "ok",
+        "pids": "ok"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "memory",
+        "misc",
+        "pids",
+        "rdma"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io",
+        "memory",
+        "pids"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "io": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "memory": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "pids": {
+          "enabled": true,
+          "hierarchy": 0
+        }
+      }
+    },
+    "partial": null
+  }
+}
