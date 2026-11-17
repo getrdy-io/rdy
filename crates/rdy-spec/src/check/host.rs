@@ -610,10 +610,11 @@ impl<'de> Deserialize<'de> for ValueRule {
 
 /// A kernel parameter name for `host.sysctl`, such as `vm.max_map_count`.
 ///
-/// With dots as separators, a name is dot-separated parts. With slashes, as in
-/// `net/ipv4/conf/eth0.100/rp_filter`, a part may hold dots, for the name of an interface. A part
-/// starts with a letter, a digit or `_`, so no part is empty, `.` or `..`. The name is at most 128
-/// characters.
+/// The first `.` or `/` in the name is its separator. With dots as separators, a name is
+/// dot-separated parts, and a `/` inside a part stands for a dot of an interface name:
+/// `net.ipv4.conf.eth0/100.rp_filter`. With slashes, as in `net/ipv4/conf/eth0.100/rp_filter`, a part
+/// may hold dots. Both examples are the same parameter. A part starts with a letter, a digit or `_`,
+/// so no part is empty, `.` or `..`. The name is at most 128 characters.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SysctlName(String);
 
@@ -628,29 +629,49 @@ impl SysctlName {
     }
 
     /// The name as a path under `/proc/sys`, with slashes: `vm/max_map_count` for both
-    /// `vm.max_map_count` and `vm/max_map_count`. Two names with the same path are the same parameter.
+    /// `vm.max_map_count` and `vm/max_map_count`. The separator is the first `.` or `/` in the name.
+    /// If it is a dot, every `.` and `/` swap places, as the kernel tools do, so
+    /// `net.ipv4.conf.eth0/100.rp_filter` and `net/ipv4/conf/eth0.100/rp_filter` give the same path.
+    /// Two names with the same path are the same parameter.
     #[must_use]
     pub fn canonical(&self) -> String {
-        if self.0.contains('/') {
-            self.0.clone()
-        } else {
-            self.0.replace('.', "/")
-        }
+        canonical_path(&self.0)
     }
 
     fn is_valid(text: &str) -> bool {
-        let start = |c: char| c.is_ascii_alphanumeric() || c == '_';
-        let (separator, inner): (char, fn(char) -> bool) = if text.contains('/') {
-            ('/', |c| {
-                c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')
+        if text.chars().count() > Self::MAX_CHARS {
+            return false;
+        }
+        let path = canonical_path(text);
+        let dot_first = text
+            .find(['.', '/'])
+            .is_some_and(|i| text[i..].starts_with('.'));
+        path.split('/').all(|part| {
+            part.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                // A dot-first name is held to the dot rules: no empty piece between dots.
+                && (!dot_first || (!part.ends_with('.') && !part.contains("..")))
+        })
+    }
+}
+
+/// The path form of `text`: unchanged if the first `.` or `/` is a slash, with `.` and `/` swapped if
+/// it is a dot.
+fn canonical_path(text: &str) -> String {
+    match text.find(['.', '/']) {
+        Some(i) if text[i..].starts_with('.') => text
+            .chars()
+            .map(|c| match c {
+                '.' => '/',
+                '/' => '.',
+                other => other,
             })
-        } else {
-            ('.', |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-        };
-        text.chars().count() <= Self::MAX_CHARS
-            && text
-                .split(separator)
-                .all(|part| part.chars().next().is_some_and(start) && part.chars().all(inner))
+            .collect(),
+        _ => text.to_owned(),
     }
 }
 
@@ -692,7 +713,7 @@ impl<'de> Deserialize<'de> for SysctlLimits {
     }
 }
 
-/// Reads `expect` and refuses a parameter written twice, once with dots and once with slashes.
+/// Reads `expect` and refuses a parameter written twice, with dots, with slashes or mixed.
 fn expect_once<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<BoundedMap<SysctlName, ValueRule, 64, 1>>, D::Error> {
@@ -719,7 +740,8 @@ fn expect_once<'de, D: Deserializer<'de>>(
 pub struct HostSysctl {
     /// Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right
     /// value that no file in a `sysctl.d` directory sets warns. `vm.max_map_count` and
-    /// `vm/max_map_count` are the same parameter, so writing both is refused.
+    /// `vm/max_map_count` are the same parameter, so writing both is refused. The first `.` or `/` in
+    /// a name is its separator.
     #[serde(default, deserialize_with = "expect_once")]
     pub expect: Option<BoundedMap<SysctlName, ValueRule, 64, 1>>,
     /// File limits and what each must be.
