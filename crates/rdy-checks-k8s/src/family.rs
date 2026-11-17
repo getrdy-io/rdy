@@ -173,6 +173,7 @@ impl Holder {
 
     /// The probe: one attempt to reach the cluster, in the order of the module text.
     async fn attempt(&self, ctx: FamilyProbe<'_>) -> Result<Vec<Capability>, FamilyFatal> {
+        let started = std::time::Instant::now();
         if !ctx.network {
             self.settle(Dialed::no_network());
             return Ok(vec![unavailable(
@@ -246,8 +247,13 @@ impl Holder {
                 if ctx.checks.iter().any(|info| info.id == "k8s.rbac")
                     && let Some(connected) = self.dialed.get().and_then(Dialed::connected)
                 {
+                    // Never more than the probe has left, with a margin: a slow connect plus a hung
+                    // `/apis` must not overrun the family limit.
+                    let left = FAMILY_PROBE_LIMIT
+                        .saturating_sub(started.elapsed())
+                        .saturating_sub(std::time::Duration::from_millis(500));
                     let _ = rdy_engine::blocking::within(
-                        OPENSHIFT_LIMIT,
+                        OPENSHIFT_LIMIT.min(left),
                         connected.discover_openshift(&ctx.probe),
                     )
                     .await;

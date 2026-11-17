@@ -111,3 +111,9 @@ path = "tests/fixtures/checks/k8s.nodes/scaler-nap/api/nodes.json"
 value = "cloud.google.com"
 reason = "The node pool label key `cloud.google.com/gke-nodepool`, as GKE names it; a label key, not a host any test contacts"
 
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.nodes/scaler-gke-hosted/api/nodes.json"
+value = "cloud.google.com"
+reason = "The node pool label key `cloud.google.com/gke-nodepool`, as GKE names it; a label key, not a host any test contacts"

@@ -46,7 +46,10 @@ pub(super) fn pod_limit(platform: Platform, node: &str) -> String {
             "The pod limit comes from the instance type with the VPC CNI. Use a larger instance type, or turn on prefix delegation with `kubectl set env daemonset aws-node -n kube-system ENABLE_PREFIX_DELEGATION=true` and replace the nodes. {check}"
         ),
         Platform::EksAuto => format!(
-            "EKS Auto Mode chooses the nodes. Ask for a larger instance size in the requirements of the NodePool. {check}"
+            "EKS Auto Mode sets the pod limit in the `maxPods` of the `kubelet` section of the NodeClass. Raise it there: `kubectl get nodeclass` lists the NodeClasses. {check}"
+        ),
+        Platform::GkeAutopilot => format!(
+            "GKE Autopilot sets the pods per node itself and it cannot be changed. Use a GKE Standard cluster if the product needs more. {check}"
         ),
         Platform::Gke => format!(
             "GKE fixes the pods per node when a node pool is made. Make a new pool with `gcloud container node-pools create <pool> --cluster <cluster> --max-pods-per-node 110`, then move the load. {check}"
