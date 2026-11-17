@@ -96,14 +96,14 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one.
-`checks/k8s.dns/` holds 42 clusters, `generated` by `scripts/gen-k8s-dns-fixtures.py` (`--check` fails on drift
+`checks/k8s.dns/` holds 43 clusters, `generated` by `scripts/gen-k8s-dns-fixtures.py` (`--check` fails on drift
 and on a file the script did not write): CoreDNS in `kube-system` (`kubeadm-ok`,
 `kubeadm-restarts-recent-but-running`, `not-ready`, `scaled-to-zero`, `default-replicas`, `nodelocal`, `label-noise`),
 crash loops (`loop-crashloop`, `loop-without-loop-plugin`, `crashloop-explicit-upstream`, `crashloop-old`, `crashloop-no-finish-time`, `crashloop-skew`,
 `crashloop-oom`, `loop-corefile-forbidden`, `healthy-corefile-forbidden`), the Corefile (`domain-other`,
 `corefile-no-zone`, `corefile-no-key`), the Service (`service-headless`, `service-missing`, `service-forbidden`,
 `service-no-port`, `service-no-tcp`), nothing readable (`no-dns`, `workload-gone-service-there`, `all-forbidden`,
-`openshift-namespace-forbidden`, `both-forbidden`, `hostile-zone`, `cut`, `hostile`) and the three distributions (`rke2`, `rke2-loop`, `rke2-no-service`, `openshift`, `openshift-labels-drift`,
+`openshift-namespace-forbidden`, `both-forbidden`, `hostile-zone`, `cut`, `hostile`) and the three distributions (`rke2`, `rke2-loop`, `rke2-no-service`, `rke2-service-forbidden`, `openshift`, `openshift-labels-drift`,
 `openshift-partial`, `openshift-service-missing`, `openshift-crashloop`, `gke`, `gke-crashloop`). The shapes follow what each
 distribution documents and are unconfirmed against a live cluster. Times count from a pinned clock
 (2026-11-17T12:00:00Z). `envs/host-min/` is the smallest environment (M1-075): a

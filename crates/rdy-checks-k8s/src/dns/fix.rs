@@ -69,8 +69,14 @@ pub(super) fn headless(namespace: &str, service: &str) -> String {
 pub(super) fn forward_loop(workload: &Workload) -> String {
     let name = object(&workload.name);
     let short = workload.kind.short();
+    let change = if workload.name.starts_with("rke2-") {
+        // RKE2 renders its Corefile from a Helm chart: a hand edit of the ConfigMap is overwritten.
+        "Change the forward through a HelmChartConfig for `rke2-coredns` (see the RKE2 documentation), or point kubelet `--resolv-conf` at `/run/systemd/resolve/resolv.conf`."
+    } else {
+        "Edit the `coredns` ConfigMap to `forward . {upstream}`, or point kubelet `--resolv-conf` at `/run/systemd/resolve/resolv.conf`: `kubectl -n kube-system edit configmap coredns`."
+    };
     format!(
-        "CoreDNS forwards to `/etc/resolv.conf`, which on these nodes may be the systemd-resolved stub, so it forwards to itself. Edit the `coredns` ConfigMap to `forward . {{upstream}}`, or point kubelet `--resolv-conf` at `/run/systemd/resolve/resolv.conf`: `kubectl -n kube-system edit configmap coredns`. Confirm with the log line `plugin/loop: Loop ... detected` in `kubectl -n kube-system logs {short}/{name}`. If rdy runs on a node, `net.dns` shows that node's file."
+        "CoreDNS forwards to `/etc/resolv.conf`, which on these nodes may be the systemd-resolved stub, so it forwards to itself. {change} Confirm with the log line `plugin/loop: Loop ... detected` in `kubectl -n kube-system logs {short}/{name}`. If rdy runs on a node, `net.dns` shows that node's file."
     )
 }
 

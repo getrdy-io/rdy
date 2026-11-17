@@ -1097,3 +1097,20 @@ async fn grants_in_both_namespaces_name_both_role_files() {
     assert!(grants(&finding).contains(&"list daemonsets in openshift-dns".to_owned()));
     rig.audit();
 }
+
+#[tokio::test]
+async fn the_refused_rke2_service_is_the_one_the_grant_names() {
+    let rig = rig("rke2-service-forbidden");
+    let finding = rig.finding().await;
+    assert_eq!(
+        grants(&finding),
+        ["get service rke2-coredns-rke2-coredns in kube-system"]
+    );
+    assert!(
+        fix_of(&finding)
+            .contains("`kubectl auth can-i get services/rke2-coredns-rke2-coredns -n kube-system`"),
+        "{}",
+        fix_of(&finding)
+    );
+    rig.audit();
+}

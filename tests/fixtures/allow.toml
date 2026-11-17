@@ -99,5 +99,18 @@ reason = "The IPv6 reverse zone that the kubernetes plugin line of a Corefile na
 
 [[allow]]
 rule = "host"
+path = "tests/fixtures/checks/k8s.dns/no-dns/api/openshift-daemonsets-by-name.json"
 value = "metadata.name"
-reason = "The field selector key `metadata.name` in a recorded list request of the k8s.dns fixtures; a Kubernetes field path, not a host"
+reason = "The field selector key `metadata.name` in a recorded list request; a Kubernetes field path, not a host (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/openshift-labels-drift/api/openshift-daemonsets-by-name.json"
+value = "metadata.name"
+reason = "The field selector key `metadata.name` in a recorded list request; a Kubernetes field path, not a host (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/workload-gone-service-there/api/openshift-daemonsets-by-name.json"
+value = "metadata.name"
+reason = "The field selector key `metadata.name` in a recorded list request; a Kubernetes field path, not a host (k8s.dns)"

@@ -186,3 +186,27 @@ fn a_service_keeps_the_address_and_the_port_53_protocols_only() {
     // A port with no protocol is TCP, the server's default.
     assert!(parts.udp_53 && parts.tcp_53);
 }
+
+#[test]
+fn the_loop_fix_for_rke2_points_at_a_helm_chart_config_not_the_configmap() {
+    use super::fix::forward_loop;
+    use super::objects::Workload;
+    let mut workload = Workload {
+        kind: Kind::Deployment,
+        name: "rke2-coredns-rke2-coredns".to_owned(),
+        role: Role::Cluster,
+        desired: 1,
+        ready: 0,
+        containers: vec!["coredns".to_owned()],
+    };
+    let text = forward_loop(&workload);
+    assert!(text.contains("HelmChartConfig"), "{text}");
+    assert!(!text.contains("edit configmap coredns"), "{text}");
+    workload.name = "coredns".to_owned();
+    let text = forward_loop(&workload);
+    assert!(
+        text.contains("`kubectl -n kube-system edit configmap coredns`"),
+        "{text}"
+    );
+    assert!(text.contains("`forward . {upstream}`"), "{text}");
+}

@@ -304,7 +304,7 @@ pub const ALLOWED: &[Allowed] = &[
             Access::ListInNamespace(Only::Name("openshift-dns")),
         ],
         checks: &["k8s.dns"],
-        reads: "desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label",
+        reads: "desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {

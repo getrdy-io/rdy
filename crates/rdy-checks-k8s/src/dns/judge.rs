@@ -352,9 +352,10 @@ fn judge_pods(place: &Place, sink: &mut Sink) -> Vec<Crash> {
 
 fn judge_service(place: &Place, found: &Gathered, sink: &mut Sink) {
     let ns = place.namespace;
+    // The name that was asked last is the one that was refused: RKE2's second GET follows a 404.
     let first = found
         .service_names
-        .first()
+        .last()
         .map_or("kube-dns", String::as_str);
     match &found.service {
         Read::Ok(service) => {

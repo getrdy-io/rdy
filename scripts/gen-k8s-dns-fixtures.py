@@ -635,6 +635,14 @@ svc("rke2-no-service", code=404)
 svc("rke2-no-service", code=404, name=RKE2_SERVICE, file="service-rke2")
 cm("rke2-no-service", code=404)
 
+case("rke2-service-forbidden", "RKE2: kube-dns is not there and the identity may not get the Service named like the Deployment")
+deployments("rke2-service-forbidden", [deployment(RKE2_SERVICE, {"k8s-app": "kube-dns"}, ["coredns"], 1, 1)])
+daemonsets("rke2-service-forbidden")
+pods("rke2-service-forbidden", [running("rke2-coredns-rke2-coredns-7d9c5f6b5-x8k2z")])
+svc("rke2-service-forbidden", code=404)
+svc("rke2-service-forbidden", code=403, name=RKE2_SERVICE, file="service-rke2")
+cm("rke2-service-forbidden", code=404)
+
 case("rke2-loop", "RKE2 with a crash-looping CoreDNS; the ConfigMap is named otherwise, so the loop cannot be told")
 deployments(
     "rke2-loop",

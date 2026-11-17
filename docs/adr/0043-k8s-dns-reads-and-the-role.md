@@ -15,15 +15,17 @@ table, the example role, the kind job's grant list and its request count togethe
 
 1. **Workloads are found by label.** Deployments by `k8s-app=kube-dns`, DaemonSets by
    `k8s-app in (kube-dns,node-local-dns)`, both in `kube-system`. When `kube-system` holds none, the
-   DaemonSets in `openshift-dns` with the DNS operator's label. The OpenShift labels are unconfirmed
+   DaemonSets in `openshift-dns` with the DNS operator's label; when that list is readable and empty, one more
+   list there by the name `dns-default`, in case the labels drifted. The OpenShift labels are unconfirmed
    against a live cluster, like the GPU labels of 03.
 2. **Pods stay a cluster-wide list.** The guard allows a pod list only cluster wide with a `status.phase`
    selector, and the cluster role already grants it. `k8s.dns` adds a label selector and keeps the pods of
    `kube-system` or `openshift-dns`. No new pod grant, no new guard shape for pods. The pod list is skipped
    when no DNS workload was found, because there is nothing to explain.
 3. **A new guard shape, `Access::GetIn { namespace, name }`.** One named object of one namespace, both
-   fixed in the table. It carries exactly three entries: `services` `kube-dns` in `kube-system`,
-   `services` `dns-default` in `openshift-dns`, and `configmaps` `coredns` in `kube-system`. A role can
+   fixed in the table. It carries exactly four entries: `services` `kube-dns` and `services`
+   `rke2-coredns-rke2-coredns` in `kube-system`, `services` `dns-default` in `openshift-dns`, and
+   `configmaps` `coredns` in `kube-system`. A role can
    grant each with `resourceNames` in a `Role` of that namespace, so the grant is as narrow as the read.
 4. **One ConfigMap, `get` only.** Only `kube-system/coredns`, and only its `Corefile` key is deserialized;
    every other key is dropped while parsing. A distribution that names the ConfigMap otherwise (RKE2) gets
@@ -33,7 +35,9 @@ table, the example role, the kind job's grant list and its request count togethe
    there and the workload carries that name.
 5. **Cut-down types for everything.** Pods, Deployments, DaemonSets and the ConfigMap are read into types
    that name the few fields used (02 Appendix B rule 6), so env values, args and pod specs never become
-   strings in rdy.
+   strings in rdy. That includes the Service (a cut-down type with the cluster IP and ports) and the
+   metadata of every object: a deserializer keeps only name, namespace and labels, so
+   `last-applied-configuration` and the other annotations are never held.
 6. **The OpenShift grants are a second file.** `examples/rbac/rdy-readonly-openshift-dns.yaml` holds the
    `openshift-dns` Role. The main file cannot hold it, because applying a Role into a namespace that does
    not exist fails the whole apply on every other cluster. The role test reads both files.
