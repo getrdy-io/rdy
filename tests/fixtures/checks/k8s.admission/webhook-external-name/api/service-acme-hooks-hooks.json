@@ -1,0 +1,34 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-hooks/services",
+    "query": "fieldSelector=metadata.name=hooks&limit=2"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ServiceList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "name": "hooks",
+          "namespace": "acme-hooks"
+        },
+        "spec": {
+          "type": "ExternalName",
+          "ports": [
+            {
+              "port": 443
+            }
+          ],
+          "externalName": "hooks.example.invalid"
+        }
+      }
+    ]
+  }
+}

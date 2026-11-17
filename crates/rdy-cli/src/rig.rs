@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use rdy_engine::watchdog::{Watchdog, WatchdogConfig, WriteState};
 
+use crate::interrupt::{self, Interrupt};
 use crate::redaction;
 
 /// A started watchdog and the state that decides who writes the report.
@@ -20,6 +21,7 @@ pub struct Rig {
     pub(crate) deadline: Duration,
     pub(crate) state: Arc<WriteState>,
     pub(crate) watchdog: Arc<Watchdog>,
+    pub(crate) interrupt: Arc<Interrupt>,
 }
 
 impl Rig {
@@ -46,7 +48,28 @@ impl Rig {
             deadline,
             state,
             watchdog: Arc::new(watchdog),
+            interrupt: Arc::new(Interrupt::default()),
         })
+    }
+
+    /// Starts the thread that catches SIGINT and SIGTERM (Ctrl-C and Ctrl-Break on Windows). The first
+    /// one aborts the process with exit 70 and no report (M1-058, [`crate::interrupt`]). The binary calls
+    /// it once, before the runtime; `json` says whether the error also goes to stdout as an
+    /// `ErrorOutput`. A test process does not call it, so it keeps its own signal handling.
+    ///
+    /// # Errors
+    ///
+    /// The thread or the handlers could not be set up. The caller ends the run with exit 70.
+    pub fn watch_signals(&self, json: bool) -> io::Result<()> {
+        interrupt::watch(Arc::clone(&self.interrupt), Arc::clone(&self.state), json)
+    }
+
+    /// For the main thread, once it has the code to exit with: takes the exit. After this a signal is
+    /// ignored. If a signal got there first, waits for it to end the process with 70, so that is the
+    /// only code the shell sees. False if that wait ran out.
+    #[must_use]
+    pub fn claim_exit(&self) -> bool {
+        self.interrupt.claim_exit()
     }
 
     /// Ends the watchdog without it acting. The binary never calls this on a run: the backstop after

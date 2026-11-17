@@ -36,6 +36,7 @@ below.
 | PC-50 | 07 section 4.1 (files that cannot be written after the verdict), 02 "Watchdog" | 07 says that when the files cannot be written, `--json` stdout gets the Report with `complete: false`. M1-176 prints stdout before it claims the write state and writes the files, because a blocked stdout is the one write that can hang for good and the watchdog must still own the report while it does (M1-043 carry). So the document is already on stdout when the files fail. | With `--json`, a failed file write after the verdict leaves the document on stdout as printed and puts the summary and the error on stderr, exit 70. Without `--json`, stdout stays empty. The exit code is the authority: 07 section 4.1 and the `complete` doc in `rdy-spec` say that a printed report can read `complete: true` with exit 70. cli-ux signed off. A script checks the exit code (`set -o pipefail`, or stdout to a file and `$?`), never the document alone; stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` Check the number at merge. | should-fix | M1-176 |
 | PC-51 | 11 backlog, M1-176 exit test ("proved with the real binary") and M1-088 (watchdog clause) | The exit test needs the shipped `rdy` to hang on a check that never yields, and to end within the deadline plus grace. The shipped binary cannot do either: ADR 0011 decision 4 gives it no hook, so it has only the real families (none hangs) and the fixed five minute deadline. | M1-176 proves the spin clause with a test binary that calls `rdy_cli::run` with a one second hook deadline and the real watchdog (`crates/rdy-cli/tests/run_watchdog.rs`, a pipe run and a spin run). The blocked-pipe clause is also proved on the real unsteered binary by `crates/rdy-cli/tests/run_watchdog_binary.rs`, which is `#[ignore]`d because it takes about 5 min 10 s, and is run by hand (no nightly test job exists). M1-088's watchdog clause (blocked stdout pipe, exit 70, `complete: false` in the folder) is the same case: it relies on that test and does not repeat it. Check the number at merge. | should-fix | M1-176 (PR #34 review) |
 | PC-52 | M1-043 carry (macOS SIGCHLD-ignored check), M1-176 | The carry asks for a check that the SIGCHLD-ignored test really ignores SIGCHLD on macOS. M1-176 tried a behavioural probe (a child's `wait` fails with ECHILD when the ignore holds). The macos-x64 CI run on ee62985e failed that probe in `sigchld_ignored` (0.195 s), so macOS does not auto-reap the way the probe assumes, or the ignore does not survive `exec` there. The runner itself works there (the rest of the test passes without the probe). | The probe is Linux only (`/proc` SigIgn plus ECHILD). The macOS carry stays open. Owner: qa-engineer, a follow-up to find out how SIGCHLD-ignored behaves on macOS (does the ignore survive `bash -c 'trap "" CHLD; exec ...'`, and what does a child of an ignoring parent report) and to write a probe that holds there. Check the number at merge. | should-fix | M1-176 (macos-x64 CI) |
+| PC-53 | Plan, Milestones table, M1, engineering done column ("Fixture envs exit 0, 1 and 2 on all five targets") | In M1 the in-process env harness runs an environment only on the legs of its own OS. `rdy_cli::run` plans for `current_os()` with no hook to change it (decided in M1-086, PR #42), and every M1 environment is a Linux machine, so the macOS and Windows legs skip them. The real-binary smoke and the unsigned and tampered spec tests still run on all five. | Say "Fixture envs exit 0, 1 and 2 on the Linux targets and write both reports" for M1, and keep "all five targets" for the real-binary smoke and the unsigned and tampered specs. M2-130 adds a `RunHooks` OS override, and then the envs run on all five (correction-48). 00's milestone table and 11's M1-138 already say so. Check the number at merge. | should-fix | PR #80 review (M1-117) |
 
 ## Decisions made
 
@@ -439,3 +440,178 @@ the corrections log of `11-backlog.md`.
   leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
   verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
   namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.
+- **Correction-44, the order of the run header, `--verbose` and the live line, and one M2 ticket.** From the
+  reviews of PR #68 (M1-143). PR #68 edits 07 C.1, C.2, 2.8, 3 and A.3, 02's `RunOptions` lines and M2-017's
+  dependencies; this entry records those decisions. The header prints at the end of the run, because it
+  holds facts known only then (the `needs` row). With `--verbose` the event lines print live after the
+  banner and before the header, one blank line follows them, and then come the header and the list (C.2).
+  07's rule for the M1-142 code now says so, and that "the header prints once before progress starts" is not
+  met until new M2-128 moves the header before progress (which also prints the `cluster` row before the first
+  Kubernetes request, as 07 section 2.1 says). `--verbose` turns the live line off: M1-142's exit test says
+  `quiet or verbose`, and the code lands with whichever of PR #60 and PR #68 merges second. 07 section 5.2
+  says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
+  exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
+  adds the started and phase events on it, and M2-017 depends on M2-124.
+- **Correction-45, `rdy run` writes the HTML report, and M1-100 takes PR #71's deferrals.** 01 section 5.5,
+  02 "Output and reports" and 07 sections 2.1 and 5.2 put a `.html` next to the `.json` in every report folder,
+  and the `rdy` and `rdy run` help says the run writes one. No ticket wired it: M1-057 writes the JSON only,
+  and the HTML tickets build and test the renderer. New M1-181 (core, week 19) writes the page through
+  `OutputDir::write_html`, with the `.json` written last, and the watchdog writes the INCOMPLETE page by the
+  same rules. M1-138 depends on it. PR #71 (M1-099) left `expected_issuer` and `pin_sha256`, the
+  generated-chain fixture rig and the Timeout case to M1-100, whose exit test did not hold them. M1-100 now
+  does all three (3.5 h), and M1-101 moves to week 21. No test-pinned document changed.
+- **Correction-47, the 03 section of k8s.cni, and one M2 ticket.** PR #78 (M1-165) changes its own 03
+  section after the code-reviewer, security-reviewer and k8s-expert reviews. The 03 text lands with the PR;
+  this entry approves it. k8s.cni never lists DaemonSets, because a DaemonSet holds env values. It reads 16
+  namespace and name pairs by name through optional Roles (`examples/rbac/rdy-readonly-cni.yaml`, ADR 0046):
+  14 in `kube-system`, `calico-system/calico-node` and `kube-flannel/kube-flannel-ds`. A namespace other than
+  `kube-system` is read by `GET` first, and its pair is skipped on a 404. DaemonSets are read only when the
+  node condition, the API groups and the OpenShift `Network` object did not name the plugin, or for the AWS
+  VPC CNI. OpenShift is named by `Network` `status.networkType`. Crash-loop restart evidence is not read in
+  M1, and ready below desired is not reported. Unknown, unreadable or two plugins is partial with the grants
+  named, never a block. Flannel with Calico is Canal, which enforces. A policy plugin on top of a base plugin
+  is the policy plugin (each `cni.toml` entry is base, policy or full); Azure CNI alone does not enforce.
+  Flannel on k3s is partial, because rdy cannot read `--disable-network-policy`. The AWS VPC CNI follows
+  `ENABLE_NETWORK_POLICY`, and is partial when it is absent. Pod ranges come from `Node.spec.podCIDRs` only
+  for a node-IPAM plugin or the OpenShift `Network` object; otherwise the pod side of `avoid_cidrs` is
+  partial. Default-deny egress is 03's definition: a policy that selects all pods and governs egress with no
+  rules. It warns only with `needs_egress`; otherwise, and on a plugin that does not enforce, it is a note.
+  Every result notes that only namespace `NetworkPolicy` objects are read. M1-165 must leave 03 saying so.
+  M1-175 also builds k8s.cni, eleven k8s ids in all, still 1.5 h. New M2-129 reads the plugin pods' restart
+  evidence with k8s.dns's pod read, reports ready below desired, and has k8s-expert confirm the 13 `cni.toml`
+  entries marked `verified = false` against a live cluster. M1-115's reviewer reads their source pages first.
+  No test-pinned document changed.
+- **Correction-48, the env harness skips Linux envs on macOS and Windows, and one M2 ticket.** M1-086 (PR #42)
+  made the env harness call `rdy_cli::run`, which plans for `current_os()` and has no hook to change it, so
+  the harness skips an env of another OS. Every M1 env is a Linux machine, so they run on the two Linux legs
+  only. M1-117's exit test said five legs; it now says the Linux legs. M1-138, the engineering done test in
+  11 and 00, the week 21 check and 08 (rule 3, the test-layer table, Environments) say the same. M1-118,
+  M1-119, M1-135 and M1-166 never said five legs and are unchanged. The plan's M1 row is PC-53. New M2-130
+  (qa-engineer, 3 h) adds a `RunHooks` OS override, `None` in the shipped binary, so every env runs on every
+  leg; security-reviewer reviews it. From the PR #80 review: M1-117's `all-pass` env has no cluster, because
+  the k8s family joins `rdy run` with M1-107. M1-107 adds k8s.version and the `api/` tree to it and
+  regenerates its goldens (4 h); the item moves to M1-117 if M1-117 is not merged first. M1-175 gets a
+  missing comma (PR #79 review). No test-pinned document changed.
+- **Correction-50, `--key` needs a signature, the unknown-key line, the proxy carries of M1-097, the `timeouts`
+  env, and M2-037.** From the reviews of PR #84 (M1-126) and of the M1-097 and M1-119 builds.
+  Correction-49 is PR #85. A `--key` run of a spec with no signature exits 64 even with `--allow-unsigned`,
+  with its own first line (01 section 4.7). The `spec_key_unknown` line shows the key id and no fingerprint,
+  because the sidecar carries only the key id, and its fix says to compare the vendor's fingerprint, because
+  a key id can be forged (01 section 4.8, 07 C.5). M1-181 writes the page that says UNSIGNED SPEC, the HTML
+  half of M1-126's "both reports say unsigned". 05 Surface 2 lists a residual for M1-132: a `--key` file read
+  as root has no owner check, and the fingerprint in the KEY NOT PINNED banner is the mitigation. The
+  "direct works, proxy fails" sentence of `auto` needs the `NO_PROXY` rules and moves to M1-098, which also
+  reports upper- and lower-case proxy variables that disagree and extends `ProbeHub::set_proxy_from_env`.
+  M1-107 must not use a proxy read from `HTTP_PROXY` for https (05 INV-11, ADR 0037). In the `timeouts` env
+  only the hung statvfs gives Timeout; the black-hole endpoint gives a bounded Block, because net.egress cuts
+  each endpoint to its own budget. k8s.version never calls `/version`, so M1-119 proves a slow cluster at
+  family level by delaying `GET /apis`, and the slow `/version` case in the CLI env moves to M1-107. 08 says
+  the same. The real-time `Fake::Block` test is M1-051's and is built. M2-037 takes the cancellation tests of
+  08 section 5: running checks marked cancelled, the drop guard that counts live futures, and the verdict
+  rule (4 h). 07 C.5 changed, but no test reads it; no 01 block changed.
+- **Correction-51, a proxy password in host.container_runtime evidence, and the proxy carries of M1-098.**
+  From the security review and the build of M1-098. Correction-49 is PR #85. host.container_runtime (M1-150,
+  PR #23) stores the proxy URL of a systemd drop-in, `daemon.json` or the Engine API `/info` as text.
+  `url_userinfo` finds userinfo only after `scheme://`, so a proxy with no scheme (`svc:pw@proxy:3128`)
+  reaches `observed.runtimes[].proxy` whole. New core M1-182 (2 h) stores each proxy as `ProxyUrl::origin`
+  with a credentials flag, as net.proxy does, and proves a canary from all three sources never appears. It
+  adds a `url_userinfo` form for a value with no scheme after a `*_proxy=` key or a Docker proxy JSON key,
+  with corpus cases, and records the residual in 05 I1. The corpus test reads 04 Appendix B, so M1-182's PR
+  edits that row, not this correction. M1-138 depends on M1-182. 05 INV-11: system resolvers also resolve
+  the proxy's name, and INV-11 lists `Probe::proxy_reach` and net.egress's one direct retry under `auto`.
+  M1-107: `Probe::route_for` does not look at `proxy_source` or the scheme, so the k8s client checks the
+  source itself and never uses an `HTTP_PROXY` proxy for an https API server. 03 net.proxy reads the
+  `proxies` of `daemon.json`, which Docker gives precedence over the drop-ins. No test-pinned document
+  changed.
+- **Correction-52, live controls in the result JSON, the fix `<bdi>`, `FixText` controls, and the carries of
+  M1-100.** From the security review of PR #89 and the reviews and deferrals of PR #91 (M1-100). Correction-49
+  is PR #85. The JSON writer leaves Cc, Cf and zero-width characters live. 05 T3 and T4 do not promise the
+  JSON rule for 0.1.0, and M1-141 escapes them in the page, so new M2-131 (2 h) writes them as `\uXXXX` and
+  05 T3 says any renderer of result JSON, the portal included, applies the same rule. New M2-132 (1 h) puts
+  `unicode-bidi: isolate-override; direction: ltr` on the fix and builtin-fix `<bdi>`. Right-to-left letters
+  reorder text with no control character, but fix text comes from the signed spec and a copy gives the
+  logical order, so it stays M2. 01 sections 2.6 and 6 and the `FixText` rustdoc say controls are stripped
+  before the text is printed, but the HTML and the terminal show them as escapes, and `FixText::new` checks
+  only the length. New M2-133 (1.5 h) refuses them at parse in `rdy spec lint`, `rdy spec sign`, `rdy verify`
+  and `rdy run`, because the signature covers the text as written.
+  M1-100 cannot delete the net.tls_intercept `PENDING` row: each host is cut to its own budget, so a hung
+  handshake gives a bounded warning, not `Timeout`. The row is narrowed to `Timeout` and moves to M1-179; the
+  second of PR #91 and PR #70 to merge deletes it. A pin matches the leaf only (SEC-100-1), and a pin equal
+  to a later certificate is partial until new M2-135 (2.5 h) records the verified path. `last_sha256` is
+  always the last certificate's hash, and `root_sha256` is null when that certificate is not self-signed;
+  new M2-136 (1.5 h) replaces `root_sha256` with the real anchor's, through `TrustStore` root subjects.
+  New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores. 03 net.tls_intercept's
+  Source line says so; PR #91 edits its Thresholds line. No new M1 ticket. No test-pinned document changed.
+- **Correction-53, spec reads that hang on a FIFO, `spec sign` of an expired spec, and the signing review
+  carries.** From the M1-132 signing review (PR #96) and the security review of PR #92 (M1-182).
+  Correction-49 is PR #85. The spec reader of `rdy run`, `rdy verify` and `rdy spec lint` stats the path,
+  then opens it again with a blocking open and never checks the handle, so a FIFO swapped in hangs the
+  command before the watchdog arms and a swapped device is opened. `rdy spec sign` opens before it checks,
+  so a FIFO hangs it outright. That breaks 05 INV-02 (MF-01). `spec sign` lints with `lint_checks` only, so
+  an expired spec is signed, then fails the self-check with exit 70 (MF-01). New core M1-183 (2.5 h) reads
+  every spec through `signing::files::read_public`, proves a direct FIFO, a swapped FIFO and `/dev/zero`
+  exit 64 within 1 s for run, verify and sign, refuses an expired spec in `spec sign` with exit 64 and
+  `spec_expired` before any password prompt, keeps today's oversize results, and records in 05 Surface 2 that `read_public` still opens a device swapped in
+  during the gap. M1-138 depends on it. 01 section 4.2's future `signed_at` warning was never built; it
+  moves to M2-032 (0.5 h more) and 01 says "from M2-032" (SF-01). M1-134's page and M1-133's unsigned page
+  say to compare the full fingerprint from `rdy verify --key`, never the 48-bit short form in the banner
+  (SF-02); M1-134 depends on M1-133. New M2-137 (1.5 h) adds the container runtime proxy password to the
+  known-secret set (PR #92 F8, INV-15). M2-107 (0.25 h more) also refuses invisible code points in
+  trust-store notes (N-01). M1-133 moves to week 16 and M1-168 to week 17, so no week holds
+  more than 15 h. Only 01 prose changed; no test-pinned text changed.
+- **Correction-54, the plugin token and the `delegated` outcome, the `all-pass` k8s item, the
+  `nothing_verified` sentence, and four M2 tickets.** From the reviews of the M1-107 build, the security
+  review of PR #98 (M1-183) and the review of PR #100 (M1-140). Correction-49 is PR #85. The exec plugin
+  runs after the cluster line and kube does not hand rdy its token, so M1-107's row now says the token is
+  registered before the first request leaves, by a layer under kube's auth layer. 02 asks for an action-log
+  outcome `delegated`, which rdy-spec lacks, so M1-107 writes a `form: delegated` field; new M2-138 (1.5 h)
+  adds the value to rdy-spec, 01 section 5.4 and the result schema, and 02 says so. Whichever of M1-107 and
+  M1-117 (PR #80) merges second adds k8s.version and the `api/` tree to `all-pass`; M1-117's row now says
+  so, which correction-48 did not. New M2-139 (1.5 h) opens spec reads with `O_PATH` on Linux, so a device
+  swapped in is never opened. New M2-140 (1.5 h) makes `rdy spec sign` open `--sig` and `--secret-key` at
+  identification level on Windows. New M2-141 (2 h) runs `rdy run` on a k8s.version spec in the kind job
+  and pages the node list on a three-node cluster. 07 D.7's `nothing_verified` sentence said every check is
+  for another OS; the verdict rule also gives it when every check is optional and was not run, so the
+  sentence now says that too. The rule is unchanged. No new M1 ticket, and no test-pinned text changed.
+- **Correction-55, the handshake signature test, the "no revocation check" note, the OS roots source,
+  the CA pin advice and the `as:` run proof.** From the M1-101 TLS verifier review
+  (`docs/plan/reviews/tls-verifier-review.md`), its cold review and the M1-113 code review. Correction-49 is PR #85. The recording verifier accepts every chain, and only the
+  handshake signature ties the chain to the server, but no test proves that rdy checks it, so a change to
+  `assertion()` would pass every test and let any server replay a pinned leaf (SF-02). ADR 0014, 02 and 05
+  say the report says "no revocation check", and no check does (SF-01). The review folded SF-01 into
+  M1-096, but PR #74 (M1-096) is approved and not merged, so it is not widened. New core M1-184 (1.5 h)
+  takes both: a server that presents leaf A and signs with key B fails `Probe::tls_chain` on TLS 1.2 and
+  1.3, net.tls_intercept with that leaf pinned gives `not_tested`, its unknown-CA case asserts zero
+  application bytes, and each net.tls_intercept result with a chain and each net.egress result with a TLS
+  stage carries `REVOCATION_NOTE` once. It depends on M1-096, M1-099 and M1-100, and M1-138 depends on it.
+  02 says the note comes from M1-184. 03's net.tls_intercept Source line and section 3's "Shared stack"
+  named `rustls-native-certs` as the OS store; they now name `NativeCall::SystemRoots`: PEM bundles
+  through the facade on Linux, and on macOS when a variable is set, and `rustls-native-certs` on macOS
+  and Windows otherwise. 03's Thresholds line and M1-116's network page say that until M2-135 a CA pin is
+  at best a warning, so pin the leaf or set `forbid_interception` to block (AR-01). PR #91 rewrites the
+  same Thresholds line; the second to merge keeps both. M1-073 (merged) moves back to week 14, so weeks 14
+  and 18 hold 15 h. From the M1-113 code review: M1-113 cannot prove in a real run that a spec `as:`
+  works and k8s.rbac shows the OpenShift grant text until the family builds k8s.rbac from its
+  parameters, which is M1-175, so that proof moves to M1-175's exit test. M1-113 keeps
+  `Cluster::read_only_as` and `Cluster::is_openshift`, tested through the family holder. No 03 `###`
+  heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-56, the family namespace in M1, the k8s registrations of M1-162 to M1-165, and the
+  autoscaler status ConfigMap.** From the reviews of the M1-175 build and the M1-113 k8s review.
+  Correction-49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
+  no `k8s:` block (03's "Spec block" was never in 01), 07 puts `--namespace` on `rdy bundle` only, and the
+  client never uses the kubeconfig's namespace (ADR 0031 decision 12). So k8s.storageclass never reads
+  claim evidence, k8s.ingress and k8s.cni read no Service or NetworkPolicy of the install namespace, and
+  k8s.admission and k8s.namespace fall back to the entry's own `namespace`. M1 adds no key and no flag.
+  03 says what M1 does in a "Not in M1" note under the Spec block and in the k8s.storageclass,
+  k8s.admission and k8s.namespace sections; its flag sentence now names `--kubeconfig` and
+  `--kube-context` (correction-07 asked for it); 07's kube flag row says `rdy run` has no `--namespace`.
+  The k8s.admission line also loses a wrong grant: a spec with no namespace is partial with a fix, not
+  `get namespaces`. ADR 0049 (Proposed) chooses the M2 source: a top-level `k8s:` block with one key,
+  `namespace`, and no run flag, because the namespace decides what the checks judge and M2-126 pins reads
+  to the namespaces the spec names. New M2-142 (3 h) builds it, with cli-ux and security review. M1-162 to
+  M1-165 now register their check in the family (M1-175's `build_check` arm, registry info, family test
+  counts) if M1-175 merges first, as M1-175's progress line defers. New M2-143 (3 h): k8s.nodes reads
+  `kube-system/cluster-autoscaler-status` by name, so GKE Standard and AKS managed autoscalers soften a
+  node shortfall; one guarded GET, a cut-down type, the 03 grant text, the role, the kind job, a new ADR
+  (ADR 0043 decision 4) and a security review. No M1 hours change. No 03 `###` heading or Appendix A row
+  changed, and no test-pinned text changed.

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-hooks/services",
+    "query": "fieldSelector=metadata.name=hooks&limit=2"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "services is forbidden: User \"acme-reader\" cannot list resource \"services\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}
