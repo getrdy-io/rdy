@@ -181,11 +181,14 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     let checks = doc["checks"].as_array().cloned().unwrap_or_default();
     assert_eq!(checks[3]["status"], "skipped", "{}", checks[3]);
     assert_eq!(checks[3]["skip_kind"], "missing_need", "{}", checks[3]);
-    // `k8s.version` is built since M1-107. This machine has no kubeconfig in the replay, so its cluster is
-    // missing and it is skipped for that need. The ids after it are still not built.
-    assert_eq!(checks[4]["status"], "skipped", "{}", checks[4]);
-    assert_eq!(checks[4]["skip_kind"], "missing_need", "{}", checks[4]);
-    for check in &checks[5..] {
+    // `k8s.version` is built since M1-107 and `k8s.storageclass` since M1-175. This machine has no kubeconfig
+    // in the replay, so its cluster is missing and both are skipped for that need. The ids after them
+    // are still not built.
+    for check in &checks[4..6] {
+        assert_eq!(check["status"], "skipped", "{check}");
+        assert_eq!(check["skip_kind"], "missing_need", "{check}");
+    }
+    for check in &checks[6..] {
         assert_eq!(check["status"], "skipped", "{check}");
         assert_eq!(check["skip_kind"], "not_in_build", "{check}");
     }

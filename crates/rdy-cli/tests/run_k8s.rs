@@ -361,3 +361,138 @@ async fn a_kubeconfig_that_does_not_parse_leaks_none_of_its_text_anywhere() {
     );
     assert_eq!(check(&json(&ran), "k8s.access")["status"], "block");
 }
+
+// ---- M1-175: the family builds every k8s check, and a real run of k8s.rbac keeps `as:` and the OpenShift text ----
+
+const APIS_OPENSHIFT: &str = r#"{"kind":"APIGroupList","apiVersion":"v1","groups":[{"name":"security.openshift.io","versions":[{"groupVersion":"security.openshift.io/v1","version":"v1"}],"preferredVersion":{"groupVersion":"security.openshift.io/v1","version":"v1"}}]}"#;
+const NOT_FOUND: &str =
+    r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}"#;
+
+fn review(allowed: bool) -> String {
+    format!(
+        r#"{{"kind":"SelfSubjectAccessReview","apiVersion":"authorization.k8s.io/v1","status":{{"allowed":{allowed},"reason":"no rule"}}}}"#
+    )
+}
+
+/// An OpenShift API server on a local socket. It may impersonate the service account and nothing else is
+/// allowed. Every request head and body is kept, lower-cased, in the list it returns.
+async fn serve_openshift() -> (std::net::SocketAddr, Arc<std::sync::Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap_or_else(|e| panic!("bind: {e}"));
+    let addr = listener
+        .local_addr()
+        .unwrap_or_else(|e| panic!("addr: {e}"));
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let kept = Arc::clone(&seen);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let kept = Arc::clone(&kept);
+            tokio::spawn(async move {
+                let mut data = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    match stream.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => data.extend_from_slice(&buf[..n]),
+                    }
+                    let text = String::from_utf8_lossy(&data).to_ascii_lowercase();
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        continue;
+                    };
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if data.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&data).to_ascii_lowercase();
+                kept.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(text.clone());
+                let first = text.lines().next().unwrap_or_default();
+                let allowed = text.contains("\"verb\":\"impersonate\"");
+                let (status, body) = if first.starts_with("get /version ") {
+                    (200, VERSION_JSON.to_owned())
+                } else if first.starts_with("get /apis ") {
+                    (200, APIS_OPENSHIFT.to_owned())
+                } else if first
+                    .starts_with("post /apis/authorization.k8s.io/v1/selfsubjectaccessreviews")
+                {
+                    (201, review(allowed))
+                } else {
+                    (404, NOT_FOUND.to_owned())
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    (addr, seen)
+}
+
+#[tokio::test]
+async fn a_real_run_builds_every_k8s_check_and_k8s_rbac_keeps_its_as_and_the_openshift_text() {
+    let (addr, seen) = serve_openshift().await;
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = spec(
+        dir.path(),
+        "  - id: k8s.version\n  - id: k8s.access\n  - id: k8s.storageclass\n  - id: k8s.nodes\n  - id: k8s.admission\n    uses: [runAsRoot]\n    namespace: acme-system\n  - id: k8s.namespace\n    namespace: acme-system\n  - id: k8s.rbac\n    as: system:serviceaccount:acme-system:installer\n    can: [\"create namespaces\"]\n",
+    );
+    let kubeconfig = kubeconfig(dir.path(), &format!("http://{addr}"));
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("no out dir: {e}"));
+    let ran = call(&run_args(
+        spec.to_str().unwrap_or_default(),
+        out.to_str().unwrap_or_default(),
+        &["--kubeconfig", kubeconfig.to_str().unwrap_or_default()],
+    ))
+    .await;
+
+    let report = json(&ran);
+    // Seven ids, seven results, none skipped as not in the build.
+    for id in [
+        "k8s.version",
+        "k8s.access",
+        "k8s.storageclass",
+        "k8s.nodes",
+        "k8s.admission",
+        "k8s.namespace",
+        "k8s.rbac",
+    ] {
+        let result = check(&report, id);
+        assert_ne!(result["skip_kind"], "not_in_build", "{id}: {result}");
+    }
+    // k8s.rbac asked as the service account, and the fix names the OpenShift command.
+    let rbac = check(&report, "k8s.rbac");
+    assert_eq!(rbac["status"], "block", "{rbac}");
+    let fix = rbac["fix"].as_str().unwrap_or_default();
+    assert!(fix.contains("On OpenShift, `oc adm policy"), "{fix}");
+    let seen = seen
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert!(
+        seen.iter().any(|request| {
+            request.contains("\"resource\":\"namespaces\"")
+                && request.contains("impersonate-user: system:serviceaccount:acme-system:installer")
+        }),
+        "no impersonated review of the item was sent: {seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|request| request.contains("\"verb\":\"impersonate\"")
+                && !request.contains("impersonate-user:")),
+        "the impersonation review is not impersonated"
+    );
+}
