@@ -288,6 +288,17 @@ impl Built {
         Self(last_line(checks))
     }
 
+    /// A time for `--verbose`: `241 ms`, and whole seconds (`12 s`) from ten seconds on. It is digits and
+    /// a unit, so it holds nothing from outside.
+    #[must_use]
+    pub(crate) fn elapsed(millis: u64) -> Self {
+        if millis < 10_000 {
+            Self(format!("{millis} ms"))
+        } else {
+            Self(format!("{} s", millis / 1000))
+        }
+    }
+
     /// `prefix`, the product name and `suffix`, such as `fix from acme-platform:` for the prefix
     /// `fix from ` and the suffix `:`. Gives `None` unless `product` is a valid product name (the rule
     /// of the spec's `metadata.product`, [`ProductSlug`]) and is not `rdy`, so a vendor cannot make its

@@ -523,6 +523,7 @@ fn plain_out() -> super::Out {
         spec: "acme.yaml".to_owned(),
         kubeconfig: None,
         out_dir_given: false,
+        detail: crate::terminal::Detail::Normal,
     }
 }
 

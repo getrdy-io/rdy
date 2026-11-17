@@ -251,6 +251,10 @@ where
                                 registry,
                                 color: cli.global.color,
                                 rig,
+                                detail: terminal::Detail::from_flags(
+                                    cli.global.quiet,
+                                    cli.global.verbose,
+                                ),
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
                         }

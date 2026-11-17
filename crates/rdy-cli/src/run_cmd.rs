@@ -60,7 +60,7 @@ use crate::output::{open_report_dir, report_error};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
-use crate::terminal::{View, banner, render};
+use crate::terminal::{Detail, View, banner, render};
 use crate::trust::{self, Layout, Vars};
 use crate::{lint, redaction};
 
@@ -116,6 +116,8 @@ pub(crate) struct RunContext {
     pub(crate) color: ColorChoice,
     /// The watchdog and the write state, started before the runtime (M1-176).
     pub(crate) rig: Rig,
+    /// `--quiet` and `--verbose` (M1-143).
+    pub(crate) detail: Detail,
 }
 
 /// Runs the command and returns the exit code.
@@ -149,6 +151,7 @@ async fn execute(
         registry,
         color,
         rig,
+        detail,
     } = cx;
     let look = Look::new(color, &hooks);
     // The watchdog was started before the runtime, from the first thing `main` did. The scheduler counts
@@ -170,7 +173,7 @@ async fn execute(
     let loaded = load_spec(args, &name, &privilege)?;
 
     // The banner comes before any check (01 section 4.7). The path is shown as typed, redacted first.
-    let out = Out::new(args, look, &name);
+    let out = Out::new(args, look, &name, detail);
     if let Some(text) = banner(
         &Signature::from(loaded.signature()),
         &out.spec,
@@ -246,7 +249,20 @@ async fn execute(
         board.set_host(host.clone());
     }
     options.board = board;
-    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+    // `--verbose` prints one line as each check ends, live and on any stream (07 C.2).
+    let executed = if detail == Detail::Verbose {
+        let queue = events::EventQueue::default();
+        options.on_finish = Some(queue.hook(look.styler()));
+        events::drive(
+            engine.execute(&loaded, plan, &privilege, &options),
+            &queue,
+            look,
+            stderr,
+        )
+        .await
+    } else {
+        engine.execute(&loaded, plan, &privilege, &options).await
+    };
 
     let finished_at = clock();
     let run = make_run(
@@ -540,10 +556,12 @@ struct Out {
     kubeconfig: Option<String>,
     /// `--out-dir` was given (it decides the Windows note).
     out_dir_given: bool,
+    /// How much the text shows.
+    detail: Detail,
 }
 
 impl Out {
-    fn new(args: &RunArgs, look: Look, name: &str) -> Self {
+    fn new(args: &RunArgs, look: Look, name: &str, detail: Detail) -> Self {
         // The spec, the kubeconfig and the folder are typed by the user. They are redacted here and
         // escaped by the renderer.
         Self {
@@ -554,6 +572,7 @@ impl Out {
                 .as_ref()
                 .map(|path| redaction::redact_text(&path.display().to_string())),
             out_dir_given: args.out_dir.is_some(),
+            detail,
         }
     }
 
@@ -579,6 +598,7 @@ impl Out {
             kubeconfig: self.kubeconfig.as_deref(),
             styler: self.look.styler(),
             width: self.look.width,
+            detail: self.detail,
         };
         say(stderr, self.look, &render(&view));
     }
@@ -675,6 +695,8 @@ fn uuid_v4() -> Result<String, CliError> {
         e.concat()
     ))
 }
+
+mod events;
 
 #[cfg(test)]
 mod tests;

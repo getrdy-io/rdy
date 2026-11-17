@@ -66,25 +66,75 @@ pub struct RunOptions {
     /// run started (M1-176). [`Engine::execute`] tells it about every start and end. `None` runs
     /// without one.
     pub board: Option<Arc<Board>>,
+    /// Told when each scheduled check ends (`rdy run --verbose`, M1-143). `None` is the default.
+    pub on_finish: Option<FinishHook>,
 }
 
-/// Sends the scheduler's positions to the board's slots. The scheduler counts only the checks it runs;
-/// the board has a slot for every spec entry.
+/// What a [`FinishHook`] is told about a check that ended.
+///
+/// It is not redacted: the key is the spec's own text. A caller that prints it redacts it first.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Finished<'a> {
+    /// The result key, `id` or `id/name`.
+    pub key: &'a str,
+    /// How the check ended, after severity.
+    pub status: &'a Status,
+    /// How long the check ran, in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// A callback for the end of each scheduled check. It runs on the scheduler's tasks, so it must not
+/// block for long. A check the plan skipped never reaches it, because it never ran.
+#[derive(Clone)]
+pub struct FinishHook(Arc<dyn Fn(&Finished<'_>) + Send + Sync>);
+
+impl FinishHook {
+    /// Wraps `hook`.
+    pub fn new(hook: impl Fn(&Finished<'_>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(hook))
+    }
+}
+
+impl std::fmt::Debug for FinishHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FinishHook")
+    }
+}
+
+/// How one end becomes a result. It gets the position of the check in the plan.
+type MapSlot = Arc<dyn Fn(usize, &Ran) -> CheckResult + Send + Sync>;
+
+/// Sends the scheduler's positions to the board's slots and to the finish hook. The scheduler counts
+/// only the checks it runs; the board has a slot for every spec entry.
 struct SlotObserver {
-    board: Arc<Board>,
+    board: Option<Arc<Board>>,
+    hook: Option<FinishHook>,
+    map: MapSlot,
     slot_of: Vec<usize>,
 }
 
 impl Observer for SlotObserver {
     fn started(&self, index: usize, at: Duration, timeout: Duration) {
-        if let Some(slot) = self.slot_of.get(index) {
-            self.board.started(*slot, at, timeout);
+        if let (Some(board), Some(slot)) = (&self.board, self.slot_of.get(index)) {
+            board.started(*slot, at, timeout);
         }
     }
 
     fn finished(&self, index: usize, ran: &Ran) {
-        if let Some(slot) = self.slot_of.get(index) {
-            self.board.finished(*slot, ran);
+        let Some(slot) = self.slot_of.get(index) else {
+            return;
+        };
+        if let Some(board) = &self.board {
+            board.finished(*slot, ran);
+        }
+        if let Some(hook) = &self.hook {
+            let result = (self.map)(*slot, ran);
+            (hook.0)(&Finished {
+                key: &result.key,
+                status: &result.status,
+                duration_ms: result.duration_ms,
+            });
         }
     }
 }
@@ -108,6 +158,7 @@ impl RunOptions {
             spec_arg: "<spec>".to_owned(),
             origin: None,
             board: None,
+            on_finish: None,
         }
     }
 }
@@ -299,7 +350,7 @@ impl Engine {
 
         // The board for the watchdog, when the caller made one: give it the way to map an end, and the
         // scheduler's positions to its slots.
-        let observer = options.board.as_ref().map(|board| {
+        let observer = (options.board.is_some() || options.on_finish.is_some()).then(|| {
             let mut owned: Vec<Option<Owned>> = Vec::with_capacity(slots.len());
             let mut slot_of: Vec<usize> = Vec::new();
             let mut kept = items.iter();
@@ -319,7 +370,7 @@ impl Engine {
             }
             let deadline = options.deadline;
             let spec_arg = options.spec_arg.clone();
-            board.set_map(Box::new(move |slot, ran| {
+            let map: MapSlot = Arc::new(move |slot, ran| {
                 let Some(Some(owned)) = owned.get(slot) else {
                     // The scheduler only reports the slots it was given, so this cannot happen. If it
                     // did, the entry would count as not run, never as passed.
@@ -335,9 +386,15 @@ impl Engine {
                 );
                 fill_spec_arg(&mut result, &spec_arg);
                 result
-            }));
+            });
+            if let Some(board) = &options.board {
+                let map = Arc::clone(&map);
+                board.set_map(Box::new(move |slot, ran| map(slot, ran)));
+            }
             SlotObserver {
-                board: Arc::clone(board),
+                board: options.board.clone(),
+                hook: options.on_finish.clone(),
+                map,
                 slot_of,
             }
         });

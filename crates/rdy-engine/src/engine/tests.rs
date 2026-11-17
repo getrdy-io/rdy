@@ -487,3 +487,73 @@ fn a_host_set_later_replaces_the_stand_in_in_the_partial_report() {
     let (report, _counts) = board.partial_report(Duration::from_secs(1));
     assert_eq!(report.host.hostname, "real-host");
 }
+
+/// What a finish hook was told: key, status and duration.
+type Heard = Arc<std::sync::Mutex<Vec<(String, Status, u64)>>>;
+
+fn listener() -> (FinishHook, Heard) {
+    let heard: Heard = Arc::default();
+    let sink = Arc::clone(&heard);
+    let hook = FinishHook::new(move |done| {
+        sink.lock().expect("lock").push((
+            done.key.to_owned(),
+            done.status.clone(),
+            done.duration_ms,
+        ));
+    });
+    (hook, heard)
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_finish_hook_hears_each_scheduled_check_once_with_its_final_status() {
+    let (hook, heard) = listener();
+    let mut options = RunOptions::new();
+    options.on_finish = Some(hook);
+    let done = run_with(Replay::new(), false, &options).await;
+    let heard = heard.lock().expect("lock").clone();
+    // Six checks were scheduled. `net.egress` was skipped by the plan and never ran, so it is not here.
+    let mut keys: Vec<&str> = heard.iter().map(|(key, _, _)| key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "host.cpu",
+            "host.cpu/boom",
+            "host.cpu/slow",
+            "host.disk",
+            "host.memory",
+            "host.memory/leak"
+        ]
+    );
+    for (key, status, _) in &heard {
+        assert_eq!(*status, find(&done, key).status, "{key}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_finish_hook_and_the_board_work_together() {
+    let engine = engine(Replay::new());
+    let spec = loaded(SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let (hook, heard) = listener();
+    let mut options = RunOptions::new();
+    let board = engine.board(&spec, &plan, watch_base(), options.deadline, "<spec>");
+    options.board = Some(Arc::clone(&board));
+    options.on_finish = Some(hook);
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    assert_eq!(heard.lock().expect("lock").len(), 6);
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert_eq!(report.checks, done.results);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_finish_hook_changes_nothing() {
+    let (hook, _heard) = listener();
+    let mut with = RunOptions::new();
+    with.on_finish = Some(hook);
+    let hooked = run_with(Replay::new(), false, &with).await;
+    let plain = run_with(Replay::new(), false, &RunOptions::new()).await;
+    assert_eq!(hooked.results, plain.results);
+}

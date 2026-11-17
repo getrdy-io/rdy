@@ -65,6 +65,7 @@ fn full(
         kubeconfig: None,
         styler,
         width,
+        detail: Detail::Normal,
     };
     let mut out = String::new();
     if let Some(banner) = banner(&report.signature, spec_arg, styler) {
@@ -336,6 +337,7 @@ fn no_report_folder_drops_the_report_block_and_keeps_the_verdict_last() {
         kubeconfig: None,
         styler: Styler::new(false),
         width: 100,
+        detail: Detail::Normal,
     };
     let out = render(&view);
     assert!(!out.contains("Report written"), "{out}");
@@ -355,6 +357,7 @@ fn a_windows_folder_closes_with_a_backslash_and_a_note_sits_above_the_verdict() 
         kubeconfig: None,
         styler: Styler::new(false),
         width: 100,
+        detail: Detail::Normal,
     };
     let out = render(&view);
     assert!(
@@ -471,6 +474,7 @@ fn a_payload_in_every_field_prints_as_text_with_colour_on_and_off() {
                 kubeconfig: Some(PAYLOAD),
                 styler,
                 width: 100,
+                detail: Detail::Normal,
             };
             assert_safe(&render(&view));
             if let Some(text) = banner(&report.signature, PAYLOAD, styler) {
@@ -804,6 +808,7 @@ fn cluster_of(report: &Report, kubeconfig: Option<&str>) -> Option<String> {
         kubeconfig,
         styler: Styler::new(false),
         width: 100,
+        detail: Detail::Normal,
     };
     render(&view)
         .lines()
@@ -1012,3 +1017,5 @@ fn a_state_other_than_verified_or_unsigned_gets_a_banner_and_no_trust_words() {
     );
     assert!(out.contains("sig     NOT VERIFIED (odd\\x1b)"), "{out}");
 }
+
+mod detail;
