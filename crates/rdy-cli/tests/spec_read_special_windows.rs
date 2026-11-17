@@ -63,6 +63,14 @@ fn a_named_pipe_as_the_spec_exits_64_at_once() {
         .build()
         .expect("runtime");
     let _guard = runtime.enter();
-    let _server = ServerOptions::new().create(&name).expect("create the pipe");
+    // Several instances, so an open finds a free one: with a single instance the open fails as busy and
+    // the disk check is never reached.
+    let _servers: Vec<_> = (0..16)
+        .map(|n| {
+            let mut options = ServerOptions::new();
+            options.first_pipe_instance(n == 0);
+            options.create(&name).expect("create the pipe")
+        })
+        .collect();
     assert_exits_64(&name);
 }

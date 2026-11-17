@@ -325,3 +325,34 @@ fn the_prefix_reader_cuts_at_the_limit_and_says_so() {
     let (bytes, more) = read_public_prefix(&path, 100).expect("read");
     assert_eq!((bytes.len(), more), (100, false));
 }
+
+/// Windows: the disk test is what refuses a pipe or a device, since `is_file` passes both.
+#[cfg(windows)]
+#[test]
+fn is_disk_file_is_false_for_a_pipe_handle_and_for_nul() {
+    let d = dir();
+    let regular = d.path().join("f");
+    std::fs::write(&regular, "x").expect("write");
+    assert!(is_disk_file(&File::open(&regular).expect("open")));
+    let nul = OpenOptions::new().read(true).open("NUL").expect("open NUL");
+    assert!(!is_disk_file(&nul));
+
+    let name = format!(r"\\.\pipe\rdy-m1-183-unit-{}", std::process::id());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let _guard = runtime.enter();
+    let _servers: Vec<_> = (0..2)
+        .map(|n| {
+            let mut options = tokio::net::windows::named_pipe::ServerOptions::new();
+            options.first_pipe_instance(n == 0);
+            options.create(&name).expect("create the pipe")
+        })
+        .collect();
+    let client = OpenOptions::new()
+        .read(true)
+        .open(&name)
+        .expect("open the pipe");
+    assert!(!is_disk_file(&client));
+}

@@ -144,10 +144,19 @@ fn read_checked(
     let unreadable = |err: &io::Error| FileError::Unreadable {
         reason: crate::error::IoReason::from_io(err),
     };
-    let seen = std::fs::metadata(path).map_err(|err| unreadable(&err))?;
-    if !seen.is_file() {
-        return Err(FileError::NotRegular);
-    }
+    // Unix: a `stat` first, so a device is refused before it is opened. Windows has no such step: `stat`
+    // there opens the path without the identification-level flags, so a pipe server would be connected
+    // at the default impersonation level. Every Windows check runs on the handle from `open_public`.
+    #[cfg(not(windows))]
+    let seen = {
+        let seen = std::fs::metadata(path).map_err(|err| unreadable(&err))?;
+        if !seen.is_file() {
+            return Err(FileError::NotRegular);
+        }
+        Some(seen)
+    };
+    #[cfg(windows)]
+    let seen: Option<std::fs::Metadata> = None;
     between();
     let mut file = open_public(path).map_err(|err| unreadable(&err))?;
     // Windows: `is_file` only means "not a folder or a link", so a pipe or a console passes it. Ask the
@@ -156,7 +165,7 @@ fn read_checked(
         return Err(FileError::NotRegular);
     }
     let opened = file.metadata().map_err(|err| unreadable(&err))?;
-    if !opened.is_file() || !same_file(&seen, &opened) {
+    if !opened.is_file() || seen.as_ref().is_some_and(|seen| !same_file(seen, &opened)) {
         return Err(FileError::NotRegular);
     }
     let mut buf = Vec::new();
