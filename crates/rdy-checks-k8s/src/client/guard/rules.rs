@@ -304,6 +304,33 @@ pub const ALLOWED: &[Allowed] = &[
         reads: "the OpenShift version",
         field_selector: FieldSelector::NotRequired,
     },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "ingressclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controller and the default-class annotation only; every other annotation and the parameters are dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        resource: "gatewayclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controllerName and the Accepted condition status only",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "services",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.ingress"],
+        reads: "the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; the address itself, annotations and the rest of the spec are dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
+    },
 ];
 
 /// The longest `as:` value, in bytes.

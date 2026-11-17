@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-pending"
+summary = "The Gateway API CRDs are installed and a class exists, but no controller accepted it"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-eks-alb"
+summary = "EKS with the AWS Load Balancer Controller class, not marked default"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

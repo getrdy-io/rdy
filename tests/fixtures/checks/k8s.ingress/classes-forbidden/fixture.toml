@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-classes-forbidden"
+summary = "The identity may not list ingress classes"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

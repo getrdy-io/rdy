@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-pending-old-two"
+summary = "Two LoadBalancer services with no address for 20 and 45 minutes, and one that has an address"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

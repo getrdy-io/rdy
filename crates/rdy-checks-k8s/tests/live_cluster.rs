@@ -64,8 +64,9 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
 };
+use k8s_openapi::api::networking::v1::IngressClass;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
@@ -313,6 +314,41 @@ async fn the_readonly_role_serves_discovery_and_names_itself() {
     assert_version_passes(&finding, &expected_minor());
 }
 
+/// A `GatewayClass`, named only so the live test can list it: the Gateway API has no type in k8s-openapi.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct GatewayClass {
+    metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+}
+
+impl kube::Resource for GatewayClass {
+    type DynamicType = ();
+    type Scope = kube::core::ClusterResourceScope;
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        "GatewayClass".into()
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        "gateway.networking.k8s.io".into()
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        "v1".into()
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        "gatewayclasses".into()
+    }
+
+    fn meta(&self) -> &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &mut self.metadata
+    }
+}
+
 /// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,
 /// for the get of a storage class that does not exist. Anything else, including a guard refusal, a 403
 /// or a 500, fails the test.
@@ -402,6 +438,9 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
+    ("list", "", "services", ""),
+    ("list", "networking.k8s.io", "ingressclasses", ""),
+    ("list", "gateway.networking.k8s.io", "gatewayclasses", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -559,6 +598,23 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
+    assert_served(
+        "ingressclasses",
+        false,
+        &client.all::<IngressClass>().list(&all).await,
+    );
+    assert_served(
+        "services",
+        false,
+        &client.namespaced::<Service>("default").list(&all).await,
+    );
+    // kind has no Gateway API CRDs, so the server answers 404 ("not installed"), which is the answer the
+    // check reads. A 403 would fail here: that is what proves the role grants the list.
+    assert_served(
+        "gatewayclasses (404 when the Gateway API is not installed)",
+        true,
+        &client.all::<GatewayClass>().list(&all).await,
+    );
     // The rules review is a POST the guard allows. The server answers 201. It is asked for `default`
     // (where only the cluster role applies) and for `kube-system` (where the optional Role adds the
     // deployments list), and the answers are read in step 2.
@@ -696,10 +752,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 12 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 15 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 12 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 15 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

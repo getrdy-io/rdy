@@ -56,8 +56,9 @@ rules:
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
   # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
+  # k8s.ingress: the services of the target namespace (name, type and whether an address is assigned).
   - apiGroups: [""]
-    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
+    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges", "services"]
     verbs: ["list"]
   # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
   - apiGroups: ["storage.k8s.io"]
@@ -65,6 +66,15 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["csinodes", "csidrivers"]
+    verbs: ["list"]
+  # k8s.ingress: the ingress classes and their controllers.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+  # k8s.ingress: the Gateway API classes and whether a controller accepted them. Without the Gateway API
+  # installed the server answers 404, which rdy reads as "not installed".
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses"]
     verbs: ["list"]
   # k8s.admission: OpenShift security context constraints. k8s.version: the OpenShift version.
   - apiGroups: ["security.openshift.io"]

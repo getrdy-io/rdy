@@ -86,3 +86,33 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "nginx.org"
+reason = "The controller name of the F5 NGINX ingress controller (nginx.org/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "traefik.io"
+reason = "The controller name of Traefik (traefik.io/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "istio.io"
+reason = "The controller name of the Istio Gateway API class (istio.io/gateway-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "gateway.envoyproxy.io"
+reason = "The controller name of the Envoy Gateway class (gateway.envoyproxy.io/gatewayclass-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "networking.gke.io"
+reason = "The controller name of the GKE Gateway class (networking.gke.io/gateway) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "metallb.io"
+reason = "The API group of MetalLB's custom resources, listed in the group discovery document, not a host a test contacts (k8s.ingress)"

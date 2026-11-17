@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-assigned"
+summary = "LoadBalancer services that have an address, a ClusterIP service and a NodePort service"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true
