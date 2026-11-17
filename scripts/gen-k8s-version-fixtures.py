@@ -104,7 +104,7 @@ def refusal(code, reason, message, details):
     }
 
 
-def apis(case, groups, status=200):
+def apis(case, groups, status=200, delay_ms=None):
     if status == 403:
         body = refusal(
             403,
@@ -118,11 +118,10 @@ def apis(case, groups, status=200):
             "apiVersion": "v1",
             "groups": [group(n, v) for n, v in groups],
         }
-    write(
-        case,
-        "api/discovery-apis.json",
-        {"request": {"method": "GET", "path": "/apis"}, "status": status, "body": body},
-    )
+    record = {"request": {"method": "GET", "path": "/apis"}, "status": status, "body": body}
+    if delay_ms is not None:
+        record["delay_ms"] = delay_ms
+    write(case, "api/discovery-apis.json", record)
 
 
 STANDARD = [
@@ -418,6 +417,12 @@ version(case, "v1.27.4")
 apis(case, [], status=403)
 cluster_version(case, [], "", status=404)
 nodes(case, [node("acme-vm-1", "v1.27.4", AWS + "a")])
+
+case = "slow-groups"
+manifest(case, "A 1.29 cluster whose API server sits on the group list for an hour, so the check times out (M1-119)")
+version(case, "v1.29.4")
+apis(case, STANDARD, delay_ms=3_600_000)
+nodes(case, [node("acme-vm-1", "v1.29.4", AWS + "a")])
 
 if CHECK:
     if DIFFERENT:

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-slow-groups"
+summary = "A 1.29 cluster whose API server sits on the group list for an hour, so the check times out (M1-119)"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

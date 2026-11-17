@@ -106,6 +106,66 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
     Ok(())
 }
 
+/// M1-119: the `timeouts` env under paused time at `jobs = 1` and `jobs = 8`.
+///
+/// A hung `statvfs` ends `host.disk` in `timeout` at the facade's 5 s limit. A black-hole endpoint does not
+/// give `timeout`: `net.egress` cuts each endpoint to its own budget by design (03), so the check returns
+/// a bounded `block` that names the black hole. The whole run ends inside `deadline_ms` in virtual time
+/// (the report's own durations, read before the golden normaliser zeroes them), so no real sleep and no
+/// real socket is involved, and a slow runner cannot change the result.
+#[test]
+fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestResult {
+    use rdy_spec::result::Status;
+    if Fixture::load(&fixtures_dir(), "envs/timeouts")?.os() != current_os() {
+        eprintln!("env_harness: skipping timeouts: it is a Linux machine");
+        return Ok(());
+    }
+    for jobs in [1, 8] {
+        let run = driver::run_env("timeouts", jobs)?;
+        let report = &run.report;
+        let check = |id: &str| {
+            report
+                .checks
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| format!("{id} did not run at jobs = {jobs}"))
+        };
+        let disk = check("host.disk")?;
+        assert_eq!(
+            disk.status,
+            Status::Timeout,
+            "jobs {jobs}: {}",
+            disk.message
+        );
+        assert_eq!(disk.timeout_after_ms, Some(5000), "jobs {jobs}");
+        // The hang cost its full limit in virtual time, so the paused clock really ran.
+        assert!(
+            disk.duration_ms >= 5000,
+            "jobs {jobs}: {} ms",
+            disk.duration_ms
+        );
+        let egress = check("net.egress")?;
+        assert_eq!(
+            egress.status,
+            Status::Block,
+            "jobs {jobs}: {}",
+            egress.message
+        );
+        assert!(egress.message.contains("blackhole"), "{}", egress.message);
+        // Virtual time: the paused clock jumped to each timer, so the run took the longest wait, not the sum
+        // of the waits, and never reached the deadline.
+        assert!(
+            report.run.duration_ms <= 20_000,
+            "jobs {jobs}: the run took {} ms of virtual time, past deadline_ms",
+            report.run.duration_ms
+        );
+        assert!(!report.interrupted, "jobs {jobs}");
+        assert_eq!(report.verdict.as_str(), "not_ready", "jobs {jobs}");
+        assert_eq!(report.exit_code, 2, "jobs {jobs}");
+    }
+    Ok(())
+}
+
 #[test]
 fn a_base_without_a_spec_is_not_an_env() -> TestResult {
     let root = tempfile::tempdir()?;
