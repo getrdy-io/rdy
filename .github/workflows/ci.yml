@@ -301,7 +301,8 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # macos-x64 is the slow leg (the nextest step alone ran about 18 minutes on 2026-11-17).
+    timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}
     permissions:
       contents: read
     defaults:
