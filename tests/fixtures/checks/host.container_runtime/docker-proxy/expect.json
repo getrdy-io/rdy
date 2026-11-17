@@ -34,8 +34,10 @@
           "d_type": true,
           "installed": false,
           "proxy": {
-            "http": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
-            "https": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
+            "http": "http://proxy.acme.example:3128",
+            "http_credentials": true,
+            "https": "http://proxy.acme.example:3128",
+            "https_credentials": true,
             "no_proxy": "localhost,10.0.0.0/8,.cluster.local",
             "source": "docker info"
           },
