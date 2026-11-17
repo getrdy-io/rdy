@@ -274,7 +274,7 @@ impl std::error::Error for RootsOverridden {}
 
 impl RootsOverridden {
     /// The error a backend returns.
-    #[cfg(any(windows, test))]
+    #[cfg(any(windows, test, feature = "testing"))]
     pub(crate) fn error() -> std::io::Error {
         std::io::Error::other(Self)
     }
