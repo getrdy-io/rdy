@@ -127,7 +127,7 @@ pub enum FieldSelector {
     /// This exact term, with `=` or `==` (`involvedObject.kind=PersistentVolumeClaim`).
     Equals(&'static str, &'static str),
     /// The `labelSelector` (not the field selector) must hold a term `key=value` or `key==value` on this
-    /// key, with a value. Used for `endpointslices`, so a list names one Service and not every slice.
+    /// key, with a value. A selector with `(` is refused. Used for `endpointslices`, so a list names one Service and not every slice.
     LabelEquals(&'static str),
 }
 
@@ -136,6 +136,10 @@ impl FieldSelector {
     /// `labelSelector` key) meet the requirement.
     fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
         if let Self::LabelEquals(key) = self {
+            // A set expression (`app in (a,key=x)`) can hide a term after a comma: refuse any `(`.
+            if labels.is_some_and(|text| text.contains('(')) {
+                return false;
+            }
             return labels
                 .into_iter()
                 .flat_map(|text| text.split(','))
@@ -176,8 +180,9 @@ fn split_term(term: &str) -> Option<(&str, &str, &str)> {
 
 /// The `resource` of an [`ALLOWED`] entry that admits every resource of its group and version. Used once:
 /// a Gatekeeper constraint kind is a CRD that each `ConstraintTemplate` creates, so its plural name cannot
-/// be listed ahead of time (ADR 0042). Every GET shape of such an entry is still a list, never a secret,
-/// and the group holds nothing but constraints.
+/// be listed ahead of time (ADR 0042). Every GET shape of such an entry is still a list, never a secret.
+/// Nothing enforces that the group holds only constraints, so a list can return more than policy
+/// objects. ADR 0042 writes down that residual and why it is accepted.
 pub const ANY_RESOURCE: &str = "*";
 
 /// One resource the M1 checks read (02 Appendix B, section 4). There is no `secrets` entry, and a test

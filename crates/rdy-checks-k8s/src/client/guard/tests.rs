@@ -366,6 +366,8 @@ fn an_endpoint_slice_list_must_name_one_service_by_label() {
         "?labelSelector=kubernetes.io%2Fservice-name%21%3Dx",
         "?labelSelector=xkubernetes.io%2Fservice-name%3Dhooks",
         "?labelSelector=kubernetes.io%2Fservice-name-other%3Dhooks",
+        "?labelSelector=app%20in%20%28a%2Ckubernetes.io%2Fservice-name%3Dx%29",
+        "?labelSelector=kubernetes.io%2Fservice-name%3Dx%2Capp%20in%20%28a%29",
         "?fieldSelector=metadata.name%3Dhooks",
     ] {
         assert_eq!(
