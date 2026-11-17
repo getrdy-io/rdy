@@ -1,6 +1,6 @@
 //! The M1 docs pages that the CLI points at (M1-133, 07 section 5, 09 section 4).
 //!
-//! Five checks:
+//! Six checks:
 //! - the exit codes page lists the five documented codes, which are the codes of `ExitCode` today. The
 //!   test cannot see a new `ExitCode` variant that is `#[non_exhaustive]`; a reviewer must add it to the
 //!   list in `every_exit_code` and to the page;
@@ -9,7 +9,9 @@
 //! - every redirect target is a file of this repo, at `main` or at a release tag, with no `..`, query,
 //!   fragment or percent escape in its path;
 //! - every relative link in a published page resolves to a file, and no page uses a root-relative link;
-//! - the unsigned page covers both flags and the Windows case.
+//! - the unsigned page covers both flags and the Windows case;
+//! - the sign and verify page runs every `rdy` command it shows, in `sign_verify_page.rs`, and the
+//!   unsigned and sign and verify pages both say to compare the full fingerprint, not the banner's.
 //!
 //! The pages live under `docs/src/content/docs/`. Only that folder is published (09 section 2).
 
@@ -308,5 +310,57 @@ fn unsigned_page_covers_both_flags_and_windows() {
         "Do not delete or rename the `.minisig` file",
     ] {
         assert!(page.contains(needle), "the unsigned page lacks {needle:?}");
+    }
+}
+
+/// The `rdy` command lines in the `sh` blocks of `page`, as written, without the fence lines.
+fn page_commands(page: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    let mut in_sh = false;
+    for line in page.lines() {
+        if let Some(info) = line.strip_prefix("```") {
+            in_sh = info.trim() == "sh";
+            continue;
+        }
+        if in_sh && line.starts_with("rdy ") {
+            commands.push(line.to_owned());
+        }
+    }
+    commands
+}
+
+#[test]
+fn sign_and_verify_page_runs_every_command_it_shows() {
+    let page = read("docs/src/content/docs/specs/signing.md");
+    let commands = page_commands(&page);
+    assert!(
+        commands.len() >= 4,
+        "the page shows the keygen, sign, verify and trust commands: {commands:?}"
+    );
+    let tests = read("crates/rdy-cli/tests/sign_verify_page.rs");
+    for command in &commands {
+        // The test file holds each page command as the literal it runs. A page line with no test is
+        // a command nobody runs.
+        assert!(
+            tests.contains(&format!("\"{command}\"")),
+            "the page shows `{command}`, but crates/rdy-cli/tests/sign_verify_page.rs does not run it"
+        );
+    }
+}
+
+#[test]
+fn sign_verify_and_unsigned_pages_say_to_compare_the_full_fingerprint() {
+    // SF-02 (signing review, M1-132): the banner shows 48 bits, which a key can be ground to match.
+    for path in [
+        "docs/src/content/docs/specs/signing.md",
+        "docs/src/content/docs/unsigned.md",
+    ] {
+        let page = read(path);
+        for needle in [
+            "Compare the full fingerprint",
+            "Do not compare the short fingerprint in the `KEY NOT PINNED` banner",
+        ] {
+            assert!(page.contains(needle), "{path} lacks {needle:?}");
+        }
     }
 }

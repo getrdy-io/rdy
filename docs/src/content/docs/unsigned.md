@@ -47,6 +47,8 @@ rdy run --key acme-platform.pub acme-platform.yaml
 
 Only run the spec when the fingerprints match.
 
+Compare the full fingerprint that `rdy verify --key` prints. Do not compare the short fingerprint in the `KEY NOT PINNED` banner. Someone can grind a key until its short form matches the one you expect.
+
 ## What the flags never do
 
 Neither flag accepts a signature that does not match. rdy exits 64 when:
@@ -78,7 +80,7 @@ Check a spec with your vendor's key on Windows in these steps.
 
 1. Get the vendor's public key file. Get the fingerprint the vendor publishes, by another route than the spec.
 2. Put the spec, its `.minisig` file and the key file in one folder. Open a terminal in that folder.
-3. Check the signature. Compare the fingerprint that rdy prints with the vendor's.
+3. Check the signature. Compare the full fingerprint that rdy prints with the vendor's. Not the short one in the banner.
 
 ```powershell pending=M1-126
 rdy verify --key acme-platform.pub acme-platform.yaml
