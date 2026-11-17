@@ -489,8 +489,9 @@ impl OutputDir {
     ///
     /// It unlinks only when the name is still a regular file with the identity read from the temp
     /// file's handle before it was linked (Unix: device and inode). A file swapped in under the name
-    /// stays. Other systems compare the size only, which is weaker. The check and the unlink are two
-    /// calls, but the folder is private (0700) and owned by this user.
+    /// stays. Windows compares the size only; this is no identity check, and it is harmless because
+    /// anyone who can swap the file can already delete it (ADR 0016 decision 7). The check and the
+    /// unlink are two calls, but on Unix the folder is private (0700) and owned by this user.
     #[cfg(feature = "html")]
     pub fn remove_html(&self, written: &WrittenHtml) {
         let name = self.report_file_name("html");
