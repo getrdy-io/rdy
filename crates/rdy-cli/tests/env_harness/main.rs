@@ -171,6 +171,12 @@ const PENDING: &[Pending] = &[
         why: "M1-095 merged the staged connector with six scripted net.json cases and no reviewed expect.json. M1-096 completes the result (HTTP stage and failure classes), so it adds the expect.json files and reviews the levels once",
     },
     Pending {
+        check: "net.dns",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "Same as host.time_sync: net.dns cuts each name to its own budget, so a hung getent gives a bounded `timeout` finding for that name and never ends the check in `timed_out_ms`. The timeout case (a 60 s delay in its getent recording, an expect.json that holds the finding and the resolver evidence) proves that. M1-179 makes the harness accept a survived hang as the Timeout class",
+    },
+    Pending {
         check: "host.time_sync",
         classes: &[Class::Timeout],
         owner: "M1-179",

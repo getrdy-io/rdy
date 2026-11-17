@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-found-dual-stack"
+summary = "getent prints three rows for each of an IPv6 and an IPv4 address"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

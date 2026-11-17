@@ -1,0 +1,37 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "slow.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "No nameserver answered for `slow.acme.test` in time. Check the `nameserver` lines of `/etc/resolv.conf`: a dead first nameserver adds its timeout to every lookup. Ask the network team to allow udp/53 and tcp/53 from this machine to them. This machine waits up to about 18 s (3 s, 3 attempts, 2 nameservers).",
+    "level": "fail",
+    "message": "1 of 1 names do not resolve: `slow.acme.test` (timed out)",
+    "notes": [
+      "getent is stopped after 5 s. This machine's resolver is set to wait 3 s per nameserver, 3 attempts, 2 nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about 18 s."
+    ],
+    "observed": {
+      "names": [
+        {
+          "ms": 5000,
+          "name": "slow.acme.test",
+          "result": "timeout",
+          "source": "getent"
+        }
+      ],
+      "resolver": {
+        "attempts": 3,
+        "nameservers": 2,
+        "timeout_s": 3,
+        "worst_case_s": 18
+      }
+    },
+    "partial": null
+  }
+}

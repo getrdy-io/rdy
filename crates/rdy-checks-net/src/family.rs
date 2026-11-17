@@ -5,6 +5,7 @@ use rdy_engine::family::{BuildError, Built, Family, HostSet};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::dns::{self, DnsCheck};
 use crate::egress::{self, EgressCheck};
 use crate::mtu::{self, MtuCheck};
 
@@ -12,13 +13,14 @@ use crate::mtu::{self, MtuCheck};
 mod tests;
 
 /// Every net check this build lists, in catalog order (03 section 3).
-static CHECKS: [&CheckInfo; 2] = [&egress::INFO, &mtu::INFO];
+static CHECKS: [&CheckInfo; 3] = [&egress::INFO, &mtu::INFO, &dns::INFO];
 
 /// The `net` family.
 ///
-/// It lists the checks that are written: `net.egress` ([`EgressCheck`]) and `net.mtu` ([`MtuCheck`]). A
-/// check gets the hosts its own spec entry lists and no others (INV-11): for `net.egress`, its `endpoints`.
-/// `net.proxy`, `net.tls_intercept`, `net.dns`, `net.registry` and `net.bandwidth` are reserved ids that
+/// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.mtu` ([`MtuCheck`]) and
+/// `net.dns` ([`DnsCheck`]). A check gets the hosts its own spec entry lists and no others (INV-11): for
+/// `net.egress`, its `endpoints`, and for `net.dns`, its `names`.
+/// `net.proxy`, `net.tls_intercept`, `net.registry` and `net.bandwidth` are reserved ids that
 /// no family lists yet, so the planner skips them with `not_in_build`. Each ticket that writes one adds
 /// its [`CheckInfo`] to the list and its arm to [`Family::build`]. There are no stubs, so the family may
 /// be registered in the CLI as it is.
@@ -41,6 +43,11 @@ impl Family for NetFamily {
                 Ok(Built::new(Box::new(EgressCheck::new(params))).with_hosts(hosts))
             }
             CheckParams::NetMtu(params) => Ok(Built::new(Box::new(MtuCheck::from_params(&params)))),
+            CheckParams::NetDns(params) => {
+                let check = DnsCheck::from_params(&params);
+                let hosts = check.hosts();
+                Ok(Built::new(Box::new(check)).with_hosts(hosts))
+            }
             _ => Err(BuildError::Unsupported(
                 "not a net check this rdy can build".to_owned(),
             )),

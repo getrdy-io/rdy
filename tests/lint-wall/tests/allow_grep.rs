@@ -199,6 +199,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
     ),
     (
+        "crates/rdy-checks-net/src/dns/tests.rs",
+        &["../../../../tests/fixtures/checks/net.dns/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/net.dns, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-net/src/family/tests.rs",
         &["../../../../examples/specs/acme-platform.yaml"],
         "embeds examples/specs/acme-platform.yaml for a test",
