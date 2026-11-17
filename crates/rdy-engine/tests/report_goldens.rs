@@ -631,11 +631,23 @@ async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
         );
         let shown = probe.file_text(&file)?;
         if *k == 0 {
-            // A whole secret is in the raw bytes before redaction. The report's rules remove it later, and
-            // the tags asserted in the leak test show they did.
+            // A whole secret is in the raw bytes, and `file_text` already replaces it with its rule's tag.
+            // (It does not survive to the report: the buffer redactor runs the built-in rules, so the
+            // report's own rules have nothing left to remove from this evidence.)
             assert!(
                 raw.contains(&secret.secret),
                 "{name}: the whole {} is not in the raw bytes",
+                secret.kind
+            );
+            let evidence = evidence_of(&shown);
+            assert!(
+                !evidence.contains(&secret.secret),
+                "{name}: the whole {} is in the shown text",
+                secret.kind
+            );
+            assert!(
+                evidence.contains(&format!("[REDACTED:{}", secret.rule)),
+                "{name}: no tag for the {} in the shown text",
                 secret.kind
             );
         } else {
