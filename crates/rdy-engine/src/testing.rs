@@ -43,8 +43,8 @@ mod tests;
 
 #[cfg(feature = "runtime")]
 pub use expect::{
-    assert_cases, assert_cases_in, assert_cases_with, expect_bytes, render, run_case, run_case_on,
-    sorted,
+    assert_cases, assert_cases_in, assert_cases_with, assert_cases_with_in, expect_bytes, render,
+    run_case, run_case_on, sorted,
 };
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};

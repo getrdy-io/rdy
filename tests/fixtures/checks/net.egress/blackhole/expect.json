@@ -13,7 +13,9 @@
     "fix": "No reply to SYN from 192.0.2.9:8080 in 3s, a firewall is dropping it. Ask the network team to allow tcp/8080 to hole.acme.test from this machine.",
     "level": "fail",
     "message": "1 of 1 endpoints unreachable: hole.acme.test:8080 (blackhole)",
-    "notes": [],
+    "notes": [
+      "hole.acme.test:8080: no reply within 3 s from 192.0.2.9:8080"
+    ],
     "observed": {
       "endpoints": [
         {

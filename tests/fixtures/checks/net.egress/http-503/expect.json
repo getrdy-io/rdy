@@ -14,7 +14,7 @@
     },
     "fix": "api.acme.test:8080 answered 503: the server, or a proxy in front of it, is failing. Run again; if it repeats, ask the owner of the server.",
     "level": "fail",
-    "message": "1 of 1 endpoints unreachable: api.acme.test:8080 (http_status 503)",
+    "message": "1 of 1 endpoints failed: api.acme.test:8080 (http_status 503)",
     "notes": [],
     "observed": {
       "endpoints": [

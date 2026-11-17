@@ -12,10 +12,12 @@
 //!
 //! 4. **HTTP** for a URL endpoint (`http://` or `https://`) that connected and, for https, that the
 //!    roots accepted: one `HEAD` (or `GET`, by the spec) with no redirect followed. The status is judged
-//!    against `expect_status`. With none listed, any status below 500 counts as reachable (a 4xx proves
-//!    the path works and gets a note), and a 5xx fails as `http_status`. A reply that is not HTTP is
-//!    `http_failed`. A `host:port` endpoint gets no request, and an `expect_status` on it is noted as
-//!    ignored. The URL's path and query go to the facade and never into the result.
+//!    against `expect_status`. With none listed, 2xx, 3xx and 4xx count as reachable except 407 (an
+//!    intercepting proxy on the direct route), which fails, and a 5xx, which fails, both as `http_status`.
+//!    A 3xx, 401, 404 and any other 4xx get a note, and a 403 warns, because a transparent proxy's deny
+//!    page looks the same. A reply that is not HTTP is `http_failed`. A `host:port` endpoint gets no
+//!    request, and an `expect_status` on it is noted as ignored. The URL's path and query go to the
+//!    facade and never into the finding; the action log keeps the path and never the query.
 //!
 //! What this version does not do yet: the proxy path (M1-097), redirect and `Date` evidence, issuer
 //! names (M1-099). An endpoint whose `via_proxy` is `proxy_only` is not tried, and the result says so
@@ -188,16 +190,19 @@ impl EgressCheck {
                     }
                     for (family, took) in p.slow() {
                         notes.push(format!(
-                            "{}: the {family} address did not answer within {took} ms, so another family connected first",
+                            "{}: the {family} address had no reply within {took} ms, so another family connected first",
                             p.label()
                         ));
                     }
-                    if let Some(http) = p.http.as_ref().filter(|h| h.accepted_by_default_4xx()) {
-                        notes.push(format!(
-                            "{} answered {} and the spec lists no expect_status, so it counts as reachable",
-                            p.label(),
-                            http.status
-                        ));
+                    if let Some(http) = &p.http
+                        && let Some((why, warn)) = http.default_judgement()
+                    {
+                        let text = format!("{} answered {}: {why}", p.label(), http.status);
+                        if warn {
+                            warns.push(text);
+                        } else {
+                            notes.push(text);
+                        }
                     }
                     let fell = p.fell_through();
                     if let Some((family, why)) = fell.first() {
@@ -207,8 +212,20 @@ impl EgressCheck {
                         ));
                     }
                 }
-                Ending::Failed(..) if p.optional => optional_failed.push(p),
-                Ending::Failed(..) => failed.push(p),
+                Ending::Failed(class, ip) => {
+                    if matches!(class, Class::Blackhole) {
+                        notes.push(format!(
+                            "{}: no reply within 3 s from {}",
+                            p.label(),
+                            ip.as_deref().unwrap_or("any address")
+                        ));
+                    }
+                    if p.optional {
+                        optional_failed.push(p);
+                    } else {
+                        failed.push(p);
+                    }
+                }
                 Ending::NotTried(_) => not_tried.push(p),
             }
         }
@@ -233,19 +250,22 @@ impl EgressCheck {
                 Finding::pass(format!("{tried} of {total} endpoints reachable"))
             }
         } else if failed.is_empty() {
-            let mut parts = names(&optional_failed, "optional, unreachable");
+            let optional_tag = format!("optional, {}", word(&optional_failed));
+            let mut parts = names(&optional_failed, &optional_tag);
             parts.extend(warns.iter().cloned());
             Finding::warn(parts.join("; "))
         } else {
             let mut message = format!(
-                "{} of {total} endpoints unreachable: {}",
+                "{} of {total} endpoints {}: {}",
                 failed.len(),
+                word(&failed),
                 names(&failed, "").join(", ")
             );
             if !optional_failed.is_empty() {
                 message.push_str(&format!(
-                    "; {} optional also unreachable",
-                    optional_failed.len()
+                    "; {} optional also {}",
+                    optional_failed.len(),
+                    word(&optional_failed)
                 ));
             }
             Finding::fail(message)
@@ -294,6 +314,18 @@ impl EgressCheck {
         }
         finding
     }
+}
+
+/// "failed" when every endpoint in the list got an answer that was wrong (an HTTP status or a reply that is
+/// not HTTP), else "unreachable": an endpoint that answered HTTP was reached.
+fn word(list: &[&Probed]) -> &'static str {
+    let answered = list.iter().all(|p| {
+        matches!(
+            p.ending,
+            Ending::Failed(Class::HttpStatus | Class::HttpFailed, _)
+        )
+    });
+    if answered { "failed" } else { "unreachable" }
 }
 
 /// `host:port (class)` for up to [`NAMED`] endpoints, then "and N more". `tag` is added to each when

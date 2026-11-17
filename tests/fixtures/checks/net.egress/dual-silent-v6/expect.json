@@ -14,7 +14,7 @@
     "level": "pass",
     "message": "1 of 1 endpoints reachable",
     "notes": [
-      "dual.acme.test:8080: the ipv6 address did not answer within 250 ms, so another family connected first"
+      "dual.acme.test:8080: the ipv6 address had no reply within 250 ms, so another family connected first"
     ],
     "observed": {
       "endpoints": [

@@ -232,7 +232,8 @@ impl Class {
             Self::HttpStatus => {
                 let status = detail.unwrap_or("an unexpected status");
                 let why = match detail.and_then(|d| d.parse::<u16>().ok()) {
-                    Some(401 | 407) => "it wants credentials rdy does not send. If that is normal for this URL, add the status to `expect_status`.",
+                    Some(401) => "it wants credentials rdy does not send. If that is normal for this URL, add the status to `expect_status`.",
+                    Some(407) => "a proxy that this route did not expect asked for credentials: an intercepting proxy sits on the direct path to the host. Ask the network team which proxy it is and whether to bypass it for this host, or set `HTTPS_PROXY` for the product service.",
                     Some(403) => "a firewall, a proxy allow list or the server refuses this machine. Ask the owner of the proxy or the server to allow it, or add 403 to `expect_status` if that is normal.",
                     Some(404 | 410) => "the path does not exist there. Check the URL in the spec.",
                     Some(429) => "the server is rate limiting. Run again later.",

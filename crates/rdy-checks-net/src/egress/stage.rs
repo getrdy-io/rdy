@@ -135,24 +135,43 @@ pub(super) struct HttpView {
     pub(super) first_byte: Duration,
     /// The whole call, to the end of the discard.
     pub(super) total: Duration,
-    /// The statuses the spec accepts, or empty for the default (anything below 500).
+    /// The statuses the spec accepts, or empty for the default (see [`HttpView::accepted`]).
     pub(super) expected: Vec<u16>,
 }
 
 impl HttpView {
-    /// Whether `status` counts as reachable: one of the listed statuses, or with none listed, anything
-    /// below 500. A 4xx proves the path works; a 5xx says the server or a proxy in front is failing.
+    /// Whether `status` counts as reachable: one of the listed statuses, or with none listed, 2xx, 3xx
+    /// and 4xx except 407. A 4xx proves the path works. A 407 is an intercepting proxy that answered on
+    /// the direct route, and a 5xx says the server or a proxy in front is failing, so both fail.
     pub(super) fn accepted(&self) -> bool {
         if self.expected.is_empty() {
-            self.status < 500
+            (200..500).contains(&self.status) && self.status != 407
         } else {
             self.expected.contains(&self.status)
         }
     }
 
-    /// A 4xx that counts only because the spec lists no statuses.
-    pub(super) fn accepted_by_default_4xx(&self) -> bool {
-        self.expected.is_empty() && (400..500).contains(&self.status)
+    /// For a status that counts only because the spec lists none: the note, and whether it is a warning
+    /// (a 403 may be the deny page of a transparent proxy, so it warns).
+    pub(super) fn default_judgement(&self) -> Option<(&'static str, bool)> {
+        if !self.expected.is_empty() || !self.accepted() {
+            return None;
+        }
+        match self.status {
+            300..=399 => Some((
+                "the redirect was not followed, and with no expect_status a 3xx counts as reachable",
+                false,
+            )),
+            403 => Some((
+                "a deny page may come from a proxy or firewall on the path and not from the server; list 403 in expect_status if the server really answers it",
+                true,
+            )),
+            400..=499 => Some((
+                "the spec lists no expect_status, so it counts as reachable",
+                false,
+            )),
+            _ => None,
+        }
     }
 }
 
@@ -343,7 +362,8 @@ pub(super) async fn probe(
     if out.ending == Ending::Reached && spec.target.is_url() {
         let budget = HTTP_BUDGET.min(ctx.remaining().saturating_sub(RESERVE));
         if budget < MIN_TO_START {
-            out.ending = Ending::Failed(Class::Timeout, None);
+            // The connect worked and the request could not start in the time left: not tried.
+            out.ending = Ending::NotTried(OUT_OF_TIME);
         } else {
             match ctx.within(budget, http_stage(ctx, spec, &mut out)).await {
                 Some(done) => done?,
@@ -362,8 +382,14 @@ async fn http_stage(
     out: &mut Probed,
 ) -> Result<(), CheckError> {
     let method = match spec.method {
+        SpecMethod::Head => HttpMethod::Head,
         SpecMethod::Get => HttpMethod::Get,
-        _ => HttpMethod::Head,
+        // The spec enum may grow; a method this build does not know is not guessed.
+        _ => {
+            return Err(CheckError::Unsupported(
+                "an HTTP method this rdy does not know",
+            ));
+        }
     };
     // The roots that judged the chain are the roots the request is verified against.
     let roots = match out.tls.as_ref().map(|t| t.roots) {

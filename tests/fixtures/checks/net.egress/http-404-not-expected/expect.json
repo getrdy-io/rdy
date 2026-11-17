@@ -17,7 +17,7 @@
     },
     "fix": "api.acme.test:8080 answered 404: the path does not exist there. Check the URL in the spec.",
     "level": "fail",
-    "message": "1 of 1 endpoints unreachable: api.acme.test:8080 (http_status 404)",
+    "message": "1 of 1 endpoints failed: api.acme.test:8080 (http_status 404)",
     "notes": [],
     "observed": {
       "endpoints": [

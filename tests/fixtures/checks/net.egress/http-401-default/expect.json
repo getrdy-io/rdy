@@ -16,7 +16,7 @@
     "level": "pass",
     "message": "1 of 1 endpoints reachable",
     "notes": [
-      "api.acme.test:8080 answered 401 and the spec lists no expect_status, so it counts as reachable"
+      "api.acme.test:8080 answered 401: the spec lists no expect_status, so it counts as reachable"
     ],
     "observed": {
       "endpoints": [

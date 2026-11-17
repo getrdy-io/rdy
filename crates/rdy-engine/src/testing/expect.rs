@@ -196,11 +196,26 @@ pub fn assert_cases_with(
     build: impl Fn(&CheckSpec) -> Built,
     serve: impl Fn(Replay) -> Replay,
 ) -> Vec<String> {
+    assert_cases_with_in(&fixtures_dir(), id, build, serve)
+}
+
+/// Like [`assert_cases_with`], under the fixtures in `root`.
+///
+/// # Panics
+///
+/// See [`assert_cases_in`].
+#[must_use]
+pub fn assert_cases_with_in(
+    root: &Path,
+    id: &str,
+    build: impl Fn(&CheckSpec) -> Built,
+    serve: impl Fn(Replay) -> Replay,
+) -> Vec<String> {
     let built = |entry: &CheckSpec| {
         let built = build(entry);
         (Arc::from(built.check), built.hosts)
     };
-    assert_cases_serving(&fixtures_dir(), id, built, serve)
+    assert_cases_serving(root, id, built, serve)
 }
 
 /// [`assert_cases_in`] with the servers of [`assert_cases_with`].
