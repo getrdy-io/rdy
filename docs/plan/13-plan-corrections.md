@@ -573,3 +573,25 @@ the corrections log of `11-backlog.md`.
   and pages the node list on a three-node cluster. 07 D.7's `nothing_verified` sentence said every check is
   for another OS; the verdict rule also gives it when every check is optional and was not run, so the
   sentence now says that too. The rule is unchanged. No new M1 ticket, and no test-pinned text changed.
+- **Correction-55, the handshake signature test, the "no revocation check" note, the OS roots source,
+  the CA pin advice and the `as:` run proof.** From the M1-101 TLS verifier review
+  (`docs/plan/reviews/tls-verifier-review.md`), its cold review and the M1-113 code review. Correction-49 is PR #85. The recording verifier accepts every chain, and only the
+  handshake signature ties the chain to the server, but no test proves that rdy checks it, so a change to
+  `assertion()` would pass every test and let any server replay a pinned leaf (SF-02). ADR 0014, 02 and 05
+  say the report says "no revocation check", and no check does (SF-01). The review folded SF-01 into
+  M1-096, but PR #74 (M1-096) is approved and not merged, so it is not widened. New core M1-184 (1.5 h)
+  takes both: a server that presents leaf A and signs with key B fails `Probe::tls_chain` on TLS 1.2 and
+  1.3, net.tls_intercept with that leaf pinned gives `not_tested`, its unknown-CA case asserts zero
+  application bytes, and each net.tls_intercept result with a chain and each net.egress result with a TLS
+  stage carries `REVOCATION_NOTE` once. It depends on M1-096, M1-099 and M1-100, and M1-138 depends on it.
+  02 says the note comes from M1-184. 03's net.tls_intercept Source line and section 3's "Shared stack"
+  named `rustls-native-certs` as the OS store; they now name `NativeCall::SystemRoots`: PEM bundles
+  through the facade on Linux, and on macOS when a variable is set, and `rustls-native-certs` on macOS
+  and Windows otherwise. 03's Thresholds line and M1-116's network page say that until M2-135 a CA pin is
+  at best a warning, so pin the leaf or set `forbid_interception` to block (AR-01). PR #91 rewrites the
+  same Thresholds line; the second to merge keeps both. M1-073 (merged) moves back to week 14, so weeks 14
+  and 18 hold 15 h. From the M1-113 code review: M1-113 cannot prove in a real run that a spec `as:`
+  works and k8s.rbac shows the OpenShift grant text until the family builds k8s.rbac from its
+  parameters, which is M1-175, so that proof moves to M1-175's exit test. M1-113 keeps
+  `Cluster::read_only_as` and `Cluster::is_openshift`, tested through the family holder. No 03 `###`
+  heading or Appendix A row changed, and no test-pinned text changed.
