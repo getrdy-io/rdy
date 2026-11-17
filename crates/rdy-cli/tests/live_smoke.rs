@@ -124,22 +124,21 @@ fn sign(dir: &Path, name: &str, body: &str) -> PathBuf {
 
 /// A port nothing listens on: a socket bound to it and never put into listening. The caller keeps it
 /// alive, so no other process can take the port, and a connect to it is refused.
-fn closed_port() -> (socket2::Socket, u16) {
-    let socket = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::STREAM,
-        Some(socket2::Protocol::TCP),
-    )
-    .expect("socket");
-    let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
-    socket.bind(&addr.into()).expect("bind a loopback port");
-    let port = socket
-        .local_addr()
-        .expect("local addr")
-        .as_socket()
-        .expect("an ip address")
-        .port();
-    (socket, port)
+fn closed_port() -> (tokio::runtime::Runtime, tokio::net::TcpSocket, u16) {
+    // A tokio socket registers with a reactor on creation, so it needs a runtime that outlives it.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .expect("runtime");
+    let (socket, port) = {
+        let _guard = runtime.enter();
+        let socket = tokio::net::TcpSocket::new_v4().expect("socket");
+        let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
+        socket.bind(addr).expect("bind a loopback port");
+        let port = socket.local_addr().expect("local addr").port();
+        (socket, port)
+    };
+    (runtime, socket, port)
 }
 
 /// Runs a spec with `--key`, `--json` and no report files. `extra` is added to the arguments.
@@ -180,7 +179,7 @@ fn live_exit_codes_0_1_2_and_64() {
     // handshake from the backlog, and a connect that completes is all the check measures.
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
     let open = listener.local_addr().expect("local addr").port();
-    let (closed_socket, closed) = closed_port();
+    let (runtime, closed_socket, closed) = closed_port();
     assert_ne!(open, closed);
 
     let key = sign(dir, "open", &spec_text(open, "block"));
@@ -228,5 +227,6 @@ fn live_exit_codes_0_1_2_and_64() {
         );
     }
     drop(closed_socket);
+    drop(runtime);
     drop(listener);
 }

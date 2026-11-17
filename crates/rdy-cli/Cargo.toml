@@ -62,10 +62,9 @@ rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
 # never has it (rdy-engine refuses a release build with it).
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
 sha2 = { workspace = true, features = ["std"] }
-socket2 = { workspace = true }
 tempfile = { workspace = true }
 # `test-util` gives the harness a paused clock, so a hung source costs no real time.
-tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "test-util", "net"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
