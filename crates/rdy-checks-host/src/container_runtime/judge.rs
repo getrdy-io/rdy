@@ -294,7 +294,7 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet, root: b
             format!("{name} is present, but this user may not open its socket {}, so rdy could not read its settings.", seen.socket),
             if root {
                 // Root was refused, so "run as root" would send the reader in a circle.
-                "Check that the daemon is running and that a security module (SELinux or AppArmor) allows rdy to open the socket.".to_owned()
+                "A security module (SELinux or AppArmor) or a user namespace may be refusing rdy the socket.".to_owned()
             } else if seen.kind == ContainerRuntime::Docker {
                 format!("Run rdy as root. Adding the user to the docker group with `usermod -aG docker USER` also works. {DOCKER_GROUP_WARNING}")
             } else {

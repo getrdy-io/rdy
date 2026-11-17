@@ -711,7 +711,7 @@ fn a_modules_dep_of_2_5_mib_cannot_prove_a_module_absent() {
     assert_eq!(head.observed["modules"]["br_netfilter"], "available");
     let tail = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(2 * MIB + 100_000)));
     assert_eq!(tail.observed["modules"]["br_netfilter"], "available");
-    let middle = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(MIB + MIB / 2)));
+    let middle = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(MIB + MIB / 4)));
     assert_eq!(middle.observed["modules"]["br_netfilter"], "unknown");
     assert_eq!(middle.level, Level::Warn);
     assert!(

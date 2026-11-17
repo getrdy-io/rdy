@@ -482,7 +482,7 @@ fn judge_version(rules: &Rules, facts: &Facts, cx: &VersionContext<'_>, out: &mu
         out.notes.extend(like_hint);
         let why = match &facts.release {
             Got::Value(_) => format!("kernel release {} is not in a form rdy compares", cx.shown),
-            Got::Absent => "the kernel release does not exist".to_owned(),
+            Got::Absent => "the kernel release could not be read".to_owned(),
             Got::Failed(why) => format!("the kernel release could not be read ({why})"),
         };
         out.problems.push(Problem {
