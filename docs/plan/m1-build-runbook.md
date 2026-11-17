@@ -459,7 +459,8 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       0.1.0 gate. Build it after #74 (M1-096) and #91 (M1-100) merge.
   - M1-101's PR (correction-55): SF-01's owner is M1-184, not M1-096, and SF-02 is an M1-138 dependency.
     In the review, its progress line and 05 "TLS", write "from M1-184" for "from M1-096", and drop the
-    facade zero-bytes test from SF-02's fix (it exists in `probe/net/tls/tests.rs`).
+    facade zero-bytes test from SF-02's fix (it exists:
+    `the_live_backend_handshakes_on_loopback_and_reads_the_real_store`, `probe/net/tls/tests.rs` ~764).
   - #91 (M1-100) and correction-55 both edit 03's net.tls_intercept Thresholds line. The second to merge
     keeps #91's pin text and appends correction-55's "Until M2-135" sentence.
   - M1-113 and M1-175 (correction-55): M1-113 implements `Cluster::read_only_as` and
