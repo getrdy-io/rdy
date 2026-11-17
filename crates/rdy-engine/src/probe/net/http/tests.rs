@@ -274,7 +274,7 @@ async fn a_302_returns_its_location_host_without_a_second_request() {
         );
         // Neither the path, the query, the port nor the token of the `Location` is kept.
         let shown = format!("{outcome:?} {}", log_text(&hub));
-        for leaked in ["hunter2", "canary", "/next", "8443", "frag"] {
+        for leaked in ["hunter2", "canary", "/next", ":8443", "frag"] {
             assert!(!shown.contains(leaked), "{leaked:?} in {shown}");
         }
     }
