@@ -24,7 +24,7 @@ WRITTEN = set()
 
 NODES_PATH = "/api/v1/nodes"
 DEPLOYMENTS_PATH = "/apis/apps/v1/namespaces/kube-system/deployments"
-SCALER_QUERY = "fieldSelector=metadata.name=cluster-autoscaler&limit=500"
+SCALER_QUERY = "limit=500"
 
 
 def write(case, name, value, text=False):
@@ -166,8 +166,11 @@ def groups(case, names=(), code=200):
     put(case, "discovery-apis", "/apis", body, code)
 
 
-def scaler_deployments(case, found=False, code=200):
-    items = [{"metadata": {"name": "cluster-autoscaler", "namespace": "kube-system"}}] if found else []
+def scaler_deployments(case, found=False, code=200, items=None):
+    if items is None:
+        items = [{"metadata": {"name": "cluster-autoscaler", "namespace": "kube-system"}}] if found else []
+        if not found:
+            items = [{"metadata": {"name": "coredns", "namespace": "kube-system", "labels": {"k8s-app": "kube-dns"}}}]
     body = listing("DeploymentList", "apps/v1", items) if code == 200 else status(
         403, "Forbidden",
         'deployments.apps is forbidden: User "acme-reader" cannot list resource "deployments" in API group "apps" in the namespace "kube-system"')
@@ -191,6 +194,10 @@ def case(name, summary):
 ZONES = ["us-east-1a", "us-east-1b", "us-east-1c"]
 GPU = {"key": "nvidia.com/gpu", "value": "present", "effect": "NoSchedule"}
 CONTROL = {"key": "node-role.kubernetes.io/control-plane", "effect": "NoSchedule"}
+UNREACHABLE = [
+    {"key": "node.kubernetes.io/unreachable", "effect": "NoSchedule"},
+    {"key": "node.kubernetes.io/unreachable", "effect": "NoExecute"},
+]
 
 
 def healthy(n=3, **kwargs):
@@ -229,9 +236,10 @@ nodes("pods-limit", [
     for i in range(3)
 ])
 
-case("pods-limit-other", "Three nodes outside AWS that allow 30 pods each")
+case("pods-limit-other", "Three self-managed nodes outside AWS that allow 30 pods each")
 nodes("pods-limit-other", [
-    node(f"acme-node-{i + 1}", pods="30", zone=ZONES[i], provider=f"gce://acme-project/us-east1-b/acme-node-{i + 1}")
+    node(f"acme-node-{i + 1}", pods="30", zone=ZONES[i], kubelet="v1.29.4",
+         provider=f"gce://acme-project/us-east1-b/acme-node-{i + 1}")
     for i in range(3)
 ])
 
@@ -241,12 +249,14 @@ nodes("no-allocatable", [node("acme-node-1", allocatable=False, zone="us-east-1a
 # ---- which nodes count ------------------------------------------------------------------------------------------
 case("excluded", "Three healthy nodes, and one NotReady, one cordoned, one Windows, one Fargate, one virtual, a GPU pool and a control plane")
 nodes("excluded", healthy() + [
-    node("acme-notready", ready="False", zone="us-east-1a"),
+    node("acme-notready", ready="Unknown", zone="us-east-1a", taints=UNREACHABLE),
     node("acme-cordoned", cordoned=True, zone="us-east-1a",
          taints=[{"key": "node.kubernetes.io/unschedulable", "effect": "NoSchedule"}]),
     node("acme-windows", os_="windows", zone="us-east-1a"),
-    node("fargate-ip-10-0-0-1", labels={"eks.amazonaws.com/compute-type": "fargate"}, zone="us-east-1a"),
-    node("acme-virtual", labels={"type": "virtual-kubelet"}, zone="us-east-1a"),
+    node("fargate-ip-10-0-0-1", labels={"eks.amazonaws.com/compute-type": "fargate"}, zone="us-east-1a",
+         taints=[{"key": "eks.amazonaws.com/compute-type", "value": "fargate", "effect": "NoSchedule"}]),
+    node("acme-virtual", labels={"type": "virtual-kubelet"}, zone="us-east-1a",
+         taints=[{"key": "virtual-kubelet.io/provider", "value": "acme", "effect": "NoSchedule"}]),
     node("acme-gpu-1", zone="us-east-1b", taints=[GPU], instance="g5.2xlarge"),
     node("acme-control-1", zone="us-east-1c", taints=[CONTROL]),
 ])
@@ -288,7 +298,9 @@ case("pressure", "Two healthy nodes and one with memory and disk pressure")
 nodes("pressure", [
     node("acme-node-1", zone="us-east-1a"),
     node("acme-node-2", zone="us-east-1b"),
-    node("acme-node-3", zone="us-east-1c", pressure=("MemoryPressure", "DiskPressure")),
+    node("acme-node-3", zone="us-east-1c", pressure=("MemoryPressure", "DiskPressure"),
+         taints=[{"key": "node.kubernetes.io/memory-pressure", "effect": "NoSchedule"},
+                 {"key": "node.kubernetes.io/disk-pressure", "effect": "NoSchedule"}]),
 ])
 
 # ---- autoscalers -------------------------------------------------------------------------------------------------------
@@ -324,6 +336,31 @@ case("scaler-small", "One node that is too small, and the cluster serves the Kar
 nodes("scaler-small", [node("acme-node-1", cpu="1930m", cap_cpu="2", zone="us-east-1a")])
 groups("scaler-small", ["karpenter.sh"])
 
+case("scaler-nap", "One node in a GKE node auto-provisioning pool")
+nodes("scaler-nap", [node("acme-node-1", zone="us-east-1a", labels={"cloud.google.com/gke-nodepool": "nap-e2-standard-4-abc"})])
+
+case("scaler-openshift", "One node, and the cluster serves the OpenShift machine autoscaler group")
+nodes("scaler-openshift", [node("acme-node-1", zone="us-east-1a")])
+groups("scaler-openshift", ["autoscaling.openshift.io"])
+
+case("scaler-helm", "One node, and a Helm-named cluster autoscaler Deployment found by its label")
+nodes("scaler-helm", [node("acme-node-1", zone="us-east-1a")])
+groups("scaler-helm")
+scaler_deployments("scaler-helm", items=[
+    {"metadata": {"name": "acme-autoscaler", "namespace": "kube-system",
+                  "labels": {"app.kubernetes.io/name": "aws-cluster-autoscaler"}}},
+])
+
+case("zero-auto-mode", "Every node is cordoned, and one is managed by EKS Auto Mode")
+nodes("zero-auto-mode", [node("acme-node-1", cordoned=True, zone="us-east-1a", labels={"eks.amazonaws.com/compute-type": "auto"})])
+
+case("zero-plain", "Every node is cordoned and there is no autoscaler")
+nodes("zero-plain", [node("acme-node-1", cordoned=True, zone="us-east-1a")])
+no_scaler("zero-plain")
+
+case("aks-no-zone", "Three AKS nodes whose zone label is 0, which means no zone")
+nodes("aks-no-zone", [node(f"acme-node-{i + 1}", zone="0") for i in range(3)])
+
 # ---- lists ---------------------------------------------------------------------------------------------------------------
 case("forbidden", "The identity may not list nodes")
 nodes("forbidden", [], code=403)
@@ -340,13 +377,14 @@ put("paged", "nodes-page-2", NODES_PATH, listing("NodeList", "v1", [node("acme-n
 
 case("capped", "Two healthy nodes on page one and the server fails on page two")
 nodes("capped", [node("acme-node-1", zone="us-east-1a"), node("acme-node-2", zone="us-east-1b")], cont="tok-more")
+no_scaler("capped")
 
 # ---- hostile text -----------------------------------------------------------------------------------------------------------
 case("hostile", "Node names, labels and quantities that try to reach the terminal or a command")
 nodes("hostile", [
     node("acme-node-1", zone="us-east-1a"),
     node("--all", cordoned=True, zone="us-east-1b"),
-    node("evil\u001b[2Jname", ready="False", zone="us-east-1c", instance="‮txet"),
+    node("evil\u001b[2Jname", ready="False", zone="us-east-1c", instance="\u202etxet"),
     node("acme-garbage", cpu="1e999999", memory="NaN", ephemeral="-5", pods="many", zone="us-east-1a"),
 ])
 no_scaler("hostile")

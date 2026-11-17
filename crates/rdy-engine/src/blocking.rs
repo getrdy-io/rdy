@@ -43,5 +43,15 @@ where
     })
 }
 
+/// Polls `future` for at most `limit` and returns its output, or `None` when the time ran out. The
+/// future is dropped then. For optional work that must not use the time of what it serves (a family probe's
+/// extra read). It must be polled inside a tokio runtime.
+pub async fn within<F: std::future::Future>(
+    limit: std::time::Duration,
+    future: F,
+) -> Option<F::Output> {
+    tokio::time::timeout(limit, future).await.ok()
+}
+
 #[cfg(test)]
 mod tests;

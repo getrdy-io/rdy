@@ -166,12 +166,12 @@ pub(super) struct NodeFacts {
     pub(super) virtual_node: bool,
     pub(super) labels: BTreeMap<String, String>,
     pub(super) taints: Vec<Taint>,
+    /// The node holds more taints than [`MAX_TAINTS`]: the rest were not kept, so it counts as tainted.
+    pub(super) taints_cut: bool,
     /// The conditions that are `True` and mean trouble: the three pressures and `NetworkUnavailable`.
     pub(super) pressure: Vec<&'static str>,
     pub(super) zone: Option<String>,
     pub(super) instance_type: Option<String>,
-    /// The scheme of `spec.providerID`: `aws`, `gcp` or `azure`.
-    pub(super) cloud: Option<&'static str>,
     pub(super) kubelet: Option<String>,
     pub(super) runtime: Option<String>,
     pub(super) allocatable: Sizes,
@@ -185,9 +185,6 @@ const PRESSURE: [&str; 4] = [
     "PIDPressure",
     "NetworkUnavailable",
 ];
-
-/// The `spec.providerID` schemes rdy knows.
-const CLOUDS: &[(&str, &str)] = &[("aws://", "aws"), ("gce://", "gcp"), ("azure://", "azure")];
 
 /// The architecture a node or a spec names, if it is one rdy knows.
 pub(super) fn arch_of(text: &str) -> Option<Arch> {
@@ -216,11 +213,6 @@ impl NodeFacts {
                 .and_then(|conditions| conditions.iter().find(|c| c.type_ == kind))
                 .map(|condition| condition.status.as_str())
         };
-        let provider = node
-            .spec
-            .as_ref()
-            .and_then(|spec| spec.provider_id.as_deref())
-            .unwrap_or_default();
         let kubelet = info.map(|info| info.kubelet_version.clone());
         let arch_text = label("kubernetes.io/arch")
             .or_else(|| info.map(|info| info.architecture.clone()))
@@ -242,6 +234,11 @@ impl NodeFacts {
             fargate: label("eks.amazonaws.com/compute-type").as_deref() == Some("fargate"),
             virtual_node: label("type").as_deref() == Some("virtual-kubelet")
                 || kubelet.as_deref().is_some_and(|text| text.contains("-vk-")),
+            taints_cut: node
+                .spec
+                .as_ref()
+                .and_then(|spec| spec.taints.as_ref())
+                .is_some_and(|taints| taints.len() > MAX_TAINTS),
             taints: node
                 .spec
                 .as_ref()
@@ -262,16 +259,13 @@ impl NodeFacts {
                 .into_iter()
                 .filter(|kind| condition(kind) == Some("True"))
                 .collect(),
+            // AKS writes `0` for a node that is not in a zone: that is no zone.
             zone: label("topology.kubernetes.io/zone")
                 .or_else(|| label("failure-domain.beta.kubernetes.io/zone"))
-                .filter(|zone| !zone.is_empty()),
+                .filter(|zone| !zone.is_empty() && zone != "0"),
             instance_type: label("node.kubernetes.io/instance-type")
                 .or_else(|| label("beta.kubernetes.io/instance-type"))
                 .filter(|text| !text.is_empty()),
-            cloud: CLOUDS
-                .iter()
-                .find(|(prefix, _)| provider.starts_with(prefix))
-                .map(|(_, cloud)| *cloud),
             kubelet,
             runtime: info.map(|info| info.container_runtime_version.clone()),
             allocatable: Sizes::from_map(status.and_then(|status| status.allocatable.as_ref())),
@@ -291,6 +285,12 @@ impl NodeFacts {
             .is_some_and(|value| value == "auto")
         {
             Some("EKS Auto Mode")
+        } else if self
+            .labels
+            .get("cloud.google.com/gke-nodepool")
+            .is_some_and(|pool| pool.starts_with("nap-"))
+        {
+            Some("GKE node auto-provisioning")
         } else if self.name.starts_with("gk3-") {
             // Google documents the `gk3-` prefix of node names as the mark of Autopilot-managed nodes. No
             // node label says it, so this is the one weak hint of the list.
@@ -369,13 +369,67 @@ pub(super) fn tolerates(toleration: &Toleration, taint: &Taint) -> bool {
     }
 }
 
+/// The taints the node lifecycle controller adds for a condition of the node. They are not the operator's
+/// taints: the node stays counted, and the condition is judged on its own (pressure warns, a node that
+/// is not Ready is `not Ready`, a cordon is `spec.unschedulable`).
+const LIFECYCLE_TAINTS: [&str; 7] = [
+    "node.kubernetes.io/memory-pressure",
+    "node.kubernetes.io/disk-pressure",
+    "node.kubernetes.io/pid-pressure",
+    "node.kubernetes.io/network-unavailable",
+    "node.kubernetes.io/not-ready",
+    "node.kubernetes.io/unreachable",
+    "node.kubernetes.io/unschedulable",
+];
+
+/// Where a node runs, for the words of a fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Platform {
+    Eks,
+    EksAuto,
+    Gke,
+    Aks,
+    OpenShift,
+    Other,
+}
+
 impl NodeFacts {
+    /// The managed platform the node's labels or version name.
+    pub(super) fn platform(&self) -> Platform {
+        let has = |key: &str| self.labels.contains_key(key);
+        let kubelet = self.kubelet.as_deref().unwrap_or_default();
+        if has("node.openshift.io/os_id") {
+            Platform::OpenShift
+        } else if self
+            .labels
+            .get("eks.amazonaws.com/compute-type")
+            .is_some_and(|v| v == "auto")
+        {
+            Platform::EksAuto
+        } else if has("eks.amazonaws.com/nodegroup")
+            || has("eks.amazonaws.com/compute-type")
+            || kubelet.contains("-eks-")
+        {
+            Platform::Eks
+        } else if has("cloud.google.com/gke-nodepool") || kubelet.contains("-gke.") {
+            Platform::Gke
+        } else if has("kubernetes.azure.com/cluster") {
+            Platform::Aks
+        } else {
+            Platform::Other
+        }
+    }
+
     /// True when a `NoSchedule` or `NoExecute` taint of the node is tolerated by none of `tolerations`.
     /// `PreferNoSchedule` never keeps a pod off.
     fn tainted(&self, tolerations: &[Toleration]) -> bool {
+        if self.taints_cut {
+            return true;
+        }
         self.taints
             .iter()
             .filter(|taint| matches!(taint.effect.as_str(), "NoSchedule" | "NoExecute"))
+            .filter(|taint| !LIFECYCLE_TAINTS.contains(&taint.key.as_str()))
             .any(|taint| !tolerations.iter().any(|t| tolerates(t, taint)))
     }
 

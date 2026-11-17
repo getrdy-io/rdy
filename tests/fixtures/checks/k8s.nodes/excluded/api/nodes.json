@@ -193,7 +193,18 @@
             "topology.kubernetes.io/zone": "us-east-1a"
           }
         },
-        "spec": {},
+        "spec": {
+          "taints": [
+            {
+              "key": "node.kubernetes.io/unreachable",
+              "effect": "NoSchedule"
+            },
+            {
+              "key": "node.kubernetes.io/unreachable",
+              "effect": "NoExecute"
+            }
+          ]
+        },
         "status": {
           "capacity": {
             "cpu": "8",
@@ -216,7 +227,7 @@
             },
             {
               "type": "Ready",
-              "status": "False"
+              "status": "Unknown"
             }
           ],
           "nodeInfo": {
@@ -370,7 +381,15 @@
             "eks.amazonaws.com/compute-type": "fargate"
           }
         },
-        "spec": {},
+        "spec": {
+          "taints": [
+            {
+              "key": "eks.amazonaws.com/compute-type",
+              "value": "fargate",
+              "effect": "NoSchedule"
+            }
+          ]
+        },
         "status": {
           "capacity": {
             "cpu": "8",
@@ -427,7 +446,15 @@
             "type": "virtual-kubelet"
           }
         },
-        "spec": {},
+        "spec": {
+          "taints": [
+            {
+              "key": "virtual-kubelet.io/provider",
+              "value": "acme",
+              "effect": "NoSchedule"
+            }
+          ]
+        },
         "status": {
           "capacity": {
             "cpu": "8",

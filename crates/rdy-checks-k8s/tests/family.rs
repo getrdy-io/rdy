@@ -508,6 +508,10 @@ async fn serve_routes(apis: Option<&'static str>) -> (SocketAddr, Arc<Mutex<Vec<
                 let (status, body) = if first.starts_with("GET /version ") {
                     (200, VERSION_JSON)
                 } else if first.starts_with("GET /apis ") {
+                    if apis == Some("hang") {
+                        // A server that takes the request and never answers.
+                        tokio::time::sleep(Duration::from_secs(600)).await;
+                    }
                     apis.map_or((404, "{}"), |body| (200, body))
                 } else {
                     (404, "{}")
@@ -623,4 +627,24 @@ async fn a_spec_as_builds_a_client_from_the_family_cluster_unless_the_kubeconfig
         family.cluster().read_only_as(ctx.probe(), user()),
         Err(ImpersonationError::Conflict)
     ));
+}
+
+#[tokio::test]
+async fn a_group_list_that_never_answers_does_not_use_the_probe_and_the_cluster_stays_reached() {
+    let (addr, lines) = serve_routes(Some("hang")).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let started = std::time::Instant::now();
+    let (family, _) = probed(dir.path(), addr, "", &["k8s.rbac"]).await;
+    // `probed` asserts the kube_context capability is available. The wait is the 3 s limit, far under the
+    // 10 s of the probe.
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(!family.cluster().is_openshift());
+    assert_eq!(
+        lines.lock().expect("lines").clone(),
+        ["GET /version HTTP/1.1", "GET /apis HTTP/1.1"]
+    );
 }

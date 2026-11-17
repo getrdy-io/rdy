@@ -158,6 +158,9 @@ pub(super) struct Assessment<'a> {
     /// The counted nodes below `per_node`, and the resources they lack.
     short: Vec<(&'a NodeFacts, Vec<Resource>)>,
     min_ready: Option<usize>,
+    /// A capacity service that sizes new nodes to pending pods (Karpenter, Auto Mode, Autopilot, node
+    /// auto-provisioning), from the labels of any node.
+    managed: Option<&'static str>,
 }
 
 impl<'a> Assessment<'a> {
@@ -187,6 +190,7 @@ impl<'a> Assessment<'a> {
             min_ready: params
                 .min_ready
                 .map(|n| usize::try_from(n.get()).unwrap_or(usize::MAX)),
+            managed: nodes.iter().find_map(NodeFacts::scaler_hint),
         }
     }
 
@@ -195,22 +199,22 @@ impl<'a> Assessment<'a> {
         self.counted.len() - self.short.len()
     }
 
-    /// The spec's node requirement is not met.
+    /// The spec's node requirement is not met. With no node counted it never is: a spec that asks for
+    /// nothing about nodes still needs one.
     fn blocked(&self) -> bool {
+        if self.counted.is_empty() {
+            return true;
+        }
         match self.min_ready {
             Some(min) => self.fits() < min,
-            None => (self.needs_any() && self.counted.is_empty()) || !self.short.is_empty(),
+            None => !self.short.is_empty(),
         }
     }
 
-    fn needs_any(&self) -> bool {
-        RESOURCES.iter().any(|r| self.needs.get(*r).is_some())
-    }
-
-    /// The only thing wrong is that there are too few nodes, which an autoscaler can fix. The caller asks
-    /// whether one exists only when this is true.
-    pub(super) fn only_a_count_is_short(&self, params: &K8sNodes) -> bool {
-        params.min_ready.is_some() && self.blocked() && self.short.is_empty()
+    /// The only thing wrong is that there are too few nodes (or none), which an autoscaler can fix. The
+    /// caller asks whether one exists only when this is true.
+    pub(super) fn only_a_count_is_short(&self) -> bool {
+        self.blocked() && self.short.is_empty()
     }
 
     /// `3 not Ready, 1 cordoned`.
@@ -265,16 +269,23 @@ pub(super) fn finish(
     let mut notes: Vec<String> = Vec::new();
     let mut unverified: Vec<String> = Vec::new();
 
-    count_and_size(found, scaler, &mut problems);
+    count_and_size(found, scaler, cut, &mut problems);
     if let Some(Scaler::Unknown(why)) = scaler
-        && found.only_a_count_is_short(params)
+        && found.only_a_count_is_short()
     {
         notes.push(format!(
             "rdy could not check for a node autoscaler ({why}), so the shortfall stands."
         ));
     }
+    if params.per_node.is_some()
+        && let Some(managed) = found.managed
+    {
+        notes.push(format!(
+            "per_node is only a hint here: {managed} sizes new nodes to the pods waiting for them, so the nodes that exist now may not be the nodes the product gets."
+        ));
+    }
     pressure(found, &mut problems);
-    zones(params, found, &mut problems, &mut unverified);
+    zones(params, found, cut, &mut problems, &mut unverified);
 
     if params.free.is_some() {
         unverified.push(
@@ -284,8 +295,8 @@ pub(super) fn finish(
     }
     if cut {
         unverified.push(format!(
-            "only the first {} nodes were read, the rest are not evaluated",
-            crate::client::list::MAX_ITEMS
+            "the node list was cut after {} nodes, the rest are not evaluated",
+            found.total
         ));
     }
 
@@ -347,7 +358,12 @@ pub(super) fn unreadable(params: &K8sNodes, why: &str, forbidden: bool) -> Findi
 }
 
 /// The problems of how many nodes there are and how big they are.
-fn count_and_size(found: &Assessment<'_>, scaler: Option<&Scaler>, problems: &mut Vec<Problem>) {
+fn count_and_size(
+    found: &Assessment<'_>,
+    scaler: Option<&Scaler>,
+    cut: bool,
+    problems: &mut Vec<Problem>,
+) {
     if !found.blocked() {
         return;
     }
@@ -358,6 +374,8 @@ fn count_and_size(found: &Assessment<'_>, scaler: Option<&Scaler>, problems: &mu
         Some(min) => counted < min,
         None => counted == 0,
     };
+    // Nodes past the cut were not read, so a count that is short may not be.
+    let unread = ". The node list was cut, so more nodes may exist";
 
     if missing_nodes {
         let fits = found.fits();
@@ -389,6 +407,10 @@ fn count_and_size(found: &Assessment<'_>, scaler: Option<&Scaler>, problems: &mu
                 ));
                 (Level::Warn, fix::scale_up())
             }
+            _ if cut => {
+                text.push_str(unread);
+                (Level::Warn, fix::add_nodes(&first_names(found)))
+            }
             _ => (Level::Fail, fix::add_nodes(&first_names(found))),
         };
         problems.push(Problem {
@@ -411,7 +433,7 @@ fn count_and_size(found: &Assessment<'_>, scaler: Option<&Scaler>, problems: &mu
             .filter(|node| others.iter().all(|r| !found.needs.short(node).contains(r)))
             .count();
         problems.push(Problem {
-            level: Level::Fail,
+            level: size_level(found, cut),
             text: format!(
                 "Only {k} of {counted} counted nodes have {} allocatable (the smallest has {})",
                 found.needs.text(&others),
@@ -435,13 +457,22 @@ fn count_and_size(found: &Assessment<'_>, scaler: Option<&Scaler>, problems: &mu
             .as_deref()
             .map_or_else(String::new, |kind| format!(" ({})", shown(kind)));
         problems.push(Problem {
-            level: Level::Fail,
+            level: size_level(found, cut),
             text: format!(
                 "Only {k} of {counted} counted nodes allow {need} pods. {}{instance} allows {have}",
                 shown(&node.name)
             ),
-            fix: fix::pod_limit(node.cloud, &command_arg(&node.name, "<node>")),
+            fix: fix::pod_limit(node.platform(), &command_arg(&node.name, "<node>")),
         });
+    }
+}
+
+/// A size problem is certain unless it only decides whether enough nodes fit and the list was cut.
+fn size_level(found: &Assessment<'_>, cut: bool) -> Level {
+    if cut && found.min_ready.is_some() {
+        Level::Warn
+    } else {
+        Level::Fail
     }
 }
 
@@ -522,6 +553,7 @@ fn pressure(found: &Assessment<'_>, problems: &mut Vec<Problem>) {
 fn zones(
     params: &K8sNodes,
     found: &Assessment<'_>,
+    cut: bool,
     problems: &mut Vec<Problem>,
     unverified: &mut Vec<String>,
 ) {
@@ -551,7 +583,7 @@ fn zones(
             format!(" ({unlabeled} counted nodes have no zone label)")
         };
         problems.push(Problem {
-            level: Level::Fail,
+            level: if cut { Level::Warn } else { Level::Fail },
             text: format!(
                 "The counted nodes span {distinct} zone{}, and the spec needs {need}{extra}",
                 if distinct == 1 { "" } else { "s" }

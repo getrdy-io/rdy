@@ -57,6 +57,9 @@ mod tests;
 /// `k8s.crds`, `k8s.ingress`, `k8s.cni`) registers its info and adds its arm to `build_check` in one change.
 static NOT_BUILT: [&str; 0] = [];
 
+/// The most time the probe spends on the OpenShift group list.
+const OPENSHIFT_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// What a check that has no cluster to read sees: no version.
 static NO_VERSION: ServerVersion = ServerVersion {
     git_version: String::new(),
@@ -245,14 +248,23 @@ impl Holder {
         });
         match attempt {
             Ok(connected) => {
-                // A check that words its fix for OpenShift (k8s.rbac) needs to know. One group list, asked
-                // only when the plan holds that check, on the run's own probe.
-                if ctx.checks.iter().any(|info| info.id == "k8s.rbac") {
-                    connected.discover_openshift(&ctx.probe).await;
-                }
                 let mut cap = Capability::new(Need::KubeContext.wire(), true);
                 cap.detail = Some(format!("{}", connected.line()));
+                // Settle first: what follows is extra, and a probe that the engine ends in the middle of
+                // it still leaves the connection as the answer.
                 self.settle(Dialed::reached(connected));
+                // A check that words its fix for OpenShift (k8s.rbac) needs to know. One group list, asked
+                // only when the plan holds that check, on the run's own probe, and for OPENSHIFT_LIMIT at
+                // most: a server that never answers it must not use the time of the probe.
+                if ctx.checks.iter().any(|info| info.id == "k8s.rbac")
+                    && let Some(connected) = self.dialed.get().and_then(Dialed::connected)
+                {
+                    let _ = rdy_engine::blocking::within(
+                        OPENSHIFT_LIMIT,
+                        connected.discover_openshift(&ctx.probe),
+                    )
+                    .await;
+                }
                 Ok(vec![cap])
             }
             Err(error) => Ok(self.failed(Some(facts), error)),

@@ -4,7 +4,8 @@ use k8s_openapi::api::core::v1::Node;
 use rdy_spec::check::K8sNodes;
 use serde_json::{Value, json};
 
-use super::facts::{Excluded, NodeFacts, Resource, Taint, command_arg, shown, tolerates};
+use super::facts::{Excluded, NodeFacts, Platform, Resource, Taint, command_arg, shown, tolerates};
+use super::fix;
 
 fn node(value: Value) -> NodeFacts {
     let node: Node = serde_json::from_value(value).expect("a node");
@@ -242,4 +243,99 @@ fn the_scaler_hint_follows_labels_then_the_autopilot_prefix() {
         Some("GKE Autopilot")
     );
     assert_eq!(labeled(json!({}), "acme").scaler_hint(), None);
+}
+
+#[test]
+fn the_taints_of_the_node_lifecycle_never_exclude_but_a_cut_taint_list_does() {
+    let none = params(json!({"min_ready": 1}));
+    for key in [
+        "node.kubernetes.io/memory-pressure",
+        "node.kubernetes.io/disk-pressure",
+        "node.kubernetes.io/pid-pressure",
+        "node.kubernetes.io/network-unavailable",
+        "node.kubernetes.io/not-ready",
+        "node.kubernetes.io/unreachable",
+        "node.kubernetes.io/unschedulable",
+    ] {
+        let node = ready_node(json!({"spec": {"taints": [{"key": key, "effect": "NoSchedule"}]}}));
+        assert_eq!(node.excluded(&none), None, "{key}");
+    }
+    // An operator's taint under the same prefix is still a taint.
+    let other = ready_node(json!({
+        "spec": {"taints": [{"key": "node.kubernetes.io/acme", "effect": "NoSchedule"}]}
+    }));
+    assert_eq!(other.excluded(&none), Some(Excluded::Tainted));
+    // More taints than rdy keeps: it cannot say the rest are harmless.
+    let many: Vec<Value> = (0..65)
+        .map(|i| json!({"key": "node.kubernetes.io/not-ready", "effect": "NoSchedule", "value": i.to_string()}))
+        .collect();
+    let cut = ready_node(json!({"spec": {"taints": many}}));
+    assert_eq!(cut.excluded(&none), Some(Excluded::Tainted));
+}
+
+#[test]
+fn a_zone_label_of_zero_is_not_a_zone() {
+    let labeled = |zone: &str| {
+        ready_node(json!({
+            "metadata": {"name": "n", "labels": {"topology.kubernetes.io/zone": zone}}
+        }))
+    };
+    assert_eq!(labeled("0").zone, None);
+    assert_eq!(labeled("1").zone.as_deref(), Some("1"));
+    assert_eq!(labeled("us-east-1a").zone.as_deref(), Some("us-east-1a"));
+}
+
+#[test]
+fn the_platform_follows_labels_and_the_version_and_auto_mode_is_its_own() {
+    let with = |labels: Value, kubelet: &str| {
+        node(json!({
+            "metadata": {"name": "n", "labels": labels},
+            "status": {"nodeInfo": {"machineID": "", "systemUUID": "", "bootID": "", "kernelVersion": "", "osImage": "",
+                "containerRuntimeVersion": "", "kubeletVersion": kubelet, "kubeProxyVersion": "",
+                "operatingSystem": "linux", "architecture": "amd64"}}
+        }))
+        .platform()
+    };
+    assert_eq!(with(json!({}), "v1.29.4-eks-abc1234"), Platform::Eks);
+    assert_eq!(
+        with(json!({"eks.amazonaws.com/nodegroup": "g"}), "v1.29.4"),
+        Platform::Eks
+    );
+    assert_eq!(
+        with(json!({"eks.amazonaws.com/compute-type": "auto"}), "v1.29.4"),
+        Platform::EksAuto
+    );
+    assert_eq!(with(json!({}), "v1.29.4-gke.1000"), Platform::Gke);
+    assert_eq!(
+        with(json!({"kubernetes.azure.com/cluster": "c"}), "v1.29.4"),
+        Platform::Aks
+    );
+    assert_eq!(
+        with(json!({"node.openshift.io/os_id": "rhcos"}), "v1.29.4+abc"),
+        Platform::OpenShift
+    );
+    assert_eq!(with(json!({}), "v1.29.4"), Platform::Other);
+}
+
+#[test]
+fn the_pod_limit_fix_names_the_platform_and_only_eks_gets_prefix_delegation() {
+    for (platform, must) in [
+        (Platform::Eks, "ENABLE_PREFIX_DELEGATION=true"),
+        (Platform::EksAuto, "NodePool"),
+        (Platform::Gke, "--max-pods-per-node"),
+        (Platform::Aks, "az aks nodepool add"),
+        (Platform::OpenShift, "KubeletConfig"),
+        (Platform::Other, "maxPods"),
+    ] {
+        let text = fix::pod_limit(platform, "acme-node-1");
+        assert!(text.contains(must), "{platform:?}: {text}");
+        assert_eq!(
+            text.contains("ENABLE_PREFIX_DELEGATION"),
+            platform == Platform::Eks,
+            "{platform:?}"
+        );
+        if let Err(error) = rdy_engine::fixtext::check(&text) {
+            panic!("{platform:?}: {error}\n{text}");
+        }
+    }
 }
