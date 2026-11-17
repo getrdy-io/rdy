@@ -27,6 +27,7 @@ pub mod entry;
 #[doc(hidden)]
 pub mod error;
 mod hooks;
+mod interrupt;
 #[doc(hidden)]
 pub mod lint;
 #[doc(hidden)]
@@ -226,6 +227,9 @@ where
             // The hub is built from the run's redactor, so the log, the errors and the report share one
             // known-secret set.
             let hub = ProbeHub::new(backend, redactor.clone());
+            // A new hub forbids the network. Only `rdy run` may open sockets, and only without
+            // `--no-network`; the engine sets the same value again from the run options.
+            hub.set_network(matches!(&cli.command, Commands::Run(run) if !run.no_network));
             // `rdy run`: the check families, and the value of every secret-named environment variable
             // they declare, go into the known-secret set before the first log event below and before
             // any check starts (M1-057, ADR 0015 decision 3). A value the set refuses ends the run.

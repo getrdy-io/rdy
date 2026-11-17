@@ -107,6 +107,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "an integration test of the raw runner",
     ),
     (
+        "crates/rdy-cli/tests/run_interrupt.rs",
+        "an integration test of Ctrl-C in `rdy run` that starts a real process with the raw runner (M1-058)",
+    ),
+    (
         "crates/rdy-cli/tests/run_watchdog.rs",
         "an integration test of the watchdog in `rdy run` that starts a real process with the raw runner (M1-176)",
     ),
@@ -199,9 +203,24 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
     ),
     (
+        "crates/rdy-checks-net/src/family/tests.rs",
+        &["../../../../examples/specs/acme-platform.yaml"],
+        "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
+        "crates/rdy-checks-net/src/mtu/tests.rs",
+        &["../../../../tests/fixtures/checks/net.mtu/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/net.mtu, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/ports/tests.rs",
         &["../../../../tests/fixtures/checks/host.ports/"],
         "embeds the expect.json goldens of tests/fixtures/checks/host.ports, because a check crate test may not read files",
+    ),
+    (
+        "crates/rdy-checks-host/src/time_sync/tests.rs",
+        &["../../../../tests/fixtures/checks/host.time_sync/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.time_sync, because a check crate test may not read files",
     ),
     (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",

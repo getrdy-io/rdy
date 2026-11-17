@@ -86,3 +86,20 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "metadata.name"
+reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.time_sync/refused-range/expect.json"
+value = "169.254.169.123"
+reason = "The Amazon time address, named as the spec entry that host.time_sync must refuse; the golden records it, no test sends a packet to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.time_sync/named-server-metadata/net.json"
+value = "169.254.169.123"
+reason = "The resolver answer that host.time_sync must refuse (the Amazon time address behind a name); no test sends a packet to it"

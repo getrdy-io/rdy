@@ -1,0 +1,7 @@
+{
+  "symlinks": {
+    "sys/class/net/eth0": "../../devices/platform/acme-nic0/net/eth0",
+    "sys/class/net/evil": "../../devices/virtual/dmi/id",
+    "sys/devices/platform/acme-nic0/net/eth0/device": "../.."
+  }
+}

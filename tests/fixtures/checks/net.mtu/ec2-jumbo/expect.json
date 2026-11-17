@@ -1,0 +1,42 @@
+{
+  "entry": {
+    "id": "net.mtu"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": null,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": 1400
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`ens5` has MTU 9001.",
+    "notes": [
+      "MTU 9001 is above 1500 (9001 is the default on EC2). Traffic that leaves the network is clamped to 1500, so make sure ICMP \"fragmentation needed\" is not filtered."
+    ],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "ens5",
+      "default_mtu": 9001,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 9001,
+          "name": "ens5",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

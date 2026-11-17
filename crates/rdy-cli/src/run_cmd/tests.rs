@@ -27,6 +27,8 @@ use crate::error::{CliError, ErrorCode};
 use crate::hooks::RunHooks;
 use crate::output::report_error;
 
+mod flags;
+
 const CANARY: &str = "canary-run-cmd-token-9917";
 
 const FULL: OsSupport = OsSupport {
@@ -621,4 +623,174 @@ fn the_plain_note_is_not_printed_when_nothing_is_on_stdout() {
     assert_eq!(fail(false, &mut out, &mut err), 70);
     let stderr = String::from_utf8(err).expect("utf-8");
     assert!(!stderr.contains("report files not written"), "{stderr}");
+}
+
+// M1-180: the OS fields of `report.host` come from os-release through the run-level probe.
+
+const RHEL_94: &str = "NAME=\"Red Hat Enterprise Linux\"\nVERSION=\"9.4 (Plow)\"\nID=\"rhel\"\nID_LIKE=\"fedora\"\nVERSION_ID=\"9.4\"\nPRETTY_NAME=\"Red Hat Enterprise Linux 9.4 (Plow)\"\n";
+
+fn host_of(machine: Replay) -> Host {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let probe = rdy_engine::testing::TestRun::new(machine).run_probe(rdy_engine::check::Os::Linux);
+    runtime.block_on(super::host_facts(&probe))
+}
+
+#[test]
+fn host_os_is_filled_from_etc_os_release() {
+    let host = host_of(Replay::new().file("/etc/os-release", RHEL_94));
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+    assert_eq!(host.os.version.as_deref(), Some("9.4"));
+    assert_eq!(
+        host.os.pretty_name.as_deref(),
+        Some("Red Hat Enterprise Linux 9.4 (Plow)")
+    );
+}
+
+#[test]
+fn host_os_falls_back_to_usr_lib_os_release() {
+    let host = host_of(Replay::new().file("/usr/lib/os-release", RHEL_94));
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+    assert_eq!(host.os.version.as_deref(), Some("9.4"));
+}
+
+#[test]
+fn host_os_stays_null_when_no_os_release_exists_or_it_is_unreadable() {
+    for machine in [
+        Replay::new(),
+        Replay::new().unreadable("/etc/os-release"),
+        Replay::new().file("/etc/os-release", "nothing useful here\n"),
+    ] {
+        let host = host_of(machine);
+        assert_eq!(host.os.id, None);
+        assert_eq!(host.os.version, None);
+        assert_eq!(host.os.pretty_name, None);
+    }
+}
+
+#[test]
+fn host_os_pretty_name_is_redacted() {
+    let text = "ID=acme\nVERSION_ID=1\nPRETTY_NAME=\"Acme canary-os-pretty-3321\"\n";
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let run = rdy_engine::testing::TestRun::new(Replay::new().file("/etc/os-release", text));
+    assert!(run.add_known_secret("canary-os-pretty-3321"));
+    let probe = run.run_probe(rdy_engine::check::Os::Linux);
+    let host = runtime.block_on(super::host_facts(&probe));
+    let pretty = host.os.pretty_name.expect("a pretty name");
+    assert!(!pretty.contains("canary-os-pretty-3321"), "{pretty}");
+}
+
+fn host_and_log(machine: Replay) -> (Host, Vec<rdy_spec::result::Action>) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let os = machine.os();
+    let run = rdy_engine::testing::TestRun::new(machine);
+    let probe = run.run_probe(os);
+    let host = runtime.block_on(super::host_facts(&probe));
+    (host, run.action_log().actions)
+}
+
+fn reads_of_os_release(log: &[rdy_spec::result::Action]) -> usize {
+    log.iter()
+        .filter(|a| {
+            a.fields
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.ends_with("os-release"))
+        })
+        .count()
+}
+
+#[test]
+fn host_os_is_not_read_on_windows_or_macos_and_logs_no_read() {
+    for os in [rdy_engine::check::Os::Windows, rdy_engine::check::Os::Macos] {
+        let machine = Replay::for_os(os).file("/etc/os-release", RHEL_94);
+        let (host, log) = host_and_log(machine);
+        assert_eq!(host.os.id, None, "{os:?}");
+        assert_eq!(reads_of_os_release(&log), 0, "{os:?}: {log:?}");
+    }
+}
+
+#[test]
+fn a_link_to_a_denied_file_gives_null_and_a_denied_entry() {
+    let machine = Replay::new()
+        .symlink("/etc/os-release", "/etc/shadow")
+        .file("/etc/shadow", "ID=leak\n");
+    let (host, log) = host_and_log(machine);
+    assert_eq!(host.os.id, None);
+    assert!(
+        log.iter()
+            .any(|a| a.outcome == rdy_spec::result::ActionOutcome::Denied),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn an_empty_os_release_gives_null() {
+    let host = host_of(Replay::new().file("/etc/os-release", ""));
+    assert_eq!(host.os.id, None);
+}
+
+#[test]
+fn etc_os_release_wins_over_usr_lib() {
+    let machine = Replay::new()
+        .file("/etc/os-release", RHEL_94)
+        .file("/usr/lib/os-release", "ID=ubuntu\nVERSION_ID=\"22.04\"\n");
+    let host = host_of(machine);
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+}
+
+/// The `host` row of the run header for a report that carries `host`.
+fn header_host_row(host: Host) -> String {
+    let mut report = small_report();
+    report.host = host;
+    let files: Vec<String> = Vec::new();
+    let view = crate::terminal::View {
+        report: &report,
+        spec_arg: "spec.yaml",
+        folder: None,
+        files: &files,
+        note: None,
+        kubeconfig: None,
+        styler: crate::style::Styler::new(false),
+        width: 100,
+    };
+    let text = crate::terminal::render(&view);
+    text.lines()
+        .find(|line| line.starts_with("host"))
+        .unwrap_or_else(|| panic!("no host row in {text}"))
+        .to_owned()
+}
+
+#[test]
+fn the_header_prints_the_os_id_and_version_from_os_release() {
+    let host = host_of(Replay::new().file("/etc/os-release", RHEL_94));
+    let row = header_host_row(host);
+    assert!(row.contains("   rhel 9.4   "), "{row}");
+}
+
+#[test]
+fn the_header_prints_the_family_alone_when_there_is_no_os_release() {
+    let row = header_host_row(host_of(Replay::new()));
+    assert!(row.contains("   linux   "), "{row}");
+}
+
+#[test]
+fn the_html_report_carries_the_pretty_name_from_os_release() {
+    let host = host_of(Replay::new().file("/etc/os-release", RHEL_94));
+    let mut report = small_report();
+    report.host = host;
+    let redacted = redactor().redact_report(report).expect("redacts");
+    let page = rdy_engine::report::render_html(&redacted).expect("renders");
+    assert!(
+        page.contains("Red Hat Enterprise Linux 9.4 (Plow)"),
+        "pretty name missing"
+    );
 }

@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-hostile-links"
+summary = "links under /sys/class/net that lead outside the class: one to the DMI directory, and a device link to the parent"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false
