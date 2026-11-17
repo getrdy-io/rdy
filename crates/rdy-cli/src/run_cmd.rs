@@ -291,6 +291,15 @@ async fn execute(
     };
     state.claim_or_park();
     let files = match &dir {
+        Some(dir) if hooks.fail_files => Err(report_error(
+            ReportStep::WriteFiles,
+            dir.path(),
+            ReportError::Io {
+                action: "write the report files",
+                path: dir.path().to_path_buf(),
+                source: std::io::ErrorKind::StorageFull.into(),
+            },
+        )),
         Some(dir) => write_files(dir, &loaded, &redacted),
         None => Ok(Vec::new()),
     };
@@ -468,16 +477,19 @@ pub(crate) fn discard_bounded(dir: Option<Arc<OutputDir>>, limit: Duration) {
 
 /// Printed on stderr when the JSON report is already on stdout and the files could not be written.
 /// stdout may say `complete: true`; this line says what the exit code means (PC-50, 07 section 4.1).
+/// It is a `note:` line: the one `error:` and `fix:` pair that follows is the real error.
 pub(crate) const FILES_NOT_WRITTEN_NOTE: &str =
-    "error: report files not written. The JSON on stdout is complete but the exit code is 70.";
+    "note: report files not written. The JSON on stdout is complete but the exit code is 70.";
 
-/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1): the
-/// Report with `complete: false` on stdout with `--json`, the summary on stderr, then the error. The
-/// exit code is 70. If the report cannot be printed either (it is over the cap, or stdout is closed),
-/// stdout gets the error object instead.
+/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1):
+/// the summary on stderr, then the error. The exit code is 70.
 ///
-/// `on_stdout` is true when the document is already on stdout (printed before the files, PC-50): a
-/// plain note then goes to stderr between the summary and the error.
+/// Where the Report goes depends on `json` and `on_stdout`. `execute` calls this with `json` false and
+/// `on_stdout` equal to `--json`, because a `--json` run printed its document (with `complete: true`)
+/// before it wrote the files (PC-50), so nothing more goes to stdout. A call with `json` true prints the
+/// Report with `complete: false` to `stdout` instead, and if that cannot be printed (it is over the cap,
+/// or `stdout` is closed) `stdout` gets the error object. `on_stdout` is true when the document is
+/// already on stdout: a plain `note:` line then goes to stderr between the summary and the error.
 #[allow(clippy::too_many_arguments)]
 fn fail_after_verdict(
     error: &CliError,
