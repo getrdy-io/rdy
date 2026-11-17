@@ -100,6 +100,11 @@ nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; ma
 .label { font-weight: 700; }
 .muted { color: var(--muted); }
 dl { margin: 0; }
+.facts { margin: 0.5rem 0; }
+.facts p { margin: 0; }
+.facts dl { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0 1rem; margin: 0.25rem 0 0; }
+.facts dt { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.facts dd { grid-column: 2; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 dl.details { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.25rem 1rem; }
 dl.details dt { font-weight: 700; }
 dl.details dd { margin: 0; overflow-wrap: anywhere; }
@@ -108,7 +113,8 @@ caption { text-align: left; font-weight: 700; padding: 0.25rem 0; }
 th, td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); overflow-wrap: anywhere; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); }
 @media (max-width: 40rem) {
-  dl.details { grid-template-columns: 1fr; }
+  dl.details, .facts dl { grid-template-columns: 1fr; }
+  .facts dd { grid-column: 1; }
 }
 /* Print is black on white whatever the screen theme: this block comes after the dark palette and replaces
    every variable it sets. No backgrounds, so a printer spends no ink on them. */
@@ -127,7 +133,12 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     --banner-fg: #8a1c14;
     --banner-bg: #ffffff;
   }
-  body { background: #ffffff; color: #000000; }
+  body { background: #ffffff; color: #000000; padding-top: var(--banner-height, 1rem); }
+  /* The banners print on every page, fixed at the top. The body leaves exactly their height (the same
+     variable, set on `body`) so they never cover the first lines. */
+  .banners { position: fixed; top: 0; left: 0; right: 0; height: var(--banner-height); background: #ffffff; }
+  .banner { margin: 0 auto; padding: 0.25rem 0.5rem; border-width: 0.125rem; }
+  .banner p { margin: 0; font-size: 0.75rem; line-height: 1.25; }
   .check, tr { break-inside: avoid; }
   #passed, #capabilities { break-before: page; }
 }

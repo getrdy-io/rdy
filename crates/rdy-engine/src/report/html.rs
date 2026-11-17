@@ -41,7 +41,11 @@
 //! the JSON holds, so its "N more entries are in the embedded JSON" line is true. The whole page is at most
 //! 5 MiB: past that, rows of the table are cut and the checks and the JSON never are.
 //!
-//! Left to later tickets: Found and Needed, the footer link and the fixed banner in print (M1-081).
+//! **Found, Needed and the footer (M1-081).** Each check lists what it saw and what it needed, from
+//! `observed` and `expected`: keys as words, `_bytes` as sizes, `_ms` as milliseconds, `_percent` with a
+//! percent sign, a list one line per item, in key order (sorted by the page, so the order does not depend on a JSON feature). The footer holds the one link out, with
+//! `ref=report` and the percent-encoded product and `rel="noopener noreferrer"`, and the link to the
+//! source. In print the banners are fixed at the top and the body leaves their height.
 
 use crate::redact::RedactedReport;
 use crate::report::JsonError;

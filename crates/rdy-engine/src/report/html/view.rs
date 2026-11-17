@@ -75,8 +75,10 @@ impl Span {
 }
 
 mod actions;
+mod facts;
 
 use actions::ActionLog;
+use facts::{Fact, facts};
 
 /// One section of checks, from one [`BucketGroup`].
 pub(super) struct Section {
@@ -120,6 +122,10 @@ pub(super) struct CheckView {
     pub not_run_reason: Option<Vec<Span>>,
     pub fix: Option<FixView>,
     pub builtin_fix: Option<String>,
+    /// What the check saw (`observed`), as labels and plain values.
+    pub found: Vec<Fact>,
+    /// What the check wanted (`expected`).
+    pub needed: Vec<Fact>,
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
     pub partial: Option<PartialView>,
@@ -164,6 +170,11 @@ pub(super) struct View {
     pub user: Option<String>,
     pub run_as: &'static str,
     pub banners: Vec<Banner>,
+    /// The height of the banners in print, in rem: the banners are fixed there, and the body leaves this
+    /// much room at the top. `None` with no banner.
+    pub banner_height: Option<u32>,
+    /// `https://getrdy.io/?ref=report&product=<product>`: the only link out, with the product encoded.
+    pub product_link: String,
     pub sections: Vec<Section>,
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
@@ -200,6 +211,7 @@ impl View {
             // `Verdict` is non_exhaustive. A verdict this version does not know is the worst case.
             _ => "verdict-not-ready",
         };
+        let banners = banners(report);
         Ok(Self {
             product: report.spec.product.clone(),
             title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
@@ -221,7 +233,9 @@ impl View {
             } else {
                 "not root"
             },
-            banners: banners(report),
+            banner_height: banner_height(&banners),
+            product_link: product_link(&report.spec.product),
+            banners,
             sections: group_by_bucket(&report.checks)
                 .iter()
                 .map(|group| section(report, group))
@@ -269,6 +283,44 @@ fn sha256_hex(bytes: &[u8]) -> String {
         out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
     }
     out
+}
+
+/// The link in the footer. It holds `ref=report` and the product, which the spec already shows, and
+/// nothing else: no run id, host, version or date (ADR 0003 decision 8). The product is percent-encoded,
+/// so nothing in it can add a parameter or a character the page would have to escape.
+fn product_link(product: &str) -> String {
+    let mut link = String::from("https://getrdy.io/?ref=report&product=");
+    for byte in product.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            link.push(char::from(byte));
+        } else {
+            link.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    link
+}
+
+/// How much room the fixed banners need in print, in rem. Each line counts as many lines as it wraps to
+/// at about 90 characters, and each banner adds one rem for its padding and border. It errs high: spare
+/// room at the top of page one is better than a banner over the verdict.
+fn banner_height(banners: &[Banner]) -> Option<u32> {
+    if banners.is_empty() {
+        return None;
+    }
+    let lines = |chars: usize| u32::try_from(chars.div_ceil(90).max(1)).unwrap_or(u32::MAX);
+    Some(
+        banners
+            .iter()
+            .map(|banner| {
+                1 + lines(banner.title.chars().count())
+                    + banner
+                        .lines
+                        .iter()
+                        .map(|line| lines(plain(&line.spans).chars().count()))
+                        .sum::<u32>()
+            })
+            .sum(),
+    )
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).
@@ -419,6 +471,8 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         not_run_reason: not_run_reason(check),
         fix: fix_view(report, check),
         builtin_fix: check.builtin_fix.clone(),
+        found: facts(check.observed.as_ref()),
+        needed: facts(check.expected.as_ref()),
         requires: check
             .needs
             .iter()

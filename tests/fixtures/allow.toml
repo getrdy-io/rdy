@@ -86,3 +86,8 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "getrdy.io"
+reason = "The product's own site: the HTML report goldens hold the footer link on purpose (07 D.4); the lint tests a report page, not a host a test contacts"

@@ -365,8 +365,9 @@ fn untrusted_text_is_shown_as_text() -> TestResult {
 /// The HTML half of the M1-056 exit test (PC-43, carried by M1-062): the canaries of the JSON test never
 /// reach the page, and neither do canaries planted in the free text the page does show.
 ///
-/// The page shows the action log (M1-080) but not `observed` or `expected` yet (M1-081 adds them), so the
-/// `observed` canaries are vacuous until then: that test must keep passing when it lands. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
+/// The page shows the action log (M1-080) and `observed` and `expected` (M1-081), so the canaries of the
+/// JSON test are checked where they would show. `html_found_needed.rs` also asserts the redaction marker.
+/// A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
 /// registration of the proxy password is M1-091's.
 #[test]
 fn canaries_never_reach_the_page() -> TestResult {
@@ -485,7 +486,7 @@ fn text_from_the_report_inside_a_sentence_is_isolated() -> TestResult {
     doc["producer"]["version"] = json!("1.0\u{202e}x");
     let html = html_of(doc)?;
     assert!(html.contains("with rdy <bdi>1.0\u{202e}x</bdi>"));
-    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi></p>"));
+    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi> | source: <a href="));
     assert!(html.contains("<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy"));
     Ok(())
 }

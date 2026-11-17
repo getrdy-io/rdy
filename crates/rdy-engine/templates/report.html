@@ -10,7 +10,10 @@
 {%- include "report.css" %}
 </style>
 </head>
-<body>
+<body{% if let Some(height) = banner_height %} style="--banner-height: {{ height }}rem"{% endif %}>
+{%- if !banners.is_empty() %}
+<div class="banners">
+{%- endif %}
 {%- for banner in banners %}
 <div class="banner">
 <p class="banner-title">{{ banner.title }}</p>
@@ -19,6 +22,9 @@
 {%- endfor %}
 </div>
 {%- endfor %}
+{%- if !banners.is_empty() %}
+</div>
+{%- endif %}
 <header>
 <h1><span class="visually-hidden">Verdict: </span><span class="{{ verdict_class }}">{{ verdict_word }}</span></h1>
 <p>For <bdi>{{ product }}</bdi>{% if let Some(version) = version %} <bdi>{{ version }}</bdi>{% endif %}{% if let Some(serial) = serial %}, revision {{ serial }}{% endif %}, on <bdi>{{ hostname }}</bdi></p>
@@ -60,6 +66,32 @@
 {%- endif %}
 {%- if let Some(more) = check.builtin_fix %}
 <p class="text"><span class="label">More from rdy:</span> <bdi>{{ more }}</bdi></p>
+{%- endif %}
+{%- if !check.found.is_empty() %}
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+{%- for fact in check.found %}
+<dt><bdi>{{ fact.label }}</bdi></dt>
+{%- for line in fact.lines %}
+<dd><bdi>{{ line }}</bdi></dd>
+{%- endfor %}
+{%- endfor %}
+</dl>
+</div>
+{%- endif %}
+{%- if !check.needed.is_empty() %}
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+{%- for fact in check.needed %}
+<dt><bdi>{{ fact.label }}</bdi></dt>
+{%- for line in fact.lines %}
+<dd><bdi>{{ line }}</bdi></dd>
+{%- endfor %}
+{%- endfor %}
+</dl>
+</div>
 {%- endif %}
 {%- for need in check.requires %}
 <p>Requires: {% for part in need %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
@@ -132,7 +164,9 @@
 </section>
 </main>
 <footer>
-<p>rdy <bdi>{{ rdy_version }}</bdi></p>
+<p>Made with Rdy. Use Rdy for your product: <a href="{{ product_link }}" rel="noopener noreferrer">{{ product_link }}</a></p>
+<p>This link carries the product name and nothing else.</p>
+<p>rdy <bdi>{{ rdy_version }}</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
 <script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>
 </body>
