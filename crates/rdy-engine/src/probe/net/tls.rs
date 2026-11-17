@@ -331,7 +331,7 @@ impl Probe {
         let bundled = hub
             .tls
             .bundled
-            .get_or_init(|| async { Arc::new(Trust::bundled(provider)) })
+            .get_or_init(|| async { Arc::new(Trust::bundled_plus(provider, &extra_public(hub))) })
             .await;
         Arc::clone(bundled)
     }
@@ -590,6 +590,22 @@ fn strict_failure(error: &io::Error, what: &str) -> ProbeError {
     handshake_failure(error, what)
 }
 
+/// The extra roots a test added to the bundled set. A build without the `testing` feature has none.
+#[cfg_attr(not(feature = "testing"), expect(unused_variables))]
+fn extra_public(hub: &ProbeHub) -> Vec<Vec<u8>> {
+    #[cfg(feature = "testing")]
+    {
+        hub.extra_public
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+    #[cfg(not(feature = "testing"))]
+    {
+        Vec::new()
+    }
+}
+
 /// Gives `config` the hub's pinned clock, when a test pinned one. Both the recording and the strict
 /// configuration pass through here, so the verdicts of `tls_chain` and the HTTP probe agree on the time.
 /// A build without the `testing` feature has no clock to pin and keeps the real one.
@@ -627,6 +643,20 @@ impl ProbeHub {
             .clock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(since_epoch);
+    }
+
+    /// Makes the bundled public set hold `root_der` too, so a test can play "a chain that public roots
+    /// validate" with a generated CA (`net.tls_intercept` class public). Call it before the first TLS
+    /// call of the hub: the bundled set is built once per run and keeps what it held then. It changes
+    /// the bundled set wherever the hub uses it, which is the bundled verdict of `Probe::tls_chain` and
+    /// the roots of `Probe::http` with `Roots::Bundled`. The OS store is not touched.
+    ///
+    /// Only the feature `testing` builds it; a release build cannot add a root.
+    pub fn trust_as_public(&self, root_der: &[u8]) {
+        self.extra_public
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(root_der.to_vec());
     }
 
     /// Puts the real clock back.

@@ -167,12 +167,14 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   command line yet.
 - The `net.egress` check (name lookup, connect to every address, TLS and ALPN, direct). It is wired
   into `rdy run`.
+- The `net.tls_intercept` check (is a middlebox re-signing TLS: public, trusted by this machine only,
+  unknown CA, clock or expiry). It is wired into `rdy run`.
 
 **Next**
 
 - Wiring `rdy run` end to end: load the spec, run the checks, write the reports, set the exit code.
 - The human terminal output and the HTML report.
-- Host ports, the proxy and TLS interception checks, the egress HTTP request and proxy path, and
+- Host ports, the proxy check, TLS interception evidence, the egress HTTP request and proxy path, and
   Kubernetes nodes and Pod Security admission.
 
 **Before 0.1.0**
