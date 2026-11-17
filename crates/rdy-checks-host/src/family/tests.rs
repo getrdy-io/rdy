@@ -208,10 +208,7 @@ fn build_refuses_an_id_the_family_does_not_have() {
 #[test]
 fn these_ids_are_still_stubs_and_the_planner_skips_them() {
     // Delete an id here in the ticket that writes its real check.
-    assert_eq!(
-        HostFamily::stub_ids(),
-        ["host.time_sync", "host.cgroups", "host.kernel",]
-    );
+    assert_eq!(HostFamily::stub_ids(), ["host.time_sync", "host.kernel"]);
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
@@ -452,4 +449,49 @@ fn host_ports_builds_the_real_check_from_a_spec_entry() {
     });
     assert_eq!(ports.tcp_ports(), [6443, 9100]);
     assert_eq!(ports.udp_ports(), [8472]);
+}
+
+#[test]
+fn host_cgroups_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.cgroups", "version": "v2", "controllers": ["cpu", "memory"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.cgroups");
+    assert_eq!(built.check.info().summary, "cgroup version and controllers");
+    assert!(!HostFamily::stub_ids().contains(&"host.cgroups"));
+    // The helper's reads are declared, or the cgroup files would be refused at run time.
+    for path in crate::cgroup::READS {
+        assert!(built.check.info().reads.contains(&path), "{path}");
+    }
+
+    // A stub reports the same id, so run it: only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.cgroups/v2-ok",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.cgroups",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
+    assert_eq!(
+        finding.message,
+        "cgroup v2 in use, controllers `cpu` and `memory` available"
+    );
 }
