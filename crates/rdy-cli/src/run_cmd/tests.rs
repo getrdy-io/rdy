@@ -503,6 +503,167 @@ fn an_html_error_maps_to_report_write_exit_70_with_the_renderers_message() {
     assert_eq!(CliError::report_html(&json).code(), ErrorCode::Internal);
 }
 
+// --- the write order of the files (M1-181) ---
+
+const SPEC_TEXT: &[u8] =
+    b"apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 1\n";
+
+fn loaded() -> rdy_spec::LoadedSpec {
+    rdy_spec::load(
+        SPEC_TEXT,
+        None,
+        &rdy_spec::sig::TrustStore::new(),
+        rdy_spec::sig::Policy::AllowUnsigned,
+    )
+    .expect("the spec loads")
+}
+
+fn folder(parent: &std::path::Path) -> rdy_engine::output::OutputDir {
+    rdy_engine::output::OutputDir::create_new(parent, "acme", "20270309T101502Z").expect("a folder")
+}
+
+fn names_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("lists")
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+fn over_cap_report() -> rdy_engine::redact::RedactedReport {
+    let mut report = small_report();
+    let note = "a note with some words ".repeat(44);
+    report.checks = (0..256)
+        .map(|i| {
+            let mut check = CheckResult::new("host.cpu", "host", Severity::Block, Status::Pass);
+            check.key = format!("host.cpu/c{i}");
+            check.notes = (0..20).map(|_| note.clone()).collect();
+            check
+        })
+        .collect();
+    redactor().redact_report(report).expect("redacts")
+}
+
+#[test]
+fn a_json_that_cannot_be_written_takes_the_page_with_it() {
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = folder(parent.path());
+    let report = redactor().redact_report(small_report()).expect("redacts");
+    let page = rdy_engine::report::render_page(&report).expect("renders");
+    // Something is already under the `.json` name, so the last write fails.
+    let json_name = dir.report_file_name("json");
+    std::fs::write(dir.path().join(&json_name), b"planted").expect("planted");
+    let error = super::write_files(&dir, &loaded(), &report, &page).expect_err("the json fails");
+    assert_eq!(error.code(), ErrorCode::ReportWrite, "{error:?}");
+    assert_eq!(error.exit_code().code(), 70);
+    // The page is gone again. The planted file and the spec copy stay.
+    assert_eq!(names_in(dir.path()), [json_name.as_str(), "spec.yaml"]);
+    assert_eq!(
+        std::fs::read(dir.path().join(&json_name)).expect("reads"),
+        b"planted"
+    );
+}
+
+#[test]
+fn a_page_name_that_is_taken_stops_the_run_before_the_json_and_the_file_stays() {
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = folder(parent.path());
+    let report = redactor().redact_report(small_report()).expect("redacts");
+    let page = rdy_engine::report::render_page(&report).expect("renders");
+    let html_name = dir.report_file_name("html");
+    std::fs::write(dir.path().join(&html_name), b"planted").expect("planted");
+    let error = super::write_files(&dir, &loaded(), &report, &page).expect_err("the page fails");
+    assert_eq!(error.code(), ErrorCode::ReportWrite, "{error:?}");
+    // No `.json`, and a file that was there before is not ours to remove.
+    assert_eq!(names_in(dir.path()), [html_name.as_str(), "spec.yaml"]);
+    assert_eq!(
+        std::fs::read(dir.path().join(&html_name)).expect("reads"),
+        b"planted"
+    );
+}
+
+fn sink(dir: &std::sync::Arc<rdy_engine::output::OutputDir>) -> super::FolderSink {
+    super::FolderSink {
+        dir: std::sync::Arc::downgrade(dir),
+        spec: loaded().verified_bytes().clone(),
+    }
+}
+
+#[test]
+fn the_watchdogs_sink_follows_the_same_order() {
+    use rdy_engine::watchdog::ReportSink as _;
+    let report = redactor().redact_report(small_report()).expect("redacts");
+
+    // A taken page name: no `.json`, the planted file stays.
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = std::sync::Arc::new(folder(parent.path()));
+    let html_name = dir.report_file_name("html");
+    std::fs::write(dir.path().join(&html_name), b"planted").expect("planted");
+    let error = sink(&dir).write(&report).expect_err("the page fails");
+    assert!(matches!(error, ReportError::FileExists { .. }), "{error:?}");
+    assert_eq!(names_in(dir.path()), [html_name.as_str(), "spec.yaml"]);
+
+    // A taken `.json` name: the page is removed again.
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = std::sync::Arc::new(folder(parent.path()));
+    let json_name = dir.report_file_name("json");
+    std::fs::write(dir.path().join(&json_name), b"planted").expect("planted");
+    assert!(sink(&dir).write(&report).is_err());
+    assert_eq!(names_in(dir.path()), [json_name.as_str(), "spec.yaml"]);
+
+    // All three, with no `.tmp`.
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = std::sync::Arc::new(folder(parent.path()));
+    sink(&dir).write(&report).expect("writes");
+    assert_eq!(
+        names_in(dir.path()),
+        [
+            dir.report_file_name("html").as_str(),
+            dir.report_file_name("json").as_str(),
+            "spec.yaml"
+        ]
+    );
+}
+
+#[test]
+fn a_report_over_the_cap_is_refused_before_any_file_is_written() {
+    use rdy_engine::watchdog::ReportSink as _;
+    let report = over_cap_report();
+    let render = rdy_engine::report::render_page(&report).expect_err("over the cap");
+    assert!(matches!(
+        render,
+        HtmlError::Json(JsonError::TooLarge { .. })
+    ));
+    let error = CliError::report_html(&render);
+    assert_eq!(error.code(), ErrorCode::ReportWrite, "{error:?}");
+
+    // The watchdog's sink renders first too, so the folder stays empty.
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let dir = std::sync::Arc::new(folder(parent.path()));
+    assert!(sink(&dir).write(&report).is_err());
+    assert_eq!(names_in(dir.path()), Vec::<String>::new());
+}
+
+#[test]
+fn an_html_error_with_a_too_large_json_says_what_the_json_error_says() {
+    let report = over_cap_report();
+    let Err(json) = json_bytes(&report) else {
+        panic!("an over-cap report was written");
+    };
+    let from_json = CliError::report_writer(&json).expect("a refusal a run can cause");
+    let render = rdy_engine::report::render_page(&report).expect_err("over the cap");
+    let from_html = CliError::report_html(&render);
+    assert_eq!(from_html.render().message, from_json.render().message);
+    assert_eq!(from_html.render().fix, from_json.render().fix);
+}
+
 #[test]
 fn the_other_writer_errors_stay_bugs() {
     let bug = report_error(

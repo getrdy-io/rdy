@@ -11,7 +11,7 @@
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
 //! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
-//! so one test runs the all-pass environment into a folder and checks the written page against the structure
+//! so one test runs the host-min environment (exit 0; switch it to the all-pass environment when M1-117, PR #80, lands) into a folder and checks the written page against the structure
 //! rules of M1-082. `driver` says what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
@@ -85,11 +85,7 @@ fn only_file(folder: &Path, extension: &str) -> TestResult<std::path::PathBuf> {
 }
 
 #[test]
-fn the_all_pass_env_writes_a_page_that_passes_the_structure_rules() -> TestResult {
-    use html_structure::{
-        heading_problems, id_problems, link_problems, page_problems, problems_in, status_problems,
-        table_problems,
-    };
+fn the_host_min_env_writes_a_page_that_passes_the_structure_rules() -> TestResult {
     use sha2::{Digest as _, Sha256};
 
     let fixture = Fixture::load(&fixtures_dir(), "envs/host-min")?;
@@ -121,27 +117,16 @@ fn the_all_pass_env_writes_a_page_that_passes_the_structure_rules() -> TestResul
     assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "hash");
     assert!(page.contains(String::from_utf8(json)?.trim_end()), "json");
 
+    assert!(page.contains("WARNING: UNSIGNED SPEC"), "no banner title");
+    assert!(page.contains("This report is marked UNSIGNED SPEC."));
+
     // The terminal lists the page.
     assert!(ran.terminal.contains(".html\n"), "{}", ran.terminal);
 
-    type Rule = fn(&[html_structure::Token]) -> Vec<String>;
-    let rules: [(&str, Rule); 6] = [
-        ("headings", heading_problems),
-        ("status", status_problems),
-        ("tables", table_problems),
-        ("ids", id_problems),
-        ("page", page_problems),
-        ("links", |tokens| link_problems(tokens, Some("acme-min"))),
-    ];
-    let mut all = Vec::new();
-    for (name, rule) in rules {
-        all.extend(
-            problems_in(&page, rule)
-                .into_iter()
-                .map(|p| format!("{name}: {p}")),
-        );
-    }
-    assert_eq!(all, Vec::<String>::new());
+    assert_eq!(
+        html_structure::all_rules(&page, Some("acme-min")),
+        Vec::<String>::new()
+    );
     Ok(())
 }
 

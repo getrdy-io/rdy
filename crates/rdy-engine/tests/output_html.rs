@@ -66,7 +66,7 @@ fn the_file_is_render_html_and_hashes_the_json_file() -> TestResult {
 
 #[cfg(unix)]
 #[test]
-fn the_file_is_private_whatever_the_umask() -> TestResult {
+fn the_file_is_0600() -> TestResult {
     use std::os::unix::fs::PermissionsExt as _;
     let report = sample()?;
     let parent = tempfile::tempdir()?;

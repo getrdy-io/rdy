@@ -407,15 +407,10 @@ impl CliError {
         if !matches!(error, JsonError::TooLarge { .. } | JsonError::Io(_)) {
             return None;
         }
-        let text = error.to_string();
-        let (message, fix) = match text.split_once(" Fix: ") {
-            Some((message, fix)) => (message, fix),
-            None => (text.as_str(), "check that the output is open and has room"),
-        };
-        Some(Self::ReportWriter {
-            message: message.trim_end_matches('.').to_owned(),
-            fix: fix.trim_end_matches('.').to_owned(),
-        })
+        Some(Self::writer_words(
+            &error.to_string(),
+            "check that the output is open and has room",
+        ))
     }
 
     /// The HTML renderer refused (code `report_write`, exit 70), with its own words (M1-181).
@@ -428,11 +423,13 @@ impl CliError {
         if let HtmlError::Json(json) = error {
             return Self::report_writer(json).unwrap_or_else(Self::bug);
         }
-        let text = error.to_string();
-        let (message, fix) = match text.split_once(" Fix: ") {
-            Some((message, fix)) => (message, fix),
-            None => (text.as_str(), "this is a bug in rdy"),
-        };
+        Self::writer_words(&error.to_string(), "this is a bug in rdy")
+    }
+
+    /// A `report_write` error from a message that ends with `Fix: <what to do>`. Without a `Fix:` the
+    /// whole text is the message and `default_fix` is the fix.
+    fn writer_words(text: &str, default_fix: &str) -> Self {
+        let (message, fix) = text.split_once(" Fix: ").unwrap_or((text, default_fix));
         Self::ReportWriter {
             message: message.trim_end_matches('.').to_owned(),
             fix: fix.trim_end_matches('.').to_owned(),

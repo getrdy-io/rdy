@@ -49,7 +49,7 @@ use rdy_engine::output::{OutputDir, ReportError, report_time};
 use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
-use rdy_engine::report::{JsonError, render_page, write_json};
+use rdy_engine::report::{HtmlPage, JsonError, render_page, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
@@ -299,10 +299,16 @@ async fn execute(
     } else {
         Ok(())
     };
+    // Rendered before the claim, so the render does not count against the watchdog's wait for the
+    // loser (M1-181). A page that cannot be made leaves no file behind.
+    let page = dir
+        .as_ref()
+        .map(|_| render_page(&redacted).map_err(|error| CliError::report_html(&error)));
     state.claim_or_park();
-    let files = match &dir {
-        Some(dir) => write_files(dir, &loaded, &redacted),
-        None => Ok(Vec::new()),
+    let files = match (&dir, page) {
+        (Some(dir), Some(Ok(page))) => write_files(dir, &loaded, &redacted, &page),
+        (_, Some(Err(error))) => Err(error),
+        _ => Ok(Vec::new()),
     };
     if let Err(error) = printed {
         // The report exists and stdout cannot take it. The files were still written; the error is what
@@ -387,7 +393,11 @@ impl ReportSink for FolderSink {
         let page = render_page(report)?;
         dir.write_spec(&self.spec)?;
         dir.write_html(&page)?;
-        dir.write_json(report)?;
+        if let Err(error) = dir.write_json(report) {
+            // A page without its `.json` is not a result (M1-181).
+            dir.remove_html();
+            return Err(error);
+        }
         Ok(())
     }
 }
@@ -575,20 +585,27 @@ fn read_sidecar(args: &RunArgs) -> Result<Option<Vec<u8>>, CliError> {
     }
 }
 
-/// Writes the spec copy, the HTML page and the JSON report into the folder and returns the names of the files, in the
-/// order the terminal lists them.
+/// Writes the spec copy, the HTML page (rendered by the caller, before the claim) and the JSON report
+/// into the folder and returns the names of the files, in the order the terminal lists them.
+///
+/// The spec copy, the page, then the `.json` last, so a `.json` in the folder means every file of the run
+/// is there. If the `.json` fails after the page was written, the page is removed (M1-181).
 fn write_files(
     dir: &OutputDir,
     loaded: &LoadedSpec,
     report: &RedactedReport,
+    page: &HtmlPage,
 ) -> Result<Vec<String>, CliError> {
     let failed = |error| report_error(ReportStep::WriteFiles, dir.path(), error);
-    // Render first: a page that cannot be made leaves no file behind. Then the spec copy, the page, and
-    // the `.json` last, so a `.json` in the folder means every file of the run is there (M1-181).
-    let page = render_page(report).map_err(|error| CliError::report_html(&error))?;
     let mut written = dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
-    written.push(dir.write_html(&page).map_err(failed)?);
-    written.push(dir.write_json(report).map_err(failed)?);
+    written.push(dir.write_html(page).map_err(failed)?);
+    match dir.write_json(report) {
+        Ok(path) => written.push(path),
+        Err(error) => {
+            dir.remove_html();
+            return Err(failed(error));
+        }
+    }
     let mut names: Vec<String> = written
         .iter()
         .filter_map(|path| path.file_name())

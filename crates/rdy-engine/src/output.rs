@@ -30,6 +30,10 @@
 //!   matter) as `.<name>.tmp`, written, flushed to disk, and then given its final name without
 //!   replacing anything. A run that is killed leaves at most `.tmp` files, never a half-written file
 //!   under a final name.
+//! - **Order and a missing `.json`.** A run writes the spec copy, then the `.html`, then the `.json`
+//!   last. When the `.json` cannot be written, the run removes the `.html` it wrote (best effort). A run
+//!   that is killed between the two can still leave a `.html` without a `.json` beside it. That is not
+//!   a result: the exit code (70) is the authority, and a `.json` present means every file is there.
 //! - **Typed input.** Report text comes in as [`Redacted`] (the JSON report as a [`RedactedReport`],
 //!   through [`OutputDir::write_json`]), and the spec copy as [`VerifiedSpecBytes`],
 //!   the buffers [`rdy_spec::load`] verified. The spec copy uses the fixed names `spec.yaml` and
@@ -429,6 +433,15 @@ impl OutputDir {
         self.write_with(&self.report_file_name("html"), |file| {
             file.write_all(page.as_bytes())
         })
+    }
+
+    /// Removes the `.html` file of this run, best effort, through the held folder handle. For a run
+    /// whose `.json` could not be written after the page was: a `.html` without a `.json` beside it is
+    /// not a result. Call it only after [`OutputDir::write_html`] succeeded, so a file that was there
+    /// before is never touched.
+    #[cfg(feature = "html")]
+    pub fn remove_html(&self) {
+        let _ = self.dir.remove_file(self.report_file_name("html"));
     }
 
     /// Writes the verified spec as `spec.yaml` and, for a signed spec, its signature as

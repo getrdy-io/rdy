@@ -395,6 +395,10 @@ fn read_partial(outcome: &Outcome) -> Result<serde_json::Value, Box<dyn Error>> 
         html.contains(&format!("data-sha256=\"{hash}\"")),
         "hash of the .json"
     );
+    assert!(
+        html.trim_end().ends_with("</html>"),
+        "the page is cut short"
+    );
     // No temp file is left under any name.
     for entry in std::fs::read_dir(folder)? {
         let file = entry?.file_name().to_string_lossy().into_owned();

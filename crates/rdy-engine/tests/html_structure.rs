@@ -477,6 +477,29 @@ pub(crate) fn page_problems(tokens: &[Token]) -> Vec<String> {
     problems
 }
 
+/// Every rule above, run over the page `html`, each problem named by its rule. M1-141 adds its rules here,
+/// so they also run on the page that `rdy run` wrote (M1-181).
+pub(crate) fn all_rules(html: &str, product: Option<&str>) -> Vec<String> {
+    type Rule<'a> = (&'a str, &'a dyn Fn(&[Token]) -> Vec<String>);
+    let rules: [Rule; 6] = [
+        ("headings", &heading_problems),
+        ("status", &status_problems),
+        ("tables", &table_problems),
+        ("ids", &id_problems),
+        ("page", &page_problems),
+        ("links", &|tokens| link_problems(tokens, product)),
+    ];
+    let mut all = Vec::new();
+    for (name, rule) in rules {
+        all.extend(
+            problems_in(html, rule)
+                .into_iter()
+                .map(|problem| format!("{name}: {problem}")),
+        );
+    }
+    all
+}
+
 /// Runs `check` over the page `html`. A page the tokenizer refuses is one problem.
 pub(crate) fn problems_in(html: &str, check: impl Fn(&[Token]) -> Vec<String>) -> Vec<String> {
     match tokens(html) {
@@ -528,6 +551,15 @@ fn ids_are_unique_and_every_in_page_link_has_a_target() -> TestResult {
 #[test]
 fn the_only_links_are_in_page_the_footer_and_the_repo_and_the_only_src_is_data() -> TestResult {
     each_golden(|tokens| link_problems(tokens, None))
+}
+
+#[test]
+fn every_rule_together_passes_on_the_goldens() -> TestResult {
+    for stem in GOLDENS {
+        let found = all_rules(&golden_html(stem)?, Some(&golden_product(stem)?));
+        assert_eq!(found, Vec::<String>::new(), "{stem}");
+    }
+    Ok(())
 }
 
 #[test]

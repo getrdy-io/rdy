@@ -205,6 +205,12 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "{hash}");
+    // The spec is unsigned, and the page says so (01 section 4.7).
+    assert!(page.contains("WARNING: UNSIGNED SPEC"), "no banner title");
+    assert!(
+        page.contains("This report is marked UNSIGNED SPEC."),
+        "no banner line"
+    );
     let mut listed: Vec<String> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("{e}"))
         .map(|e| {
