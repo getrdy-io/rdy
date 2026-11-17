@@ -220,6 +220,8 @@ pub(super) struct Probed {
     pub(super) exempt: Option<String>,
     /// An `auto` endpoint failed through the proxy and a direct connect to it worked.
     pub(super) direct_works: bool,
+    /// A direct connect was tried after the proxy failed, whatever it came to.
+    pub(super) direct_tried: bool,
     pub(super) ending: Ending,
 }
 
@@ -239,6 +241,7 @@ impl Probed {
             proxy_var: None,
             exempt: None,
             direct_works: false,
+            direct_tried: false,
             ending: Ending::NotTried("not started"),
         }
     }
@@ -326,8 +329,9 @@ impl Probed {
             out["route"] = json!("direct");
             out["exempted_by"] = json!(why);
         }
-        if self.direct_works {
-            out["direct_works"] = json!(true);
+        if self.direct_tried {
+            out["direct_tried"] = json!(true);
+            out["direct_works"] = json!(self.direct_works);
         }
         if let Some((took, v4, v6)) = self.lookup {
             out["lookup"] = json!({ "ms": ms(took), "ipv4": v4, "ipv6": v6 });
@@ -434,10 +438,12 @@ pub(super) async fn probe(
     // the call fits in what is left after the rounds still queued, as the second connect above does.
     if way.auto && matches!(&out.ending, Ending::Failed(class, _) if class.is_proxy()) {
         let behind = SECOND_CONNECT * u32::try_from(queued).unwrap_or(u32::MAX);
-        if ctx.remaining() >= RESERVE + SECOND_CONNECT + behind
-            && let Ok(report) = ctx.probe().tcp(&spec.target, Route::Direct).await
-        {
-            out.direct_works = report.connected;
+        if ctx.remaining() >= RESERVE + SECOND_CONNECT + behind {
+            out.direct_tried = true;
+            // A refusal by the address rule is an error here, and it is a failed retry like any other.
+            if let Ok(report) = ctx.probe().tcp(&spec.target, Route::Direct).await {
+                out.direct_works = report.connected;
+            }
         }
     }
     Ok(out)

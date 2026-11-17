@@ -72,7 +72,7 @@ const PAC_ENV: [&str; 2] = ["auto_proxy", "AUTO_PROXY"];
 const DAEMON_JSON: &str = "/etc/docker/daemon.json";
 
 /// What the check says on an OS it has only the environment for.
-const PARTIAL_OS: &str = "only the process environment is read here: the macOS proxy settings (scutil) and the Windows ones (registry, WinHTTP) arrive with M2-010, and daemons are not compared";
+const PARTIAL_OS: &str = "only the process environment is read here: the macOS proxy settings (scutil) and the Windows ones (registry, WinHTTP) are not read by this version, and daemons are not compared";
 
 /// The time kept for writing the result when the proxy connection runs long.
 const RESERVE: Duration = Duration::from_millis(500);
@@ -215,6 +215,10 @@ type Environment = (
 fn read_environment(ctx: &CheckContext) -> Result<Environment, CheckError> {
     let mut values: HashMap<&'static str, String> = HashMap::new();
     for name in ENV {
+        // Windows names are not case sensitive, so the lower-case spelling would read the same value twice.
+        if ctx.os() == Os::Windows && name.chars().any(|c| c.is_ascii_lowercase()) {
+            continue;
+        }
         if let Some(value) = ctx.probe().env(name)? {
             let value = value.trim().to_owned();
             if !value.is_empty() {
@@ -267,26 +271,6 @@ async fn read_daemon(
             }
         }
     }
-    if unit == "docker" {
-        let path = DAEMON_JSON;
-        match ctx.probe().read(Path::new(path)).await {
-            Ok(file) => {
-                daemon.present = true;
-                let text = String::from_utf8_lossy(&file.bytes).into_owned();
-                match daemon_json_proxies(&text) {
-                    Ok(assigns) => apply(&mut daemon, assigns, path),
-                    Err(why) => notes.push(format!("{path} was not read: {why}.")),
-                }
-            }
-            Err(error) => {
-                let text = short(&error);
-                if !matches!(soft(error)?, ProbeError::NotFound) {
-                    unread.push(format!("{path} could not be read: {text}"));
-                    daemon.unread = true;
-                }
-            }
-        }
-    }
     let dir = format!("/etc/systemd/system/{unit}.service.d");
     let entries = match ctx.probe().read_dir(Path::new(&dir)).await {
         Ok(entries) => entries,
@@ -296,7 +280,7 @@ async fn read_daemon(
                 unread.push(format!("{dir} could not be listed: {text}"));
                 daemon.unread = true;
             }
-            return Ok(daemon);
+            return daemon_json(ctx, daemon, notes, unread).await;
         }
     };
     daemon.present = true;
@@ -320,6 +304,37 @@ async fn read_daemon(
             Ok(file) => {
                 let text = String::from_utf8_lossy(&file.bytes).into_owned();
                 apply(&mut daemon, parse_dropin(&text), &path);
+            }
+            Err(error) => {
+                let text = short(&error);
+                if !matches!(soft(error)?, ProbeError::NotFound) {
+                    unread.push(format!("{path} could not be read: {text}"));
+                    daemon.unread = true;
+                }
+            }
+        }
+    }
+    daemon_json(ctx, daemon, notes, unread).await
+}
+
+/// Docker's `daemon.json`, applied after the drop-ins and outside any reset of them: the daemon gives the
+/// file precedence over its environment. Nothing of the file but `proxies` is read.
+async fn daemon_json(
+    ctx: &CheckContext,
+    mut daemon: Daemon,
+    notes: &mut Vec<String>,
+    unread: &mut Vec<String>,
+) -> Result<Daemon, CheckError> {
+    if daemon.unit == "docker" {
+        let path = DAEMON_JSON;
+        match ctx.probe().read(Path::new(path)).await {
+            Ok(file) => {
+                daemon.present = true;
+                let text = String::from_utf8_lossy(&file.bytes).into_owned();
+                match daemon_json_proxies(&text) {
+                    Ok(assigns) => apply(&mut daemon, assigns, path),
+                    Err(why) => notes.push(format!("{path} was not read: {why}.")),
+                }
             }
             Err(error) => {
                 let text = short(&error);

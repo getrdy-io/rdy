@@ -7,7 +7,7 @@
       "daemons_need_proxy": false,
       "required_no_proxy": []
     },
-    "fix": "Docker does not see the proxy. Create `/etc/systemd/system/docker.service.d/http-proxy.conf` with `[Service]` and `Environment=\"HTTP_PROXY=http://proxy.acme.test:3128\" \"HTTPS_PROXY=http://proxy.acme.test:3128\" \"NO_PROXY=localhost,.svc\"`, then run `systemctl daemon-reload && systemctl restart docker`. The proxy URL of this shell has a user name and password. Add them to the URLs in the drop-in if the proxy needs them. rdy does not print them.",
+    "fix": "Docker does not see the proxy. Create `/etc/systemd/system/docker.service.d/http-proxy.conf` with `[Service]` and `Environment=\"HTTP_PROXY=http://proxy.acme.test:3128\" \"HTTPS_PROXY=http://proxy.acme.test:3128\" \"NO_PROXY=<your NO_PROXY list>\"`, then run `systemctl daemon-reload && systemctl restart docker`. The proxy URL of this shell has a user name and password. Add them to the URLs in the drop-in if the proxy needs them. rdy does not print them.",
     "level": "warn",
     "message": "Docker is installed and has no proxy in a systemd drop-in or daemon.json, so it does not see the proxy this shell uses",
     "notes": [],

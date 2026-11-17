@@ -4,9 +4,9 @@
 //! file path from the fixed list, or an entry of a `NO_PROXY` list the customer wrote. Never a user name
 //! or password: [`Setting`] has none, and `NO_PROXY` holds none.
 //!
-//! **Levels (03).** Block: the proxy is not reachable; a required `NO_PROXY` entry is missing; a daemon
-//! does not see the proxy and the spec sets `daemons_need_proxy`. Warn: a daemon does not see the proxy,
-//! a PAC address, two spellings of one variable that differ, an unsupported scheme, a daemon whose
+//! **Levels (03).** Block: the proxy is not reachable; a daemon does not see the proxy and the spec sets
+//! `daemons_need_proxy`. Warn: a required `NO_PROXY` entry is missing, a daemon does not see the proxy, a
+//! PAC address, two spellings of one variable that differ, an unsupported scheme, a daemon whose
 //! `NO_PROXY` lacks a required entry. Anything else is a note.
 
 use rdy_engine::check::{Finding, Level, Need, Os, Partial};
@@ -125,8 +125,9 @@ fn list(items: &[String]) -> String {
     shown.join(", ")
 }
 
-/// The `NO_PROXY` text for a fix: the entries the shell has, then the required ones it lacks. Only entries
-/// made of plain characters are copied, so the text is safe inside quotes.
+/// The `NO_PROXY` text for a fix: a placeholder for the list the shell has, then the required entries it
+/// lacks. The shell's own list is never copied (it can name internal hosts, and the report shows only the
+/// entry that matched). Only entries made of plain characters are written, so the text is safe in quotes.
 fn no_proxy_text(facts: &Facts, rules: &Rules) -> String {
     let plain = |entry: &str| {
         !entry.is_empty()
@@ -135,22 +136,24 @@ fn no_proxy_text(facts: &Facts, rules: &Rules) -> String {
                     || matches!(c, '.' | ':' | '*' | '/' | '_' | '-' | '[' | ']')
             })
     };
-    let mut entries: Vec<String> = facts
-        .no_proxy
-        .iter()
-        .flat_map(|(_, list)| list.entries().map(str::to_owned))
-        .filter(|entry| plain(entry))
-        .collect();
+    let mut parts: Vec<String> = Vec::new();
+    if facts.no_proxy.is_some() {
+        parts.push("<your NO_PROXY list>".to_owned());
+    }
     for required in &rules.required_no_proxy {
         let required = required.trim().to_ascii_lowercase();
-        if plain(&required) && !entries.contains(&required) {
-            entries.push(required);
+        let covered = facts
+            .no_proxy
+            .as_ref()
+            .is_some_and(|(_, list)| list.covers(&required).is_some());
+        if plain(&required) && !covered && !parts.contains(&required) {
+            parts.push(required);
         }
     }
-    if entries.is_empty() {
-        entries = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
+    if parts.is_empty() {
+        parts = vec!["localhost".to_owned(), "127.0.0.1".to_owned()];
     }
-    let text = entries.join(",");
+    let text = parts.join(",");
     if text.chars().count() > 200 {
         "<your NO_PROXY list>".to_owned()
     } else {
@@ -332,6 +335,9 @@ pub(super) fn judge(facts: &Facts, rules: &Rules) -> Finding {
             "refused" => format!(
                 "Nothing listens at the proxy {origin}. Check the host and port in {var}, and that the proxy is running."
             ),
+            "refused_by_policy" => format!(
+                "The proxy {origin} resolves to an address rdy never connects to (link-local or cloud metadata). Point {var} at the real proxy address."
+            ),
             "dns" => format!(
                 "The proxy name in {var} ({origin}) does not resolve on this machine. Fix the name in {var}, or use the proxy's IP address."
             ),
@@ -419,7 +425,7 @@ pub(super) fn judge(facts: &Facts, rules: &Rules) -> Finding {
             .cloned()
             .collect();
         if !missing.is_empty() {
-            blocks.push(format!("NO_PROXY does not cover {}", list(&missing)));
+            warns.push(format!("NO_PROXY does not cover {}", list(&missing)));
             fixes.push(format!(
                 "Add {} to NO_PROXY in the environment of the product, so that traffic to them does not go through the proxy.",
                 list(&missing)

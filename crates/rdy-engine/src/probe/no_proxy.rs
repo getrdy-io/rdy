@@ -311,7 +311,10 @@ fn normal_host(host: &str) -> String {
 
 /// `localhost` and loopback addresses. Go never proxies them.
 fn is_loopback(host: &str) -> bool {
-    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+    host == "localhost"
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.to_canonical().is_loopback())
 }
 
 /// Splits `name:port`, `[v6]:port` and `[v6]`. An unbracketed IPv6 literal has no port. `None` for an

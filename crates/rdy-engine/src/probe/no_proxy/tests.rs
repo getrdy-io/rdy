@@ -117,6 +117,8 @@ fn loopback_never_uses_a_proxy() {
         "127.9.9.9",
         "::1",
         "[::1]",
+        "::ffff:127.0.0.1",
+        "[::ffff:127.0.0.1]",
     ] {
         assert_eq!(
             NoProxy::parse("").exempts(host, 80),

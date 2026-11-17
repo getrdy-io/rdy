@@ -828,7 +828,8 @@ async fn direct_works_and_proxy_fails_is_said_for_an_auto_endpoint_and_for_no_ot
         );
     let ran = run_from_env(broken, json!([at]), json!({}), NET).await;
     assert_eq!(ran.endpoint(0)["class"], "proxy_403");
-    assert!(ran.endpoint(0).get("direct_works").is_none());
+    assert_eq!(ran.endpoint(0)["direct_tried"], true);
+    assert_eq!(ran.endpoint(0)["direct_works"], false);
 }
 
 #[tokio::test]
@@ -914,4 +915,34 @@ fn the_new_evidence_keys_do_not_read_as_secret_names() {
     for key in ["exempted_by", "direct_works", "route", "proxy"] {
         assert!(!rdy_engine::redact::is_secret_name(key), "{key}");
     }
+}
+
+#[tokio::test]
+async fn a_star_in_no_proxy_never_sends_a_forbidden_address_anywhere() {
+    // INV-12: whatever the route, a metadata address is refused before any connection, literal or resolved,
+    // and so is the direct retry after a proxy failure.
+    let proxy = ConnectProxy::start(ProxyMode::Ok).await.expect("proxy");
+    let replay = || {
+        through(&proxy, None)
+            .env("HTTPS_PROXY", PROXY_URL)
+            .env("NO_PROXY", "*")
+            .host("meta.acme.test", ["169.254.169.254".parse().expect("ip")])
+    };
+    for at in ["169.254.169.254:80", "meta.acme.test:80"] {
+        let ran = run_from_env(replay(), json!([at]), json!({}), NET).await;
+        assert_eq!(ran.endpoint(0)["route"], "direct", "{at}");
+        assert_eq!(ran.endpoint(0)["class"], "refused_by_policy", "{at}");
+    }
+    assert!(proxy.requests().is_empty(), "no CONNECT was sent");
+    // The retry: no NO_PROXY, the proxy refuses, and the name resolves to the metadata address.
+    let forbidden = ConnectProxy::start(ProxyMode::Forbidden)
+        .await
+        .expect("proxy");
+    let machine = through(&forbidden, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .host("meta.acme.test", ["169.254.169.254".parse().expect("ip")]);
+    let ran = run_from_env(machine, json!(["meta.acme.test:80"]), json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["class"], "proxy_403");
+    assert_eq!(ran.endpoint(0)["direct_tried"], true);
+    assert_eq!(ran.endpoint(0)["direct_works"], false);
 }

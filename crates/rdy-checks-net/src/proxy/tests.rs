@@ -26,6 +26,7 @@ const CANARIES: &[&str] = &[
     "bG9uZ2VyLWNhbmFyeS1wdw",
     "svc:longer",
     "daemon-canary-pw",
+    "scheme-less-canary-pw",
     "AUTHS-CANARY-PW",
     "YWNtZTpBVVRIUy1DQU5BUlktUFc",
     "PAC-USERINFO-CANARY",
@@ -243,8 +244,8 @@ fn the_levels_are_what_the_catalog_says() {
     assert_eq!(level_of("docker-dropin-ok"), Level::Pass);
     assert_eq!(level_of("daemon-json-proxy"), Level::Pass);
     assert_eq!(level_of("no-proxy-covered"), Level::Pass);
-    // A required NO_PROXY entry is missing, and the spec listed it.
-    assert_eq!(level_of("no-proxy-gap"), Level::Fail);
+    // A required NO_PROXY entry is missing: a warning (03).
+    assert_eq!(level_of("no-proxy-gap"), Level::Warn);
     assert_eq!(level_of("pac-auto-proxy"), Level::Warn);
     assert_eq!(level_of("proxy-refused"), Level::Fail);
     assert_eq!(level_of("proxy-blackhole"), Level::Fail);
@@ -280,7 +281,7 @@ fn a_shell_proxy_with_no_docker_dropin_warns_and_prints_the_dropin_text() {
     // The proxy without its userinfo, and a NO_PROXY the shell already has.
     assert!(
         fix.contains(
-            "Environment=\"HTTP_PROXY=http://proxy.acme.test:3128\" \"HTTPS_PROXY=http://proxy.acme.test:3128\" \"NO_PROXY=localhost,.svc\""
+            "Environment=\"HTTP_PROXY=http://proxy.acme.test:3128\" \"HTTPS_PROXY=http://proxy.acme.test:3128\" \"NO_PROXY=<your NO_PROXY list>\""
         ),
         "{fix}"
     );

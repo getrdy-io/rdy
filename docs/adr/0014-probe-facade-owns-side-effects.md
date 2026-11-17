@@ -109,7 +109,7 @@ loopback rule, bounded at 256 entries and 8 KiB). `ProbeHub::set_proxy_from_env`
 `no_proxy`) with the proxy, and `Probe::route_for` gives a host `Route::Direct` when the list or the loopback
 rule exempts it, else `Route::ViaProxy` when the run has a proxy. `proxy_only` ignores the list. The k8s
 client moves onto the same matcher in M1-107. (c) The hub also records which proxy variables are set in two
-spellings that differ (`env_conflicts`, names only) and hides the password of an `ALL_PROXY` URL.
+spellings that differ (`env_conflicts`, names only) and hides the password of an `ALL_PROXY` URL. Because the set must hide it, an `ALL_PROXY` password too short to register makes the run exit 70, although rdy never uses `ALL_PROXY`.
 
 ## Consequences
 

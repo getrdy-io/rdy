@@ -157,8 +157,8 @@ fn a_no_proxy_host_connects_direct_and_the_other_host_uses_the_proxy() {
                 &out.to_string_lossy(),
             ],
         );
-        // The spec's required `.svc` is not in NO_PROXY, so `net.proxy` blocks: exit 2.
-        assert_eq!(ran.code, 2, "{name}: {}", ran.stderr);
+        // The spec's required `.svc` is not in NO_PROXY, so `net.proxy` warns: exit 1.
+        assert_eq!(ran.code, 1, "{name}: {}", ran.stderr);
         let doc: Value = serde_json::from_str(&ran.stdout)
             .unwrap_or_else(|e| panic!("{name}: stdout is not JSON ({e}): {}", ran.stdout));
         let egress = check(&doc, "net.egress");

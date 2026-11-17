@@ -313,6 +313,11 @@ impl Probe {
     /// `net.egress` tests with `via_proxy: auto`. It writes no log entry and reads nothing: the list was
     /// read once by `ProbeHub::set_proxy_from_env`.
     ///
+    /// It does not look at which variable the proxy came from or at the scheme of the target: one proxy
+    /// serves the whole run. A caller that talks to an `https` server (the Kubernetes client, M1-107) must
+    /// not use a proxy that was read from `HTTP_PROXY` for it (05 INV-11, ADR 0037); `Probe::proxy_source`
+    /// says where it came from.
+    ///
     /// A run with no proxy is [`Route::Direct`] with no exemption. A host that `NO_PROXY` or the
     /// loopback rule exempts is [`Route::Direct`] with the [`Exemption`] that did it.
     #[must_use]

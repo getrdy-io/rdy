@@ -19,7 +19,7 @@
       ]
     },
     "fix": "Add `.svc`, `.cluster.local`, `10.0.0.0/8`, `172.16.0.0/12` to NO_PROXY in the environment of the product, so that traffic to them does not go through the proxy. Add `.svc`, `.cluster.local`, `10.0.0.0/8`, `172.16.0.0/12` to the NO_PROXY of docker in its systemd drop-in, then run `systemctl daemon-reload && systemctl restart docker`.",
-    "level": "fail",
+    "level": "warn",
     "message": "NO_PROXY does not cover `.svc`, `.cluster.local`, `10.0.0.0/8`, `172.16.0.0/12`; the NO_PROXY of docker does not cover `.svc`, `.cluster.local`, `10.0.0.0/8`, `172.16.0.0/12`",
     "notes": [],
     "observed": {

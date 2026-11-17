@@ -174,7 +174,7 @@ const PENDING: &[Pending] = &[
         check: "net.proxy",
         classes: &[Class::Timeout],
         owner: "M1-179",
-        why: "M1-098 added the reviewed expect.json for the passing, warning and blocking cases (16). By design no hang ends net.proxy in a Timeout: the one connection to the proxy gets what is left of the check's time minus 0.5 s, and a black hole gives a bounded finding with class `blackhole` and the note `no reply within 3 s`, never `timed_out_ms`. M1-179 counts that hang the check survived as the Timeout class. The proxy-blackhole case has the note",
+        why: "M1-098 added the reviewed expect.json for the passing, warning and blocking cases (16). By design no hang ends net.proxy in a Timeout: the one connection to the proxy gets what is left of the check's time minus 0.5 s, and a black hole gives a bounded finding with class `blackhole` and the note `no reply within 3 s`, never `timed_out_ms`. M1-179 counts that hang the check survived as the Timeout class. The proxy-blackhole case has the note. The row is closed by the second of PR #70 and this PR to merge",
     },
     Pending {
         check: "host.time_sync",
