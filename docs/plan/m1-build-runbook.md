@@ -237,6 +237,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 44: records #68's decisions (M1-143). The run header prints at the end, so `--verbose` event lines come
   before it. `--verbose` turns the live line off (M1-142's exit test), in the second of #60 and #68 to merge.
   A full stderr pipe under `--verbose` ends in the watchdog (07 5.2). New M2-128 moves the header earlier.
+- 46: records and approves the 03 changes of #74 (net.egress status with no `expect_status`: 403 warns, 407
+  and 5xx fail) and #72 (net.dns needs `Network`, refused-range `getent` answers block, 9 s per name).
+  The second of #70 and #74, and of #70 and #72, to merge deletes that check's `PENDING` row (M1-179).
+  M2-060 sets non-dumpable right after the privilege gate, before any password prompt (#47 security).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -249,7 +253,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next PR is #51 (#50 is this pause-state PR).
 - The next free ADR is 0046. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163) and ADR 0045 in #64 (M1-164).
-- The next ticket ids are M1-181 and M2-129, and the next correction is 45.
+- The next ticket ids are M1-182 and M2-129 (#73 takes M1-181), and the next correction is 47.
 - The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
 **Process lessons from this session.**

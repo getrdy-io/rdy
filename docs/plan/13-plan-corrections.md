@@ -451,3 +451,23 @@ the corrections log of `11-backlog.md`.
   says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
   exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
   adds the started and phase events on it, and M2-017 depends on M2-124.
+- **Correction-46, the 03 sections of net.egress and net.dns, two `PENDING` rows and the non-dumpable order.**
+  PR #74 (M1-096) and PR #72 (M1-153) change their own 03 sections after review. The 03 text lands with each
+  PR; this entry records and approves it. net.egress with no `expect_status`: 2xx, 3xx and 4xx count as
+  reachable, except 407. A 3xx gets a note that the redirect was not followed. 401, 404 and every other 4xx
+  get a note naming the status. A 403 warns, because a proxy or firewall deny page looks the same; list 403 in
+  `expect_status` when the server really answers it. A 407 on the direct route is an intercepting proxy that
+  answered, so it fails as class `http_status`. A 5xx fails. The `expect_status` doc comment and its schema
+  description say so; the schema shape does not change. net.dns declares `Network`, so `--no-network` skips
+  it as `missing_need` and never as a failed lookup; it falls back when `getent` is missing, so it does not
+  need `getent`. A `getent` answer in a refused range is shown and blocks as `refused_by_policy`, like the
+  facade fallback, so the verdict does not depend on whether `getent` is installed. For that,
+  `rdy_engine::probe::is_unusable_peer` is now public; rdy-engine is not on crates.io before M2-017, so no
+  version changes. Each name gets 9 s (`getent` 5 s, the 3 s fallback lookup, 1 s of slack) inside the
+  check's time, so a hung `getent` is a bounded `timeout` finding for that name and not a check `Timeout`.
+  M1-096 and M1-153 must leave 03 saying so. Each PR adds a `PENDING` row for its Timeout class, which
+  M1-179 (PR #70) makes countable; whichever of #70 and #74, and of #70 and #72, merges second deletes the
+  row. From the PR #47 security review: M2-060 sets the process non-dumpable in every command right after
+  the privilege gate passes, before any password prompt and never earlier, because the gate reads
+  `/proc/self/auxv` and start-up lists `/proc/self/fd` first. M2-104 lists descriptors before the flag or
+  uses `close_range`. 04 says so. No test-pinned document changed, and no estimate.
