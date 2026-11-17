@@ -5,9 +5,9 @@
 # is sent. This file is the second line: even if the guard had a bug, this identity could not write,
 # and it cannot read Secret objects.
 #
-# What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments
-# returns literal environment variable values, and those often hold credentials. rdy keeps only
-# resources, node name and phase, and drops the rest. The token is still a credential, so keep it short
+# What this identity can still see: Deployment specs and claim events. Listing events and deployments
+# can return literal values, and those may hold credentials. rdy keeps only the fields it judges and
+# drops the rest. This role does not list pods: the free capacity half of k8s.nodes (M1-159) will add it. The token is still a credential, so keep it short
 # lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test

@@ -554,6 +554,10 @@ fn openshift_never_syncs_default_kube_and_openshift_and_starts_user_openshift_na
         // A system namespace is exempt even with the label `true`.
         ("openshift-monitoring", SyncLabel::On, false),
         ("openshift-kube-apiserver", SyncLabel::On, false),
+        ("openshift-user-workload-monitoring", SyncLabel::On, false),
+        ("openshift-cloud-credential-operator", SyncLabel::On, false),
+        // A name that only starts like a system one is not exempt.
+        ("openshift-monitoring-extra", SyncLabel::On, true),
         // The one system namespace of that prefix that the controller does sync.
         ("openshift-operators", SyncLabel::Unset, true),
         // Only the exact names and prefixes count.

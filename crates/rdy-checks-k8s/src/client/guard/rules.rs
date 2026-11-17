@@ -24,7 +24,7 @@
 //!
 //! For check authors: a list takes `limit`, `continue`, `labelSelector` and `fieldSelector` and nothing
 //! else. `resourceVersion` (so `ListParams::match_any()` too), `timeoutSeconds`, `watch` and the rest are
-//! refused as [`RULE_QUERY`]. A list of `pods` or `events` must also carry the field selector its
+//! refused as [`RULE_QUERY`]. A list of `events` must also carry the field selector its
 //! [`ALLOWED`] entry names, or it is refused as [`RULE_SELECTOR`]. A request carries only the headers
 //! `accept`, `content-type` and `content-length`; any other is refused as [`RULE_HEADER`].
 
