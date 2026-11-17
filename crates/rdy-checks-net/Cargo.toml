@@ -9,5 +9,17 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE", "NOTICE", "clippy.toml"]
 
+[dependencies]
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+# The test run (`TestRun`) applies the real read policy and writes the real action log.
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
+tokio = { workspace = true, features = ["rt", "test-util", "time"] }
+# Parsers of external text never panic on arbitrary bytes (08 Appendix E).
+proptest = { workspace = true, features = ["std"] }
+
 [lints]
 workspace = true
