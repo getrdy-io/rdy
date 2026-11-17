@@ -215,7 +215,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-099 | todo | | net.tls_intercept recording verifier and classes
 
-- M1-100 | todo | | net.tls_intercept evidence, trust-store report and fix text | backlog corrected 2026-10-30 (correction-28): env-var trust-store sources shown with `~` and no control characters (PR #143 review)
+- M1-100 | todo | | net.tls_intercept evidence, trust-store report and fix text | backlog corrected 2026-10-30 (correction-28): env-var trust-store sources shown with `~` and no control characters (PR #143 review); backlog corrected 2026-11-17 (correction-45): `expected_issuer` and `pin_sha256` enforcement, the generated-chain fixture rig with reviewed expect.json files, and the Timeout class case (PR #71 deferrals)
 
 - M1-101 | todo | | Security review of the TLS recording verifier and 03 Appendix A
 
@@ -291,7 +291,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1 | interim README landed ([#155](https://github.com/getrdy-io/rdy/pull/155)); M1-137 replaces transcripts with goldens
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-31): depends on M1-141 (PR #149 review); backlog corrected 2026-10-30 (correction-30): depends on M1-170; founder decides the kind gate first (PR #146, #147 reviews); backlog corrected 2026-10-30 (correction-32): depends on M1-175 (PR #151 review); backlog corrected 2026-10-30 (correction-34): depends on M1-177 (PR #18 and PR #20 reviews)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-31): depends on M1-141 (PR #149 review); backlog corrected 2026-10-30 (correction-30): depends on M1-170; founder decides the kind gate first (PR #146, #147 reviews); backlog corrected 2026-10-30 (correction-32): depends on M1-175 (PR #151 review); backlog corrected 2026-10-30 (correction-34): depends on M1-177 (PR #18 and PR #20 reviews); backlog corrected 2026-11-17 (correction-45): depends on M1-181 (PR #30 review)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
@@ -376,6 +376,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-179 | todo | | The env harness counts a hang the check survived as the Timeout class | added 2026-11-06 (correction-38, PR #35 review)
 
 - M1-180 | todo | | `rdy run` fills `report.host.os` from os-release | added 2026-11-06 (correction-41, PR #42 reviews)
+
+- M1-181 | todo | | `rdy run` writes the HTML report next to the JSON | added 2026-11-17 (correction-45)
 
 ## Summary
 

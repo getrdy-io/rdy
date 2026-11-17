@@ -215,8 +215,9 @@ main). No document may name a person as owner, and no document may mention the f
 - #44 M1-124, #43 correction-40, #46 correction-41, #23 M1-150, #25 M1-072, #42 M1-086.
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
-M1-177 and M1-178, which makes 180. Totals after correction-34 and correction-43: M1 180 tickets, 396.5 h,
-332 h core; M2 127 tickets, 456.5 h; all milestones 407 tickets, 1366.5 h, 1302 h core.
+M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
+correction-45: M1 181 tickets, 400 h, 335.5 h core; M2 127 tickets, 456.5 h; all milestones 408 tickets,
+1370 h, 1305.5 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -234,6 +235,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   cuts action rows, then Found and Needed lines. M1-175 builds k8s.dns. New M2-121 to M2-125.
 - 43: records and approves the 03 changes of #64 (k8s.crds reads discovery) and #65 (k8s.ingress). M1-175
   builds k8s.crds and k8s.ingress. Two k8s verdicts go to the founder. New M2-126 and M2-127.
+- 45: new core M1-181: `rdy run` writes the HTML report next to the JSON, and M1-138 depends on it. M1-100
+  takes #71's deferrals (pins, the generated-chain rig, the Timeout case) and grows to 3.5 h. M1-101 moves
+  to week 21.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -246,7 +250,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next PR is #51 (#50 is this pause-state PR).
 - The next free ADR is 0046. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163) and ADR 0045 in #64 (M1-164).
-- The next ticket ids are M1-181 and M2-128, and the next correction is 44.
+- The next ticket ids are M1-182 and M2-129, and the next correction is 46.
 - The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
 **Process lessons from this session.**
