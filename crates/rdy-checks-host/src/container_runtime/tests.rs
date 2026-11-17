@@ -52,6 +52,9 @@ const CASES: &[(&str, &str)] = &[
     expect!("docker-down"),
     expect!("docker-down-bad-json"),
     expect!("docker-dropin-proxy"),
+    expect!("docker-proxy-no-scheme"),
+    expect!("docker-dropin-no-scheme"),
+    expect!("docker-daemon-json-no-scheme"),
     expect!("docker-rootless"),
     expect!("docker-podman-shim"),
     expect!("podman-ok"),
@@ -83,6 +86,10 @@ const HUNG: &[&str] = &["docker-hung"];
 
 /// The secret that sits in two of the cases, in a Docker `/info` body and in `daemon.json`.
 const SECRET: &str = "REDACTED-TEST-TOKEN";
+
+/// The password and the user name of the proxy URLs with no scheme in the `*-no-scheme` cases.
+const NOSCHEME_CANARY: &str = "NOSCHEME-CANARY-PW";
+const NOSCHEME_USER: &str = "canary-svc";
 
 fn load(case: &str) -> Fixture {
     let fixture = Fixture::load(
@@ -313,6 +320,9 @@ fn the_levels_are_what_the_catalog_says() {
         ("docker-down", Level::Warn),
         ("docker-down-bad-json", Level::Warn),
         ("docker-dropin-proxy", Level::Warn),
+        ("docker-proxy-no-scheme", Level::Pass),
+        ("docker-dropin-no-scheme", Level::Warn),
+        ("docker-daemon-json-no-scheme", Level::Warn),
         ("docker-rootless", Level::Pass),
         ("docker-podman-shim", Level::Fail),
         ("podman-ok", Level::Pass),
@@ -932,6 +942,23 @@ fn the_whole_result_is_searched_for_secrets() {
             !everything.contains("acme-svc:"),
             "{case}: user and password reached the result"
         );
+    }
+    // A proxy URL with no scheme, from each of the three sources, with a canary password. The redactor
+    // takes the userinfo, and the check stores only the origin and a flag, so the user and the password
+    // reach nothing, and the proxy host stays.
+    for case in [
+        "docker-proxy-no-scheme",
+        "docker-dropin-no-scheme",
+        "docker-daemon-json-no-scheme",
+    ] {
+        let result = run(case);
+        let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+        for planted in [NOSCHEME_CANARY, NOSCHEME_USER] {
+            assert!(!everything.contains(planted), "{case}: {planted} leaked");
+        }
+        let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+        assert_eq!(proxy["http"], "http://proxy.acme.example:3128", "{case}");
+        assert_eq!(proxy["http_credentials"], true, "{case}");
     }
     // The config with the password still parses, so the case is judged on its cgroup driver.
     let result = run("containerd-registry-auth");

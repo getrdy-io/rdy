@@ -20,7 +20,16 @@ const MAX_AUTHORITY: usize = 16 * 1024;
 static SCHEME: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9+.\-]*:(?:\\?/){2}"));
 
-/// Removes the userinfo of every URL in `text`.
+/// The keys of a proxy URL with no scheme, written as JSON (lower case, with the quotes).
+const PROXY_JSON_KEYS: [&str; 4] = [
+    "\"http-proxy\"",
+    "\"https-proxy\"",
+    "\"httpproxy\"",
+    "\"httpsproxy\"",
+];
+
+/// Removes the userinfo of every URL in `text`, and of a proxy value with no scheme (see
+/// [`find_scheme_less_proxy`]).
 ///
 /// The authority is the text after `://` up to the first `/`, `?`, `#`, quote, angle bracket, white
 /// space, control character or backslash. The userinfo ends at the last `@` in it, so a password that
@@ -31,6 +40,7 @@ static SCHEME: LazyLock<Result<Regex, regex::Error>> =
 /// space, quote or backslash, the userinfo runs to the last such `@`: `postgres://app:K7x/9+Qa@db/app`.
 /// A space in a password is not read: write it as a percent escape, as the URL standard asks.
 pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
+    find_scheme_less_proxy(text, out);
     // A scheme is followed by `:` and two slashes, either of which may carry a JSON backslash.
     if !text.contains(":/") && !text.contains(":\\/") {
         return;
@@ -62,6 +72,73 @@ pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
             out.push(m.end()..end);
         }
     }
+}
+
+/// A proxy value with no scheme, `svc:pw@proxy.acme.test:3128`, after a `*_proxy=` key (any case, so
+/// also `Environment="HTTPS_PROXY=..."`) or after the JSON keys `"http-proxy":`, `"https-proxy":`,
+/// `"HttpProxy":` and `"HttpsProxy":`. The userinfo is what comes before the last `@` of the value.
+///
+/// A value with no `@` (`proxy.acme.test:3128`, a `no_proxy` list) is left alone, and so is one with a
+/// `://`, which the scheme form reads. Any other key, and free text, is not read: a check stores a proxy
+/// only as `ProxyUrl::origin` or `evidence_url`.
+fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
+    if !text.contains('@') && !text.contains("\\u0040") {
+        return;
+    }
+    let lower = text.to_ascii_lowercase();
+    // Matches inside a value already read are skipped, so the work stays linear.
+    let mut done = 0;
+    let mut hits: Vec<usize> = lower
+        .match_indices("_proxy=")
+        .map(|(i, key)| i + key.len())
+        .collect();
+    for key in PROXY_JSON_KEYS {
+        for (i, found) in lower.match_indices(key) {
+            let rest = &text[i + found.len()..];
+            let after_colon = rest.trim_start_matches([' ', '\t']);
+            let Some(after_colon) = after_colon.strip_prefix(':') else {
+                continue;
+            };
+            let value = after_colon.trim_start_matches([' ', '\t']);
+            if value.starts_with('"') {
+                hits.push(text.len() - value.len() + 1);
+            }
+        }
+    }
+    hits.sort_unstable();
+    for start in hits {
+        if start < done {
+            continue;
+        }
+        let value = &text[start..];
+        let end = value
+            .find(|c: char| {
+                c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '`' | '<' | '>')
+            })
+            .unwrap_or(value.len())
+            .min(MAX_AUTHORITY);
+        let value = &value[..floor_boundary(value, end)];
+        done = start + value.len();
+        if value.contains("://") || value.contains(":\\/") {
+            continue;
+        }
+        let at = value.rfind('@');
+        let escaped = value.rfind("\\u0040");
+        let Some(userinfo_end) = at.into_iter().chain(escaped).max().filter(|&e| e > 0) else {
+            continue;
+        };
+        if !is_single_placeholder(&value[..userinfo_end]) {
+            out.push(start..start + userinfo_end);
+        }
+    }
+}
+
+/// The largest char boundary of `text` that is at most `at`.
+fn floor_boundary(text: &str, mut at: usize) -> usize {
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 /// Reads the authority that starts at `from`. Returns where the userinfo ends (the last `@`) and where
@@ -243,6 +320,61 @@ mod tests {
     #[test]
     fn two_urls_in_one_line_are_two_spans() {
         assert_eq!(found("http://a:b@h1 and https://c:d@h2/x"), ["a:b", "c:d"]);
+    }
+
+    #[test]
+    fn a_proxy_with_no_scheme_after_a_proxy_key_loses_its_userinfo() {
+        for (text, want) in [
+            ("HTTPS_PROXY=svc:pw@proxy.acme.test:3128", "svc:pw"),
+            ("http_proxy=svc:p@w@proxy:3128 next", "svc:p@w"),
+            (
+                "Environment=\"HTTP_PROXY=svc:pw@proxy:3128\" \"NO_PROXY=a,.b\"",
+                "svc:pw",
+            ),
+            ("Environment=Https_Proxy=TOKEN123@proxy:3128", "TOKEN123"),
+            (r#"{"http-proxy": "svc:pw@proxy:3128"}"#, "svc:pw"),
+            (r#"{"https-proxy":"svc:pw@proxy:3128"}"#, "svc:pw"),
+            (r#""HttpProxy" : "svc:pw@proxy:3128","#, "svc:pw"),
+            (r#""HttpsProxy":"svc:p/w@proxy:3128""#, "svc:p/w"),
+            (r#""HttpProxy":"svc:pw\u0040proxy:3128""#, "svc:pw"),
+        ] {
+            assert_eq!(found(text), [want], "{text}");
+        }
+    }
+
+    #[test]
+    fn a_proxy_value_with_no_at_sign_or_another_key_is_left_alone() {
+        for text in [
+            "HTTPS_PROXY=proxy.acme.test:3128",
+            "NO_PROXY=localhost,10.0.0.0/8,.cluster.local",
+            r#""HttpProxy":"proxy.acme.test:3128""#,
+            r#""no-proxy":"localhost""#,
+            "proxy=svc:pw@proxy:3128",
+            "the proxy svc:pw@proxy:3128 is down",
+            "HTTP_PROXY=",
+            "HTTP_PROXY=@proxy:3128",
+        ] {
+            assert!(found(text).is_empty(), "{text}: {:?}", found(text));
+        }
+        // A scheme is read by the scheme form, once.
+        assert_eq!(found("HTTP_PROXY=http://u:p@h:1"), ["u:p"]);
+    }
+
+    #[test]
+    fn a_placeholder_proxy_userinfo_is_not_read_again() {
+        let ph = "[REDACTED:url_userinfo:1a2b3c4d]";
+        assert!(found(&format!("HTTPS_PROXY={ph}@proxy:3128")).is_empty());
+        assert!(found(&format!(r#""HttpProxy":"{ph}@proxy:3128""#)).is_empty());
+    }
+
+    #[test]
+    fn many_proxy_keys_cost_linear_time() {
+        let text = "_proxy=".repeat(200_000);
+        assert!(found(&text).is_empty());
+        let text = "_proxy=a@".repeat(100_000);
+        assert!(!found(&text).is_empty());
+        let text = format!("{}é@", "\"httpproxy\":\"é".repeat(50_000));
+        let _ = found(&text);
     }
 
     #[test]

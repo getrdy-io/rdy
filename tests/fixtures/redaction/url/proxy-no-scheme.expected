@@ -1,0 +1,4 @@
+https_proxy=[REDACTED:url_userinfo:~1]@proxy.acme.test:3128
+Environment="HTTP_PROXY=[REDACTED:url_userinfo:~1]@proxy.acme.test:3128" "NO_PROXY=localhost,.cluster.local"
+{"http-proxy": "[REDACTED:url_userinfo:~1]@proxy.acme.test:3128", "no-proxy": "localhost"}
+"HttpsProxy":"[REDACTED:url_userinfo:~1]@proxy.acme.test:3128",

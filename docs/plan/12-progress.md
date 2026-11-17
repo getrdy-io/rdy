@@ -379,6 +379,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-181 | todo | | `rdy run` writes the HTML report next to the JSON | added 2026-11-17 (correction-45); backlog corrected 2026-11-17 (correction-50): the page of an `--allow-unsigned` run shows the UNSIGNED SPEC banner, the HTML half of M1-126's "both reports say unsigned" (PR #84 review)
 
+- M1-182 | PR #TBD | | none
+
 ## Summary
 
 Written when the last M1 ticket merges: what shipped, what moved to M2 and why.

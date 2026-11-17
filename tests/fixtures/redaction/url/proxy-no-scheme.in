@@ -1,0 +1,4 @@
+https_proxy=svc:${SYN:noscheme_pw}@proxy.acme.test:3128
+Environment="HTTP_PROXY=svc:${SYN:noscheme_pw}@proxy.acme.test:3128" "NO_PROXY=localhost,.cluster.local"
+{"http-proxy": "svc:${SYN:noscheme_pw}@proxy.acme.test:3128", "no-proxy": "localhost"}
+"HttpsProxy":"svc:${SYN:noscheme_pw}@proxy.acme.test:3128",

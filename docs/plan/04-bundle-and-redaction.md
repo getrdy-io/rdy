@@ -442,7 +442,7 @@ Patterns are sketches; the code is the source of truth and the corpus is its tes
 
 | Rule | Group | M | Matches | Span |
 | --- | --- | --- | --- | --- |
-| `url_userinfo` | `url_credentials` | 1 | `scheme://user:pass@host`, `scheme://token@host`, percent-encoded | the userinfo |
+| `url_userinfo` | `url_credentials` | 1 | `scheme://user:pass@host`, `scheme://token@host`, percent-encoded, a proxy with no scheme after a proxy key (`*_proxy=user:pass@host`, `"http-proxy": "user:pass@host"`) | the userinfo |
 | `auth_header` | `bearer_tokens` | 1 | `Authorization:` and `Proxy-Authorization:` values (any scheme), `-H 'Authorization: ...'`, bare `Bearer <token>` | the credential |
 | `api_key_header` | `bearer_tokens` | 1 | `X-Api-Key`, `X-Auth-Token` values. M2 adds `Cookie` and `Set-Cookie` | each value |
 | `aws_access_key_id` | `aws_keys` | 1 | `(AKIA\|ASIA\|ABIA\|ACCA)[A-Z2-7]{16}` | the id |
@@ -478,7 +478,11 @@ the choices the table leaves open.
   A raw `/`, `?` or `#` in a password ends the authority with no `@` in it. If what came before is
   `user:x` (`x` not all digits, so not a port) and an `@` follows before white space, a quote or a
   backslash, the userinfo runs to the last such `@` (`postgres://app:K7x/9+Qa@db/app`). A space in a
-  password is not read; write it as a percent escape. `http:\/\/` (JSON slashes) is read too.
+  password is not read; write it as a percent escape. `http:\/\/` (JSON slashes) is read too. A value
+  with no scheme (`svc:pw@proxy.acme.test:3128`) is read after a key that ends in `_proxy=` (any case,
+  also inside `Environment=`) and after the JSON keys `"http-proxy":`, `"https-proxy":`, `"HttpProxy":`
+  and `"HttpsProxy":` (M1-182). The userinfo ends at the last `@` of the value. A value with no `@`
+  stays. Any other key, and free text, is not read (05 I1).
 - **`auth_header`** keeps the scheme and replaces the credential after it (`Authorization: Basic
   <credential>`; one word is all credential). A quoted value runs to its closing quote, a header inside
   a quoted word (`-H 'Authorization: ...'`) to that quote, anything else to the end of the line or a
