@@ -48,7 +48,7 @@ The output names the version you installed.
 
 The script does not edit your shell profile. If `rdy` is not found, add the folder to your `PATH`:
 
-```sh tested shape=^$
+```sh tested shape=\A\z
 export PATH="$HOME/.local/bin:$PATH"
 ```
 

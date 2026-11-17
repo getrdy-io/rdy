@@ -200,6 +200,9 @@ Now run a spec. `--no-network` opens no connections, and `--jobs N` sets how man
 
 ```sh tested exit=2 shape=^NOT\sREADY
 rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
+```
+
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-network --jobs 2
 ```
 

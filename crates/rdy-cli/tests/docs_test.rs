@@ -1,4 +1,4 @@
-//! The docs-test runner (M1-136, ADR 0046). It runs every fenced command that the README and the docs
+//! The docs-test runner (M1-136, ADR 0048). It runs every fenced command that the README and the docs
 //! pages mark `tested`, live against the built `rdy`.
 //!
 //! A fenced `sh`, `bash`, `console`, `powershell` or `pwsh` block carries exactly one marker in its info
@@ -8,18 +8,23 @@
 //!   when absent) and its output (stdout, then stderr) must match the regex, with `^` and `$` at line
 //!   edges. The regex has no spaces: write `\s`. A shape never holds a host number;
 //! - `install-only`: runs only in the install-blocks workflow (ADR 0047), never here;
-//! - `pending=<ticket>`: not built yet, owned by that ticket;
-//! - `skip=<reason>`: never runs, for a placeholder, a build from source or a command that needs the network.
+//! - `pending=<ticket>`: not built yet, owned by that ticket. The id is `M<n>-<nnn>` and has a `todo` row in
+//!   `docs/plan/12-progress.md`, so a ticket that merged cannot keep a block pending;
+//! - `skip=<reason>`: never runs. The reason is one of `SKIP_REASONS`.
 //!
-//! A block may also carry `transcript=<path>`. Its body must equal that golden file below the repo root.
-//! Every `console` block of the README has one, and every golden in `tests/fixtures/readme/` is used.
+//! A block may also carry `transcript=<path>`, on the README only. Its body must equal that golden file below
+//! the repo root. Every `console` block of the README has one, and every golden in `tests/fixtures/readme/`
+//! is used. The golden's `$ echo $?` value must be in the block's exit set, and its verdict line must match
+//! the block's shape.
 //!
 //! How a tested block runs: in a fresh folder that holds `examples/` and a flat copy of every example
-//! spec, with an empty `HOME`, a cleared environment (so no proxy variable), and `rdy` as a shell
-//! function. The function adds `--no-network` to `rdy run` unless the block gives it, so no tested block makes a lookup or a
-//! connection. A block that needs the network is marked `skip=network`. A `sh` block runs as the script
-//! of `sh -c`, and its exit code is the last command's. A `console` block runs its first `$ ` line.
-//! Every block has a timeout.
+//! spec, with an empty `HOME`, a cleared environment (so no proxy variable), and `rdy` as a wrapper script
+//! in a temporary folder at the front of `PATH`. The wrapper adds `--no-network` to `rdy run` unless the
+//! block gives it, so no tested block makes a lookup or a connection. A block that needs the network is
+//! marked `skip=network`. A `sh` block runs as the script of `sh -c`, and its exit code is the last
+//! command's, so a block with several commands checks only the last exit: split it in two. A `console`
+//! block runs its first `$ ` line. Every block has a timeout, and on a timeout the whole process group is
+//! killed.
 //!
 //! Windows has no POSIX shell that this runner can rely on, so the blocks do not run there. The parser
 //! and the golden checks run on every OS. `first_run_page.rs` runs the same commands directly on Windows.
@@ -38,7 +43,26 @@ const PAGES: &str = "docs/src/content/docs";
 /// The folder of the README transcript goldens.
 const GOLDENS: &str = "tests/fixtures/readme";
 /// Languages whose blocks must carry a marker.
-const CHECKED: &[&str] = &["sh", "bash", "console", "powershell", "pwsh"];
+/// A fence with no language is checked too, so a bare block cannot hide a command.
+const CHECKED: &[&str] = &[
+    "",
+    "sh",
+    "bash",
+    "shell",
+    "zsh",
+    "console",
+    "powershell",
+    "pwsh",
+    "ps1",
+];
+/// The reasons a `skip=` block may give. A new reason is a reviewed change to this list and to ADR 0048.
+const SKIP_REASONS: &[&str] = &[
+    "placeholder",
+    "builds",
+    "network",
+    "needs-release-files",
+    "windows-only",
+];
 
 /// The repo root: two levels above this crate's manifest (`crates/rdy-cli`).
 fn repo_root() -> PathBuf {
@@ -70,6 +94,16 @@ struct Block {
     body: Vec<String>,
 }
 
+/// True for a ticket id: `M`, a digit, `-`, three digits.
+fn is_ticket(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.len() == 6
+        && b[0] == b'M'
+        && b[1].is_ascii_digit()
+        && b[2] == b'-'
+        && b[3..].iter().all(u8::is_ascii_digit)
+}
+
 /// Parses the info string of a checked block into its marker and transcript path.
 fn parse_info(words: &[&str]) -> Result<(Mark, Option<String>), String> {
     let mut tested = false;
@@ -83,8 +117,21 @@ fn parse_info(words: &[&str]) -> Result<(Mark, Option<String>), String> {
         match word.split_once('=') {
             None if *word == "tested" => tested = true,
             None if *word == "install-only" => install_only = true,
-            Some(("pending", v)) if !v.is_empty() => pending = Some(v.to_owned()),
-            Some(("skip", v)) if !v.is_empty() => skip = Some(v.to_owned()),
+            Some(("pending", v)) => {
+                if !is_ticket(v) {
+                    return Err(format!("`{word}`: a ticket id looks like `M1-134`"));
+                }
+                pending = Some(v.to_owned());
+            }
+            Some(("skip", v)) => {
+                if !SKIP_REASONS.contains(&v) {
+                    return Err(format!(
+                        "`{word}`: the reason is one of {}",
+                        SKIP_REASONS.join(", ")
+                    ));
+                }
+                skip = Some(v.to_owned());
+            }
             Some(("exit", v)) => {
                 let mut set = BTreeSet::new();
                 for part in v.split('|') {
@@ -242,6 +289,20 @@ fn rule_problems(block: &Block) -> Vec<String> {
             block.at
         ));
     }
+    if block.transcript.is_some() && !block.at.starts_with(README) {
+        out.push(format!(
+            "{}: `transcript=` belongs on a README block, not a docs page",
+            block.at
+        ));
+    }
+    if let Some(Mark::Pending(ticket)) = &block.mark
+        && !todo_tickets().contains(ticket)
+    {
+        out.push(format!(
+            "{}: `pending={ticket}` has no `todo` row in docs/plan/12-progress.md. Mark the block `tested`, or give it the ticket that owns it",
+            block.at
+        ));
+    }
     if block.transcript.is_some() && block.lang != "console" {
         out.push(format!(
             "{}: `transcript=` belongs on a `console` block",
@@ -249,6 +310,19 @@ fn rule_problems(block: &Block) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The ids of the tickets that have a `todo` row in the progress file.
+fn todo_tickets() -> BTreeSet<String> {
+    let text = fs::read_to_string(repo_root().join("docs/plan/12-progress.md"))
+        .expect("read docs/plan/12-progress.md");
+    text.lines()
+        .filter_map(|line| {
+            let mut cells = line.strip_prefix("- ")?.split('|').map(str::trim);
+            let id = cells.next()?;
+            (cells.next()? == "todo").then(|| id.to_owned())
+        })
+        .collect()
 }
 
 /// The script a tested block runs: a `sh` block as written, a `console` block its first `$ ` line.
@@ -281,12 +355,49 @@ fn diff_transcript(body: &[String], golden: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Checks a golden against the block's declared exit set and shape. The value after `$ echo $?` must be in
+/// the set, and the last line before it (the verdict) must match the shape.
+fn check_transcript_against_mark(
+    golden: &str,
+    exit: &BTreeSet<i32>,
+    shape: &str,
+) -> Result<(), String> {
+    let lines: Vec<&str> = golden.lines().collect();
+    let at = lines
+        .iter()
+        .position(|line| *line == "$ echo $?")
+        .ok_or("the golden has no `$ echo $?` line")?;
+    let code: i32 = lines
+        .get(at + 1)
+        .and_then(|line| line.trim().parse().ok())
+        .ok_or("the line after `$ echo $?` is not an exit code")?;
+    if !exit.contains(&code) {
+        return Err(format!(
+            "the golden exits {code}, the block declares {exit:?}"
+        ));
+    }
+    let verdict = at
+        .checked_sub(1)
+        .and_then(|i| lines.get(i))
+        .ok_or("the golden has no verdict line before `$ echo $?`")?;
+    let re = Regex::new(&format!("(?m){shape}")).expect("the shape compiled when parsed");
+    if !re.is_match(verdict) {
+        return Err(format!(
+            "the verdict line `{verdict}` does not match `{shape}`"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 mod exec {
     use std::collections::BTreeSet;
     use std::fs::{self, File};
-    use std::path::Path;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
     use regex::Regex;
@@ -308,6 +419,27 @@ mod exec {
         }
     }
 
+    /// The folder with the `rdy` wrapper, made once per process before any block starts, so no thread forks
+    /// while the script is open for writing. `rdy run` never opens a connection through it. Everything
+    /// else is the binary.
+    fn wrapper_dir() -> &'static Path {
+        static DIR: OnceLock<PathBuf> = OnceLock::new();
+        DIR.get_or_init(|| {
+            let real = env!("CARGO_BIN_EXE_rdy");
+            assert!(!real.contains('\''), "the rdy path has a quote: {real}");
+            let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+                .join(format!("docs-test-bin-{}", std::process::id()));
+            fs::create_dir_all(&dir).expect("a wrapper folder");
+            let file = dir.join("rdy");
+            let text = format!(
+                "#!/bin/sh\nif [ \"$1\" = run ]; then shift; off=--no-network; for a in \"$@\"; do [ \"$a\" = --no-network ] && off=; done; exec '{real}' run $off \"$@\"; fi\nexec '{real}' \"$@\"\n"
+            );
+            fs::write(&file, text).expect("write the wrapper");
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).expect("chmod");
+            dir
+        })
+    }
+
     /// Runs `script` in a fresh folder and checks the exit code and the shape. `Err` holds the reason and
     /// the output.
     pub fn execute(
@@ -317,8 +449,7 @@ mod exec {
         shape: &str,
         timeout: Duration,
     ) -> Result<(), String> {
-        let real = env!("CARGO_BIN_EXE_rdy");
-        assert!(!real.contains('\''), "the rdy path has a quote: {real}");
+        let bin = wrapper_dir();
         let work = tempfile::tempdir().expect("a run folder");
         let out = tempfile::tempdir().expect("an output folder");
         let home = work.path().join("home");
@@ -329,10 +460,11 @@ mod exec {
             fs::copy(&path, work.path().join(path.file_name().expect("a name")))
                 .expect("copy a spec");
         }
-        // `rdy` is a function: `rdy run` never opens a connection here. Everything else is the binary.
-        let program = format!(
-            "rdy() {{ if [ \"$1\" = run ]; then shift; off=--no-network; for a in \"$@\"; do [ \"$a\" = --no-network ] && off=; done; '{real}' run $off \"$@\"; else '{real}' \"$@\"; fi; }}\n{script}\n"
-        );
+        let program = format!("{script}\n");
+        let path = std::env::join_paths(std::iter::once(bin.to_path_buf()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))
+        .expect("a PATH");
         let stdout_path = out.path().join("stdout");
         let stderr_path = out.path().join("stderr");
         let mut child = Command::new("sh")
@@ -340,11 +472,12 @@ mod exec {
             .arg(&program)
             .current_dir(work.path())
             .env_clear()
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("PATH", path)
             .env("HOME", &home)
             .env("NO_COLOR", "1")
             .env("LC_ALL", "C")
             .env("TERM", "dumb")
+            .process_group(0)
             .stdin(Stdio::null())
             .stdout(File::create(&stdout_path).expect("an output file"))
             .stderr(File::create(&stderr_path).expect("an output file"))
@@ -356,6 +489,13 @@ mod exec {
                 break status;
             }
             if started.elapsed() > timeout {
+                // `sh` leads its own process group: kill the group, so a background child dies too.
+                if let Some(pid) = i32::try_from(child.id())
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw)
+                {
+                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("timed out after {} s", timeout.as_secs()));
@@ -365,7 +505,13 @@ mod exec {
         let stdout = String::from_utf8_lossy(&fs::read(&stdout_path).expect("stdout")).into_owned();
         let stderr = String::from_utf8_lossy(&fs::read(&stderr_path).expect("stderr")).into_owned();
         let code = status.code().unwrap_or(-1);
-        let seen = format!("{stdout}{stderr}");
+        // A line break between the two streams, so `^` and `$` never join the end of one to the start of the other.
+        let sep = if stdout.is_empty() || stdout.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        let seen = format!("{stdout}{sep}{stderr}");
         let shown = format!("stdout:\n{stdout}\nstderr:\n{stderr}");
         if !exit.contains(&code) {
             return Err(format!("exit {code}, declared {exit:?}\n{shown}"));
@@ -478,6 +624,11 @@ fn every_readme_transcript_equals_its_golden_and_every_golden_is_used() {
                 if let Err(why) = diff_transcript(&block.body, &golden) {
                     failures.push(format!("{}: differs from `{path}`, {why}", block.at));
                 }
+                if let Some(Mark::Tested { exit, shape }) = &block.mark
+                    && let Err(why) = check_transcript_against_mark(&golden, exit, shape)
+                {
+                    failures.push(format!("{}: `{path}`: {why}", block.at));
+                }
             }
         }
     }
@@ -523,8 +674,8 @@ fn a_tested_marker_reads_its_exit_set_and_shape() {
 fn the_other_markers_parse() {
     assert_eq!(parse_one("install-only").unwrap(), Mark::InstallOnly);
     assert_eq!(
-        parse_one("pending=M1-126").unwrap(),
-        Mark::Pending("M1-126".to_owned())
+        parse_one("pending=M1-134").unwrap(),
+        Mark::Pending("M1-134".to_owned())
     );
     assert_eq!(
         parse_one("skip=network").unwrap(),
@@ -543,7 +694,11 @@ fn a_bad_marker_is_refused_with_a_reason() {
         ("skip=network exit=2", "belong on a `tested`"),
         ("skip=network shape=a", "belong on a `tested`"),
         ("tested install-only shape=a", "exactly one"),
-        ("skip=", "unknown word"),
+        ("skip=", "the reason is one of"),
+        ("skip=because", "the reason is one of"),
+        ("pending=soon", "looks like `M1-134`"),
+        ("pending=M1-12", "looks like `M1-134`"),
+        ("pending=", "looks like `M1-134`"),
         ("tested shape=a bogus", "unknown word"),
     ] {
         let err = parse_one(info).expect_err(info);
@@ -553,7 +708,7 @@ fn a_bad_marker_is_refused_with_a_reason() {
 
 #[test]
 fn the_reader_finds_blocks_marks_and_transcripts() {
-    let page = "text\n```sh tested shape=a\nrdy version\n\n```\n- item\n  ```console skip=x transcript=tests/fixtures/readme/a.txt\n  $ rdy\n  out\n  ```\n```text\nrdy ignored\n```\n```sh\nrdy bare\n```\n";
+    let page = "text\n```sh tested shape=a\nrdy version\n\n```\n- item\n  ```console skip=placeholder transcript=tests/fixtures/readme/a.txt\n  $ rdy\n  out\n  ```\n```text\nrdy ignored\n```\n```sh\nrdy bare\n```\n";
     let (blocks, problems) = blocks_of("page.md", page);
     assert_eq!(blocks.len(), 4);
     assert_eq!(blocks[0].at, "page.md:2");
@@ -574,7 +729,7 @@ fn the_reader_finds_blocks_marks_and_transcripts() {
 
 #[test]
 fn an_unclosed_block_is_a_problem() {
-    let (_, problems) = blocks_of("p.md", "```sh skip=x\nrdy\n");
+    let (_, problems) = blocks_of("p.md", "```sh skip=placeholder\nrdy\n");
     assert_eq!(problems.len(), 1);
     assert!(problems[0].contains("never closed"));
 }
@@ -601,6 +756,31 @@ fn a_transcript_that_differs_from_its_golden_names_the_line() {
     assert!(err.starts_with("line 3"), "{err}");
 }
 
+#[test]
+fn a_golden_must_agree_with_its_block() {
+    let golden = "out\nNOT READY\n$ echo $?\n2\n";
+    let exit = BTreeSet::from([2]);
+    assert_eq!(
+        check_transcript_against_mark(golden, &exit, r"^NOT\sREADY"),
+        Ok(())
+    );
+    let err = check_transcript_against_mark(golden, &BTreeSet::from([0, 1]), "NOT").unwrap_err();
+    assert!(err.contains("exits 2"), "{err}");
+    let err = check_transcript_against_mark(golden, &exit, "^READY").unwrap_err();
+    assert!(err.contains("verdict line"), "{err}");
+    let err = check_transcript_against_mark("NOT READY\n", &exit, "NOT").unwrap_err();
+    assert!(err.contains("no `$ echo $?`"), "{err}");
+}
+
+#[test]
+fn a_bare_fence_and_other_shell_names_are_checked() {
+    let (_, problems) = blocks_of(
+        "p.md",
+        "```\nrdy run x\n```\n```zsh\nls\n```\n```ps1\nls\n```\n",
+    );
+    assert_eq!(problems.len(), 3, "{problems:?}");
+}
+
 #[cfg(unix)]
 mod runner {
     use std::collections::BTreeSet;
@@ -622,6 +802,33 @@ mod runner {
     fn an_exit_code_outside_the_set_fails() {
         let err = run("exit 3", &[0, 1, 2], ".*").unwrap_err();
         assert!(err.starts_with("exit 3"), "{err}");
+    }
+
+    #[test]
+    fn an_empty_shape_means_nothing_was_printed() {
+        assert_eq!(run("true", &[0], r"\A\z"), Ok(()));
+        let err = run("echo hi", &[0], r"\A\z").unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
+        // `^$` is not that: in multi-line mode it matches any empty line.
+        assert_eq!(run("echo hi; echo", &[0], "^$"), Ok(()));
+    }
+
+    #[test]
+    fn a_hung_block_loses_its_whole_process_group() {
+        let exit = BTreeSet::from([0]);
+        let marker = std::env::temp_dir().join(format!("docs-test-group-{}", std::process::id()));
+        let script = format!("(sleep 2; echo late > '{}') & wait", marker.display());
+        let err = exec::execute(
+            &repo_root(),
+            &script,
+            &exit,
+            ".*",
+            Duration::from_millis(300),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("timed out"), "{err}");
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(!marker.exists(), "a child outlived the timeout");
     }
 
     #[test]

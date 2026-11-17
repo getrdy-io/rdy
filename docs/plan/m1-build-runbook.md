@@ -281,9 +281,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
-  security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
-  in #78 (M1-165).
+- The next free ADR is 0049. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+  security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164), ADR 0046
+  in #78 (M1-165), ADR 0047 in #85 (M1-133) and ADR 0048 in M1-136.
 - The next ticket ids are M1-185 and M2-142, and the next correction is 56 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 

@@ -95,6 +95,8 @@ Rules:
 | `kind` (own workflow, `kind.yml`) | no | M1-108, ADR 0039. The ignored tests of `crates/rdy-checks-k8s/tests/live_cluster.rs` against a kind cluster on the oldest and newest Kubernetes minors upstream still patches, with a `restricted` namespace and the `rdy-readonly` role. Runs on PRs, on main, nightly and by hand. Not in `ci-ok`: it depends on Docker Hub, and an outage must not block merges |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
 
+The `test` job also has a named `docs-test` step (M1-136, ADR 0048) that reruns the docs-test binary with `--no-capture` on the same build. It is for log visibility: nextest hides the output of passing tests, and this step shows each leg's count of tested blocks. Windows prints that it skipped them.
+
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.
 
 Static-link proof (ADR 0006). Since Rust 1.59 the musl targets build static-pie, so `file` says "static-pie linked" and `ldd` output varies. The check is: `readelf -lW rdy` shows no `INTERP` header, `readelf -d rdy` shows no `NEEDED` entry, then run `rdy version` in a `scratch` container. `scripts/check-static.sh` runs the `readelf` checks from ADR 0006 (static-pie, full RELRO, non-executable stack) and `ci.yml` runs it on both Linux legs. `scratch` cannot be pulled, so CI imports an empty tar as the image. If `ring` needs a C compiler, set `CC_<target>` only. Never set the linker to `musl-gcc`; its wrappers do not handle static-pie.
