@@ -62,7 +62,7 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `verify/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (17 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (37 cases), `host.cgroups/` (13 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
@@ -89,7 +89,7 @@ none, unreadable, Auto Mode and Karpenter node labels, the `gk3-` prefix, a node
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.admission/` holds 29 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
+`checks/k8s.admission/` holds 55 clusters (the 28 below, and 27 for webhooks, `ValidatingAdmissionPolicy` and the engines' policies: `webhook-*` (fail-empty, default-fail, ready, not-ready, mutating, service-missing, match-conditions, object-selector, url, external-name, ignore, not-matching, slices-forbidden, services-forbidden, many-services), `webhooks-forbidden`, `vap-*` (deny, warn-only, not-matching, other-namespace, bindings-forbidden, not-served, forbidden), `engine-policies`, `engine-policies-forbidden`, `kyverno-exception-only`, `kyverno-cel-alpha`; the generator also writes an empty list of each new kind into every older cluster) (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
 `no-metadata-labels`, `invalid-labels`, `invalid-warn`, `namespace-missing`, `namespace-forbidden`,
 `no-namespace`, `apis-forbidden`, the OpenShift cases `openshift`, `openshift-enforce`,
 `openshift-sync-off`, `openshift-sync-off-no-labels`, `openshift-scc-forbidden`, `openshift-scc-cut`, `openshift-hostile-range`, `openshift-and-engine`, and the
@@ -106,11 +106,13 @@ by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a fi
 `checks/net.egress/` holds eleven scripted `net.json` cases, each with a reviewed `expect.json` (M1-095, M1-096): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused`, `nxdomain`, and the HTTP cases `http-ok`, `http-503`, `http-401-default`, `http-404-not-expected` and `not-http`. A `serve` entry names a server that
 code registers, so `crates/rdy-checks-net/src/expect_cases.rs` runs them through `rdy_engine::testing::assert_cases_with`, which takes the replay servers and the hosts the family builds. The TLS cases need real sockets and are in the check's own tests.
+`checks/net.tls_intercept/` holds 16 cases (M1-100), each with a reviewed `expect.json`: the generated-chain cases `public`, `machine-only`, `machine-only-forbidden`, `unknown-ca`, `expired-pinned-clock`, `expired-inside-window`, `empty-os-store`, `env-store-canary-user`, `issuer-match`, `issuer-mismatch`, `pin-match`, `pin-ca-only`, `pin-mismatch`, `pin-root-not-sent` and `handshake-never-completes` (an in-memory peer that never reads or answers the ClientHello, run on a paused clock so the 5 s handshake limit costs nothing), and the scripted `refused`. A generated case names its chain in `chain.json` and holds no certificate: the env harness (`crates/rdy-cli/tests/env_harness/chains.rs`) builds a root, an issuing CA and a leaf with rcgen at test time, serves them from a loopback server and points the case's host at it. `chain` is `public`, `machine_only`, `unknown_ca`, `expired` (the last needs a pinned `clock`: after the leaf's notAfter it is `clock_or_expiry`, inside the window it is `machine_only`) or `silent`; `os_store: "empty"`, `sources` (where the OS roots were read from, with an optional `env`) and `home` are optional. An `expect.json` `entry` may list `<leaf>`, `<issuing>`, `<root>` or `<other>` in `pin_sha256`, which the rig swaps for that certificate's SHA-256, and the golden writes every 64 digit hash as `<sha256>`. `env-store-canary-user` holds a canary user name in its sources and a test proves it is in no golden. The `Timeout` class is still owed by M1-179 (PENDING row).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `checks/net.proxy/` holds 16 cases (M1-098), each `hand` made, with a reviewed `expect.json` (`UPDATE_GOLDENS=1`, then read the diff): `no-proxy`, `shell-proxy-no-docker-dropin`, `docker-dropin-ok`, `daemon-json-proxy`, `no-proxy-covered`, `no-proxy-gap`, `pac-auto-proxy`, `proxy-refused`, `proxy-blackhole`, `env-conflict`, `socks-all-proxy`, `environment-file`, `dropin-reset`, `no-network`, `macos-env-only` and `unreadable-dropins`. The proxy URLs carry planted passwords (`longer-canary-pw`, `daemon-canary-pw`), the PAC case a planted query token and user info, and the docker client config under `root/root/.docker` and `root/home/ada/.docker` a planted `auths` secret that the check must never open. The `proxy` server of the replay accepts one connection and answers nothing. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
 of `rdy_cli::run`) and a `golden/terminal.txt` (its stderr, M1-086).
 `redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+`results/plan-07/` holds 07 Appendix B.1 to B.3 as result files (M1-083); `reports/golden/results-*` are their JSON and HTML goldens, and `results-secrets-redacted.html` is the page of a run holding a machine id, cut secrets and a known secret.
 The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -121,6 +123,8 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
+| `exit-codes/<row>.stderr.txt` | The stderr of the built `rdy` for an exit-code row that needs no fixture backend: `bad-flag`, `missing-file`, `unsigned`, `too-many-hosts` and `unwritable-out-dir` (M1-087, M1-126). The report folder stamp is `<stamp>`, `\` is `/`. Compared by `tests/exit_code_goldens.rs`, plain and with `--json` | `UPDATE_GOLDENS=1`, then read the diff |
+| `verify/<name>.stderr.txt` | The stderr of `rdy verify --key` on the signed fixture (07 C.4, the KEY NOT PINNED form) and of `rdy spec lint` for the two C.8 samples (M1-126). Compared by `tests/verify_command.rs` | `UPDATE_GOLDENS=1`, then read the diff |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
@@ -163,6 +167,7 @@ envs/all-pass/
   env.json           environment variables the process sees
   golden/            report.json, report.html, terminal.txt
   expect.json        (check cases) the reviewed expected result
+  chain.json         (net.tls_intercept cases) the certificate chain the env harness generates, see below
 ```
 
 The file tree is the machine: a path it does not hold is not found, as on a machine without that file, so a

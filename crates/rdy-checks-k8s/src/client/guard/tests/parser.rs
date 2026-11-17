@@ -338,7 +338,10 @@ async fn an_unlisted_resource_is_refused_and_logged() {
         "/apis/apps/v1/statefulsets",
         "/apis/apps/v1/namespaces/default/deployments",
         "/apis/batch/v1/jobs",
-        "/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations",
+        // M1-160 reads the webhook lists and policies. A get by name and a neighbour kind stay refused.
+        "/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations/x",
+        "/apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies",
+        "/apis/discovery.k8s.io/v1/endpointslices",
         "/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
         "/healthz",
         "/openapi/v2",

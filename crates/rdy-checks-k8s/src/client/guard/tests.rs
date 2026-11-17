@@ -233,12 +233,18 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
         Only::Any => "x".to_owned(),
         Only::Name(name) => (*name).to_owned(),
     };
+    // An entry for every resource of its group is tried with one resource name.
+    let resource = if entry.resource == ANY_RESOURCE {
+        "k8srequiredlabels"
+    } else {
+        entry.resource
+    };
     match access {
-        Access::List => format!("{prefix}/{}", entry.resource),
+        Access::List => format!("{prefix}/{resource}"),
         Access::ListInNamespace(only) => {
-            format!("{prefix}/namespaces/{}/{}", name(only), entry.resource)
+            format!("{prefix}/namespaces/{}/{resource}", name(only))
         }
-        Access::Get(only) => format!("{prefix}/{}/{}", entry.resource, name(only)),
+        Access::Get(only) => format!("{prefix}/{resource}/{}", name(only)),
     }
 }
 
@@ -260,9 +266,15 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 let selector = match entry.field_selector {
                     FieldSelector::Key(key) => format!("{key}%21%3Dx"),
                     FieldSelector::Equals(key, value) => format!("{key}%3D{value}"),
+                    FieldSelector::LabelEquals(key) => format!("{key}%3Dx"),
                     FieldSelector::NotRequired => unreachable!("handled above"),
                 };
-                let ok = format!("{path}?&fieldSelector={selector}&limit=500");
+                let query = if matches!(entry.field_selector, FieldSelector::LabelEquals(_)) {
+                    "labelSelector"
+                } else {
+                    "fieldSelector"
+                };
+                let ok = format!("{path}?&{query}={selector}&limit=500");
                 assert_eq!(judge_get(&ok), Ok(()), "{ok}");
             }
         }
@@ -298,7 +310,7 @@ fn a_key_selector_needs_a_term_on_its_key() {
         "spec.nodeName=n1,status.phase!=Failed",
         "status.phase!=Failed,spec.nodeName=n1",
     ] {
-        assert!(phase.met_by(Some(text)), "{text}");
+        assert!(phase.met_by(Some(text), None), "{text}");
     }
     for text in [
         "spec.nodeName=n1",
@@ -307,9 +319,142 @@ fn a_key_selector_needs_a_term_on_its_key() {
         "status.phasex=Running",
         "",
     ] {
-        assert!(!phase.met_by(Some(text)), "{text}");
+        assert!(!phase.met_by(Some(text), None), "{text}");
     }
-    assert!(!phase.met_by(None));
+    assert!(!phase.met_by(None, None));
+}
+
+#[test]
+fn the_gatekeeper_entry_admits_a_list_of_any_constraint_kind_and_nothing_else() {
+    // ADR 0042: one entry with ANY_RESOURCE, list only, one version.
+    let group = "/apis/constraints.gatekeeper.sh/v1beta1";
+    for kind in ["k8srequiredlabels", "k8sallowedrepos", "anything9"] {
+        assert_eq!(judge_get(&format!("{group}/{kind}")), Ok(()), "{kind}");
+        assert_eq!(
+            judge_get(&format!("{group}/{kind}?limit=500")),
+            Ok(()),
+            "{kind}"
+        );
+    }
+    for (path, rule) in [
+        // A get by name, a namespaced list, another version, another group.
+        (format!("{group}/k8srequiredlabels/x"), RULE_NOT_ALLOWED),
+        (
+            format!("{group}/namespaces/x/k8srequiredlabels"),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.sh/v1alpha1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.sh/v1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/templates.gatekeeper.sh/v1/constrainttemplates".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.shx/v1beta1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        // A subresource, a Secret, and a path that is not a plain name.
+        (
+            format!("{group}/k8srequiredlabels/x/status"),
+            RULE_SUBRESOURCE,
+        ),
+        (format!("{group}/secrets"), RULE_SECRETS),
+        (format!("{group}/*"), RULE_PATH_SHAPE),
+        (format!("{group}/a%2fb"), RULE_PATH_SHAPE),
+    ] {
+        assert_eq!(judge_get(&path), Err(rule), "{path}");
+    }
+    // The wildcard is for that one entry: no other entry uses it.
+    let wild: Vec<&str> = ALLOWED
+        .iter()
+        .filter(|entry| entry.resource == ANY_RESOURCE)
+        .map(|entry| entry.group)
+        .collect();
+    assert_eq!(wild, ["constraints.gatekeeper.sh"]);
+}
+
+#[test]
+fn an_endpoint_slice_list_must_name_one_service_by_label() {
+    // F2 of the PR #48 security review: without the label a list would return every slice of a namespace.
+    let base = "/apis/discovery.k8s.io/v1/namespaces/x/endpointslices";
+    for query in [
+        "",
+        "?limit=5",
+        "?labelSelector=app%3Dx",
+        "?labelSelector=kubernetes.io%2Fservice-name",
+        "?labelSelector=kubernetes.io%2Fservice-name%3D",
+        "?labelSelector=kubernetes.io%2Fservice-name%21%3Dx",
+        "?labelSelector=xkubernetes.io%2Fservice-name%3Dhooks",
+        "?labelSelector=kubernetes.io%2Fservice-name-other%3Dhooks",
+        "?labelSelector=app%20in%20%28a%2Ckubernetes.io%2Fservice-name%3Dx%29",
+        "?labelSelector=kubernetes.io%2Fservice-name%3Dx%2Capp%20in%20%28a%29",
+        "?fieldSelector=metadata.name%3Dhooks",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{base}{query}")),
+            Err(RULE_SELECTOR),
+            "{query}"
+        );
+    }
+    for query in [
+        "?labelSelector=kubernetes.io%2Fservice-name%3Dhooks",
+        "?labelSelector=kubernetes.io%2Fservice-name%3D%3Dhooks&limit=500",
+        "?labelSelector=app%3Dx%2Ckubernetes.io%2Fservice-name%3Dhooks",
+    ] {
+        assert_eq!(judge_get(&format!("{base}{query}")), Ok(()), "{query}");
+    }
+}
+
+#[test]
+fn a_pod_list_needs_the_phase_field_selector() {
+    let pods = "/api/v1/pods";
+    for query in [
+        "&fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed&limit=500",
+        "fieldSelector=status.phase%3DRunning",
+        "fieldSelector=status.phase%3D%3DRunning",
+        "fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed",
+        "fieldSelector=status.phase%21%3DFailed%2Cspec.nodeName%3Dn1&limit=100",
+    ] {
+        assert_eq!(judge_get(&format!("{pods}?{query}")), Ok(()), "{query}");
+    }
+    // Missing, or a selector on another key.
+    for query in [
+        "",
+        "?",
+        "?&limit=500",
+        "?labelSelector=status.phase%3DRunning",
+        "?fieldSelector=spec.nodeName%3Dn1",
+        "?fieldSelector=",
+        "?fieldSelector=metadata.name%3Dstatus.phase",
+        "?fieldSelector=xstatus.phase%3DRunning",
+        "?fieldSelector=status.phasex%3DRunning",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{pods}{query}")),
+            Err(RULE_SELECTOR),
+            "{query}"
+        );
+    }
+    // A selector the guard cannot read is a query error, not a pass. A term with no operator is one.
+    for query in [
+        "fieldSelector=status.phase",
+        "fieldSelector=status.phase%2Cspec.nodeName%3Dn1",
+        "fieldSelector=status.phase%21%3DFailed&fieldSelector=status.phase%21%3DRunning",
+        "fieldSelector=spec.nodeName%3Da%5C%2Cstatus.phase%3Dx",
+        "fieldSelector=status.phase%3D%ff",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{pods}?{query}")),
+            Err(RULE_QUERY),
+            "{query}"
+        );
+    }
 }
 
 #[test]
@@ -346,6 +491,9 @@ fn a_raw_semicolon_in_the_query_is_refused() {
     // Go's `URL.Query()` drops a pair that holds a raw `;`, so the server would list without the
     // selector that the guard saw.
     for uri in [
+        "/api/v1/pods?&fieldSelector=status.phase%21%3DFailed;&limit=500",
+        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed;",
+        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed&limit=5;00",
         "/api/v1/namespaces/app/events?&fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;&limit=500",
         "/api/v1/namespaces/app/events?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;x",
         "/api/v1/nodes?labelSelector=a;",
@@ -1142,6 +1290,7 @@ const SSAR_BODY: &[u8] = br#"{"apiVersion":"authorization.k8s.io/v1","kind":"Sel
 const SSR: &str = "/apis/authentication.k8s.io/v1/selfsubjectreviews";
 const SSAR: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
 const SSRR: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
+const PHASE: &str = "fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed";
 
 /// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. Only the checks not
 /// built yet are listed (M1-107 onward), so these are the calls the design says each one sends, written as
@@ -1186,12 +1335,20 @@ fn calls_of(check: &str) -> Vec<Call> {
         ],
         "k8s.nodes" => vec![
             get("/api/v1/nodes?&limit=500"),
+            get(pods_uri()),
+            get("/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed"),
             get("/apis/karpenter.sh"),
             get("/apis/karpenter.k8s.aws"),
             get("/apis/apps/v1/namespaces/kube-system/deployments?&limit=500"),
         ],
         other => panic!("no calls for {other}"),
     }
+}
+
+fn pods_uri() -> &'static str {
+    // `PHASE` is the selector 03 gives for the pod list. Built once so the test table stays readable.
+    static URI: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URI.get_or_init(|| format!("/api/v1/pods?&{PHASE}&limit=500"))
 }
 
 /// What a faulty or hostile check could try. Each is refused, from any check.

@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-pin-root-not-sent"
+summary = "A pin on the root, which the server does not send"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

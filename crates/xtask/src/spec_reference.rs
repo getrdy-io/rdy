@@ -1055,7 +1055,8 @@ mod tests {
         for id in ids {
             assert!(page.contains(&format!("\n### {id}\n\n")), "{id}\n{page}");
         }
-        assert_eq!(page.matches("```yaml\n").count(), 31, "{page}");
+        // 31 check examples and the whole-spec example under the top-level fields (M1-129).
+        assert_eq!(page.matches("```yaml\n").count(), 32, "{page}");
         assert!(
             page.contains("```yaml\nid: host.cpu\nmin: 4\nrecommended: 8\n```"),
             "{page}"
@@ -1083,10 +1084,18 @@ mod tests {
         let schema: Value = serde_json::from_str(&schema_text)?;
         let mut examples = Vec::new();
         all_examples(&schema, "", &mut examples);
-        assert_eq!(examples.len(), 31, "every check id has one example");
+        // 31 check ids have one example each. The root has one whole spec (M1-129).
+        assert_eq!(examples.len(), 32, "31 check examples and one spec example");
         // Each variant's examples sit under `Check`, the object whose `allOf` names the variant.
         let validator = check_validator(&schema)?;
         for (at, example) in &examples {
+            if at.is_empty() {
+                // The root example is a whole spec, so it is checked as one, not as a check.
+                let yaml = serde_saphyr::to_string(example)?;
+                rdy_spec::parse_unverified(yaml.as_bytes())
+                    .map_err(|e| anyhow!("the spec example does not parse: {e:?}"))?;
+                continue;
+            }
             assert!(
                 validator.validate(example).is_ok(),
                 "{at} does not validate: {example}"
@@ -1113,6 +1122,29 @@ mod tests {
                 "{at} does not decode: {example}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_spec_example_is_the_quickstart_file() -> Result<()> {
+        // The reference page shows the root example. It must be the file that the docs point readers at.
+        let schema: Value = serde_json::from_str(&committed_schema()?)?;
+        let mut examples = Vec::new();
+        all_examples(&schema, "", &mut examples);
+        let (_, root) = examples
+            .iter()
+            .find(|(at, _)| at.is_empty())
+            .context("the spec root has no example")?;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/specs/acme-quickstart.yaml");
+        let text = std::fs::read_to_string(&path)?;
+        let file: Value = serde_saphyr::from_str(&text)?;
+        assert_eq!(
+            root,
+            &file,
+            "the spec example differs from {}",
+            path.display()
+        );
         Ok(())
     }
 

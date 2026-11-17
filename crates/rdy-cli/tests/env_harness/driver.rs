@@ -67,8 +67,14 @@ pub fn env_names(root: &Path) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-/// Runs the environment `env` with `jobs` checks at once.
+/// Runs the environment `env` with `jobs` checks at once. Nothing is written (`--no-report`).
 pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
+    run_env_into(env, jobs, None)
+}
+
+/// Like [`run_env`]. With `Some(out_dir)` the run writes its report folder there (`--out-dir`, M1-181)
+/// and no `--no-report` is passed.
+pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<EnvRun, String> {
     let root = fixtures_dir();
     let name = format!("envs/{env}");
     let fixture = Fixture::load(&root, &name).map_err(|e| format!("{name}: {e}"))?;
@@ -108,18 +114,22 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
 
     let machine = machine(&fixture, env);
     let jobs_arg = jobs.to_string();
+    let out_arg = out_dir.map(|dir| dir.to_string_lossy().into_owned());
     let mut args = vec![
         "rdy",
         "run",
         &spec_arg,
         "--allow-unsigned",
         "--json",
-        "--no-report",
         "--color",
         "never",
         "--jobs",
         &jobs_arg,
     ];
+    match &out_arg {
+        Some(dir) => args.extend(["--out-dir", dir]),
+        None => args.push("--no-report"),
+    }
     if !manifest.caps.network {
         args.push("--no-network");
     }
@@ -218,7 +228,7 @@ fn auxv() -> Vec<u8> {
 }
 
 /// A pinned clock such as `2026-11-02T09:00:00Z` (or with milliseconds) as a `SystemTime`.
-fn pinned_time(clock: &str) -> Result<SystemTime, String> {
+pub fn pinned_time(clock: &str) -> Result<SystemTime, String> {
     let bad = || format!("the pinned clock {clock:?} is not like 2026-11-02T09:00:00Z");
     let text = clock.strip_suffix('Z').ok_or_else(bad)?;
     let (date, time) = text.split_once('T').ok_or_else(bad)?;
