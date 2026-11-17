@@ -62,7 +62,6 @@ use std::time::Duration;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, Method, Request, Response, Uri};
 use http_body::Body as _;
-use kube::api::ListParams;
 use kube::client::Body;
 use rdy_engine::check::{Need, Os};
 use rdy_engine::probe::Probe;
@@ -826,58 +825,5 @@ impl Drop for Harness {
     }
 }
 
-// ---- paging -------------------------------------------------------------------------------------------------
-
-/// A list read to the end.
-#[derive(Debug)]
-pub(crate) struct Listed<K> {
-    /// Every object, in page order.
-    pub(crate) items: Vec<K>,
-    /// How many times the walk started over after a `410 Gone`: 0 or 1.
-    pub(crate) restarts: u32,
-}
-
-/// Reads a whole list by following `continue` tokens. A `410 Gone` on an expired token starts the walk
-/// over once from the first page (03: "restarts once, then marks the check partial"); a second `410` is
-/// returned as the error. `params` carries the limit and the selectors.
-///
-/// This is the paging contract of 03, written for the harness. The 5000 object cap and the "partial"
-/// mark belong to the production paging helper that M1-107 builds.
-///
-/// # Errors
-///
-/// The `kube::Error` of the request that failed.
-pub(crate) async fn list_all<K>(
-    api: &kube::Api<K>,
-    params: &ListParams,
-) -> Result<Listed<K>, kube::Error>
-where
-    K: Clone + k8s_openapi::serde::de::DeserializeOwned + fmt::Debug,
-{
-    let mut restarts = 0;
-    loop {
-        let mut items = Vec::new();
-        let mut token: Option<String> = None;
-        let walked: Result<(), kube::Error> = loop {
-            let mut page = params.clone();
-            if let Some(token) = &token {
-                page = page.continue_token(token);
-            }
-            match api.list(&page).await {
-                Ok(list) => {
-                    items.extend(list.items);
-                    match list.metadata.continue_.filter(|next| !next.is_empty()) {
-                        Some(next) => token = Some(next),
-                        None => break Ok(()),
-                    }
-                }
-                Err(error) => break Err(error),
-            }
-        };
-        match walked {
-            Ok(()) => return Ok(Listed { items, restarts }),
-            Err(kube::Error::Api(status)) if status.code == 410 && restarts == 0 => restarts += 1,
-            Err(error) => return Err(error),
-        }
-    }
-}
+// The production paging helper, so the harness tests walk the same code a check does.
+pub(crate) use super::list::list_all;

@@ -752,7 +752,7 @@ fn an_expired_client_certificate_blocks_with_a_renewal_fix() {
 
 #[test]
 fn an_unknown_issuer_blocks_and_the_hint_depends_on_the_kubeconfig_ca() {
-    // No CA in the kubeconfig: rdy trusts only its bundled roots (ADR 0031 decision 9).
+    // No CA in the kubeconfig: rdy trusts the roots the facade read, else its bundled ones (ADR 0031 decision 9).
     let without = token_facts();
     let error = network_error("invalid peer certificate: UnknownIssuer", &without);
     let ran = run_outcome(Some(without), DialOutcome::Failed(error), &json!({}));
@@ -764,7 +764,7 @@ fn an_unknown_issuer_blocks_and_the_hint_depends_on_the_kubeconfig_ca() {
         "{}",
         ran.fix()
     );
-    assert!(has(ran.fix(), "not this machine's store"), "{}", ran.fix());
+    assert!(has(ran.fix(), "read from this machine's store"), "{}", ran.fix());
     // A CA that does not match: a proxy that re-signs TLS is the other suspect.
     let with = facts(
         &kubeconfig(

@@ -7,17 +7,21 @@
 //! Nothing here does I/O. [`Family::build`] is a pure function of the entry and the spec, so the plan
 //! of a run is the same on every machine with the same OS.
 //!
-//! The probe hook of 02 (`Family::probe`, for needs only one family can test, such as `kube_context`)
-//! arrives with the probe facade (M1-040) and the family probe ticket. The trait gains a method with a
-//! default body then, so a family written now keeps compiling.
+//! The probe hook of 02 ([`Family::probe`], for needs only one family can test, such as `kube_context`)
+//! has a default body, so a family that has no such need ignores it. The engine calls it once per run
+//! for each family that has a runnable check in the plan, under [`FAMILY_PROBE_LIMIT`] (M1-107).
 
 use std::collections::BTreeMap;
+use std::path::Path;
+use std::time::Duration;
 
 use rdy_spec::Target;
+use rdy_spec::result::{Capability, CheckResult, KubeIdentity};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
-use crate::check::{Check, CheckInfo};
+use crate::check::{BoxFuture, Check, CheckInfo};
+use crate::probe::{Probe, ProbeHub};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -130,6 +134,55 @@ pub enum BuildError {
     Unsupported(String),
 }
 
+/// How long a family's probe may take. The engine ends the probe at this limit and calls
+/// [`Family::probe_timed_out`]. A kube credential plugin that waits for a login is the case it exists
+/// for (02, "Privilege and needs").
+pub const FAMILY_PROBE_LIMIT: Duration = Duration::from_secs(10);
+
+/// What the engine hands [`Family::probe`].
+#[non_exhaustive]
+pub struct FamilyProbe<'a> {
+    /// The run's own probe (`check: null`).
+    pub probe: Probe,
+    /// The run's hub, for the known-secret set. Register every secret before anything is printed.
+    pub hub: &'a ProbeHub,
+    /// The checks of this family that will run, so a family can tell that its work is wanted. A spec that
+    /// holds none of them never reaches the hook.
+    pub checks: &'a [&'static CheckInfo],
+    /// Whether the run allows sockets (no `--no-network`).
+    pub network: bool,
+    /// `--kubeconfig`.
+    pub kubeconfig: Option<&'a Path>,
+    /// `--kube-context`.
+    pub kube_context: Option<&'a str>,
+    /// Prints one line to the user's stderr, before the first request. The family says which cluster it
+    /// is about to touch with it.
+    pub announce: &'a (dyn Fn(&str) + Send + Sync),
+}
+
+/// A family's probe failed in a way that ends the run: the CLI exits 70 with the message and the hint.
+/// The text holds no secret.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+#[non_exhaustive]
+pub struct FamilyFatal {
+    /// What went wrong, in one sentence.
+    pub message: String,
+    /// How to fix it.
+    pub hint: String,
+}
+
+impl FamilyFatal {
+    /// A fatal probe error.
+    #[must_use]
+    pub fn new(message: impl Into<String>, hint: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            hint: hint.into(),
+        }
+    }
+}
+
 /// A group of checks with one id prefix.
 ///
 /// Three families exist in M1 (`host`, `net`, `k8s`), which is why this is a trait.
@@ -145,6 +198,36 @@ pub trait Family: Send + Sync + 'static {
     /// never runs on a customer's machine. The default is none.
     fn not_built(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// Probes the needs only this family can test, once per run, before the first check starts. The
+    /// engine calls it only when the plan holds a runnable check of this family, and ends it at
+    /// [`FAMILY_PROBE_LIMIT`]. The default tests nothing.
+    ///
+    /// The capabilities it returns go into the report's `capabilities`. A need that is not in them as
+    /// available is not met, so a check that names it as a hard need ends as `missing_need`.
+    ///
+    /// # Errors
+    ///
+    /// [`FamilyFatal`] when the run cannot go on (exit 70).
+    fn probe<'a>(
+        &'a self,
+        ctx: FamilyProbe<'a>,
+    ) -> BoxFuture<'a, Result<Vec<Capability>, FamilyFatal>> {
+        let _ = ctx;
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// Called when [`Family::probe`] did not end inside [`FAMILY_PROBE_LIMIT`]. The future was dropped,
+    /// so whatever the probe was going to record, this records. The default does nothing.
+    fn probe_timed_out(&self) {}
+
+    /// The Kubernetes identity of the run, from the results of the run (the `k8s.access` result says
+    /// whether the server verified the user). `None` when this family has none. Called once, after
+    /// every check ended and only when [`Family::probe`] ran.
+    fn kube_identity(&self, results: &[CheckResult]) -> Option<KubeIdentity> {
+        let _ = results;
+        None
     }
 
     /// Builds the check for `entry`.

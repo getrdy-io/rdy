@@ -58,7 +58,7 @@ use kube::Config;
 use kube::client::ClientBuilder;
 use kube::config::{AuthInfo, Cluster, ExecInteractiveMode, Kubeconfig};
 use rdy_engine::check::{CheckError, MAX_TIMEOUT};
-use rdy_engine::probe::Probe;
+use rdy_engine::probe::{NativeCall, NativeValue, Probe};
 use secrecy::ExposeSecret;
 
 mod b64;
@@ -66,6 +66,7 @@ mod credential;
 mod error;
 pub mod guard;
 mod impersonate;
+pub(crate) mod list;
 #[cfg(test)]
 pub(crate) mod mock;
 mod proxy;
@@ -599,9 +600,17 @@ impl Loaded {
         let Self {
             facts,
             files,
-            config,
+            mut config,
             ..
         } = self;
+        // With no CA of its own the client trusts the roots the facade read (ADR 0031 decision 9). The
+        // connector never asks the operating system itself: that is where `rustls-platform-verifier` and
+        // `rustls-native-certs` would be reached.
+        if !facts.ca_set
+            && let Some(roots) = facade_roots(probe).await
+        {
+            config.root_cert = Some(roots);
+        }
         let server = facts.line.server.clone();
         let plugin = facts.line.plugin.clone();
         let (proxied, ca_set) = (facts.proxy.is_proxied(), facts.ca_set);
@@ -642,6 +651,15 @@ impl Loaded {
             latency,
             client,
         })
+    }
+}
+
+/// The trust roots the probe facade read from this machine, as DER, or `None` when it has none (an empty
+/// or unreadable store, or an OS with no source yet). `None` leaves kube on the bundled roots.
+async fn facade_roots(probe: &Probe) -> Option<Vec<Vec<u8>>> {
+    match probe.native(NativeCall::SystemRoots).await {
+        Ok(NativeValue::SystemRoots(found)) if !found.certs.is_empty() => Some(found.certs),
+        _ => None,
     }
 }
 
@@ -998,7 +1016,14 @@ fn from_kubeconfig(
 
     // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
     // as /dev/zero would fill memory. The files are listed for the action log.
-    let mut secrets = inline_secrets(auth);
+    // The inline credentials of every user entry, not only the chosen one: the file is parsed in memory
+    // already, and a value of an entry that is not in use must not reach a log either (PR #96 review).
+    let mut secrets: Vec<String> = kubeconfig
+        .auth_infos
+        .iter()
+        .filter_map(|named| named.auth_info.as_ref())
+        .flat_map(|other| inline_secrets(Some(other)))
+        .collect();
     let mut token_text = auth
         .and_then(|auth| auth.token.as_ref())
         .map(|t| t.expose_secret().to_owned());

@@ -1,0 +1,17 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "nodes"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "denied": true,
+        "reason": "RBAC: no ClusterRole of \"acme-reader\" lists nodes"
+      }
+    }
+  ]
+}

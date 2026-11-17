@@ -1306,6 +1306,56 @@ impl Probe {
         Ok(KubeCall { entry })
     }
 
+    /// Records that the run itself read `path`: the kubeconfig and the files it names, which the
+    /// kube client reads on its own (ADR 0031 decision 2). One `read` entry with `check: null`, outcome
+    /// `ok`, and the path as the log shows it. It reads nothing. A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_read(&self, path: &Path) -> Result<(), ProbeError> {
+        let what = self.hub.as_ref().map_or_else(
+            || path.to_string_lossy().into_owned(),
+            |hub| hub.log.display_path(path),
+        );
+        let mut fields = Map::new();
+        fields.insert("path".to_owned(), what.clone().into());
+        let (_, entry) = self.begin(ActionKind::Read, fields, &what)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, &what));
+        }
+        entry.finish(ActionOutcome::Ok);
+        Ok(())
+    }
+
+    /// Records a program that a library will run for the run, with `program` as the resolved path and
+    /// `argv` as the arguments (both pass the redactor with the rest of the log). One `exec` entry with
+    /// `check: null`, outcome `ok` and `form` `delegated`: rdy does not start the process and does not
+    /// see its output (the kube credential plugin, 02 "The action log"). A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_exec(&self, program: &str, argv: &[String]) -> Result<(), ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("program".to_owned(), program.into());
+        fields.insert(
+            "argv".to_owned(),
+            Value::Array(argv.iter().cloned().map(Value::String).collect()),
+        );
+        let (_, mut entry) = self.begin(ActionKind::Exec, fields, program)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, program));
+        }
+        entry.set("form", "delegated");
+        entry.set(
+            "note",
+            "run by the kube client, output not captured, may run again on token refresh",
+        );
+        entry.finish(ActionOutcome::Ok);
+        Ok(())
+    }
+
     /// The OS this probe's command table and privilege snapshot are read for.
     #[must_use]
     pub fn os(&self) -> Os {
