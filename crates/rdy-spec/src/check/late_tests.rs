@@ -1315,7 +1315,8 @@ fn a_sysctl_written_with_dots_and_with_slashes_is_one_parameter() {
     );
     assert!(message.contains("same kernel parameter"), "{message}");
     assert!(message.contains("eth0/100"), "{message}");
-    for bad_name in ["a.b/.c", "a.b//c", "a./b", "a.b/"] {
+    // Only `a./b` is newly refused: the others were refused before the first-separator rule.
+    for bad_name in ["a.b/.c", "a.b//c", "a./b", "a.b/", "a.b/-c"] {
         let reason = why("host.sysctl", &json!({"expect": {bad_name: "1"}}));
         assert!(
             matches!(&reason, UnsupportedReason::BadValue { .. }),

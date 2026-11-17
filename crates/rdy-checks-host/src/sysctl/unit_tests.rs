@@ -203,8 +203,12 @@ fn the_first_separator_decides_how_a_key_is_read() {
     );
     assert_eq!(canonical_key("plain"), "plain");
     assert_eq!(canonical_key(""), "");
-    // The spec's own form agrees for the two forms a spec may use.
-    for text in ["vm.max_map_count", "net/ipv4/conf/eth0.100/rp_filter"] {
+    // The spec's own form agrees for every form a spec may use.
+    for text in [
+        "vm.max_map_count",
+        "net/ipv4/conf/eth0.100/rp_filter",
+        "net.ipv4.conf.eth0/100.rp_filter",
+    ] {
         let name: SysctlNameProbe = SysctlNameProbe::new(text);
         assert_eq!(canonical_key(text), name.0, "{text}");
     }

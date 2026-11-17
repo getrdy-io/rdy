@@ -371,7 +371,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-177 | todo | | Host check fixes from the M1-174 and M1-149 to M1-152 reviews | added 2026-10-30 (correction-34, PR #18, PR #20, PR #23, PR #24, PR #26 and PR #27 reviews); 3 h; an item whose ticket is not merged when M1-177 starts moves to that ticket's exit test
 
-- M1-178 | [#76](https://github.com/getrdy-io/rdy/pull/76) | 2026-11-17 | none
+- M1-178 | [#76](https://github.com/getrdy-io/rdy/pull/76) | 2026-11-17 | `SysctlName::canonical` by the first separator: spec, check and docs agree, no deferrals | added 2026-10-30 (correction-34, PR #20 review)
 
 - M1-179 | todo | | The env harness counts a hang the check survived as the Timeout class | added 2026-11-06 (correction-38, PR #35 review)
 

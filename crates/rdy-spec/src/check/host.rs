@@ -653,9 +653,15 @@ impl SysctlName {
                 && part
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
-                // A dot-first name is held to the dot rules: no empty piece between dots.
-                && (!dot_first || (!part.ends_with('.') && !part.contains("..")))
-        })
+        }) && (!dot_first
+            // A dot-first name is held to the dot rules: every piece between any `.` or `/` starts
+            // like a part, so none is empty and none starts with `-`.
+            || text.split(['.', '/']).all(|piece| {
+                piece
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            }))
     }
 }
 
