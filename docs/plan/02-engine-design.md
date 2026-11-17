@@ -1310,7 +1310,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 
 | Group, resource | Verbs and scope | Check: what it reads |
 | --- | --- | --- |
-| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
+| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions; `k8s.cni`: whether `calico-system` and `kube-flannel` exist before a DaemonSet is asked for there |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion`; `k8s.cni`: the `NetworkUnavailable` reason, `spec.podCIDRs` and `kubeletVersion` (annotations and labels dropped while parsing) |
 | core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |

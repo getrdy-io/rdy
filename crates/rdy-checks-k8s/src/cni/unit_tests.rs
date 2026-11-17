@@ -27,7 +27,7 @@ fn the_shipped_table_parses_and_holds_the_plugins_of_03() {
         "cilium",
         "anetd",
         "canal",
-        "rke2-calico",
+        "azure-cns",
         "rke2-cilium",
         "aws-vpc-cni",
         "azure-npm",
@@ -76,7 +76,7 @@ fn the_daemonsets_of_the_table_are_the_pairs_of_03() {
         "kube-system/anetd",
         "kube-system/canal",
         "kube-system/rke2-canal",
-        "kube-system/rke2-calico",
+        "kube-system/azure-cns",
         "kube-system/rke2-cilium",
         "kube-system/aws-node",
         "kube-system/azure-npm",
@@ -113,7 +113,7 @@ fn the_guard_allows_exactly_the_daemonsets_of_the_table() {
 
 fn entry(extra: &str) -> String {
     format!(
-        "schema = 1\n[[cni]]\nid = \"x\"\nname = \"X\"\nfamily = \"x\"\nnode_reasons = []\ncrd_groups = []\nnetwork_types = []\ndaemonsets = []\nenforces = \"yes\"\npod_cidr = \"own\"\nsource = \"https://example.org/x\"\nchecked_on = \"2026-11-17\"\n{extra}"
+        "schema = 1\n[[cni]]\nid = \"x\"\nname = \"X\"\nfamily = \"x\"\nnode_reasons = []\ncrd_groups = []\nnetwork_types = []\ndaemonsets = []\nrole = \"full\"\nenforces = \"yes\"\npod_cidr = \"own\"\nsource = \"https://example.org/x\"\nverified = true\nchecked_on = \"2026-11-17\"\n{extra}"
     )
 }
 
@@ -132,6 +132,7 @@ fn the_parser_refuses_what_it_should() {
             "source = \"http://example.org/x\"",
         ),
         ("checked_on = \"2026-11-17\"", "checked_on = \"yesterday\""),
+        ("verified = true", "verified = false"),
         ("daemonsets = []", "daemonsets = [\"no-slash\"]"),
         (
             "daemonsets = []",
@@ -146,7 +147,7 @@ fn the_parser_refuses_what_it_should() {
     }
     // A DaemonSet named by two entries.
     let two = format!(
-        "{}[[cni]]\nid = \"y\"\nname = \"Y\"\nfamily = \"y\"\nnode_reasons = []\ncrd_groups = []\nnetwork_types = []\ndaemonsets = [\"a/b\"]\nenforces = \"yes\"\npod_cidr = \"own\"\nsource = \"https://example.org/y\"\nchecked_on = \"2026-11-17\"\n",
+        "{}[[cni]]\nid = \"y\"\nname = \"Y\"\nfamily = \"y\"\nnode_reasons = []\ncrd_groups = []\nnetwork_types = []\ndaemonsets = [\"a/b\"]\nrole = \"full\"\nenforces = \"yes\"\npod_cidr = \"own\"\nsource = \"https://example.org/y\"\nverified = true\nchecked_on = \"2026-11-17\"\n",
         entry("").replace("daemonsets = []", "daemonsets = [\"a/b\"]")
     );
     assert!(matches!(bad(&two), TableError::Entry { .. }));
@@ -488,4 +489,103 @@ fn the_openshift_network_type_names_the_plugin() {
     let signals = cheap_signals(table, &[], &[], Some("OpenShiftSDN"));
     assert!(matches!(name_plugin(table, signals), Named::One(e, _) if e.id == "openshift-sdn"));
     assert!(cheap_signals(table, &[], &[], Some("SomethingElse")).is_empty());
+}
+
+#[test]
+fn a_policy_plugin_on_top_of_a_base_plugin_is_the_policy_plugin() {
+    let table = shipped();
+    let id = |n: Named<'_>| match n {
+        Named::One(entry, _) => entry.id.clone(),
+        other => format!("{other:?}"),
+    };
+    let ds = |entry: &str, pair: &str| {
+        (
+            table.by_id(entry).expect(entry),
+            Signal::DaemonSet(pair.to_owned()),
+        )
+    };
+    let crd = |entry: &str, group: &str| {
+        (
+            table.by_id(entry).expect(entry),
+            Signal::CrdGroup(group.to_owned()),
+        )
+    };
+    // Calico over the VPC CNI (EKS), over Azure CNI (AKS), Cilium in chaining mode over the VPC CNI.
+    let calico_aws = vec![
+        crd("calico", "crd.projectcalico.org"),
+        ds("aws-vpc-cni", "kube-system/aws-node"),
+    ];
+    assert_eq!(id(name_plugin(table, calico_aws)), "calico");
+    let calico_azure = vec![
+        crd("calico", "crd.projectcalico.org"),
+        ds("azure-cns", "kube-system/azure-cns"),
+    ];
+    assert_eq!(id(name_plugin(table, calico_azure)), "calico");
+    let cilium_aws = vec![
+        crd("cilium", "cilium.io"),
+        ds("aws-vpc-cni", "kube-system/aws-node"),
+    ];
+    assert_eq!(id(name_plugin(table, cilium_aws)), "cilium");
+    // Azure CNI with the Azure network policy manager.
+    let azure = vec![
+        ds("azure-cns", "kube-system/azure-cns"),
+        ds("azure-npm", "kube-system/azure-npm"),
+    ];
+    assert_eq!(id(name_plugin(table, azure)), "azure-npm");
+    // Two policy plugins, or a policy plugin over a full plugin, are still ambiguous.
+    let two = vec![
+        crd("calico", "crd.projectcalico.org"),
+        crd("cilium", "cilium.io"),
+    ];
+    assert!(matches!(name_plugin(table, two), Named::Several(_)));
+    let full = vec![
+        crd("calico", "crd.projectcalico.org"),
+        crd("antrea", "crd.antrea.io"),
+    ];
+    assert!(matches!(name_plugin(table, full), Named::Several(_)));
+    // A base plugin alone is itself.
+    assert_eq!(
+        id(name_plugin(
+            table,
+            vec![ds("azure-cns", "kube-system/azure-cns")]
+        )),
+        "azure-cns"
+    );
+}
+
+#[test]
+fn azure_cni_alone_does_not_enforce_and_the_table_says_where_names_are_verified() {
+    let table = shipped();
+    assert_eq!(
+        table.by_id("azure-cns").expect("azure-cns").enforces,
+        Enforces::No
+    );
+    for entry in table.entries() {
+        assert_eq!(entry.verified, entry.checked_on.is_some(), "{}", entry.id);
+    }
+    assert!(table.by_id("flannel").expect("flannel").verified);
+    assert!(table.by_id("aws-vpc-cni").expect("aws").verified);
+    assert!(!table.by_id("calico").expect("calico").verified);
+    assert!(table.by_id("rke2-calico").is_none());
+}
+
+#[test]
+fn a_selector_with_labels_is_counted_and_its_keys_are_not_kept() {
+    let policy: CniPolicy = serde_json::from_value(json!({
+        "metadata": {"name": "p"},
+        "spec": {"podSelector": {"matchLabels": {MARKER: "x"}}, "policyTypes": ["Egress"]}
+    }))
+    .expect("parses");
+    assert!(!format!("{policy:?}").contains(MARKER), "{policy:?}");
+    assert!(!policy.facts().selects_all);
+}
+
+#[test]
+fn the_service_subnet_read_keeps_nothing_else_of_the_document() {
+    let doc = format!(
+        "apiServer:\n  extraArgs:\n    oidc-client-secret: {MARKER}\nnetworking:\n  serviceSubnet: 10.96.0.0/12\n"
+    );
+    let found = service_subnet(&doc);
+    assert_eq!(found, ["10.96.0.0/12"]);
+    assert!(!format!("{found:?}").contains(MARKER));
 }

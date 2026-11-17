@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-namespaces-missing"
+summary = "No plugin is named, and calico-system and kube-flannel do not exist"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

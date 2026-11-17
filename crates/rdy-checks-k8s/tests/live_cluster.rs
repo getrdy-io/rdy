@@ -491,7 +491,7 @@ const CNI_KUBE_SYSTEM: &[(&str, &str, &str, &str)] = &[
     ("get", "apps", "daemonsets", "anetd"),
     ("get", "apps", "daemonsets", "canal"),
     ("get", "apps", "daemonsets", "rke2-canal"),
-    ("get", "apps", "daemonsets", "rke2-calico"),
+    ("get", "apps", "daemonsets", "azure-cns"),
     ("get", "apps", "daemonsets", "rke2-cilium"),
     ("get", "apps", "daemonsets", "aws-node"),
     ("get", "apps", "daemonsets", "azure-npm"),

@@ -16,6 +16,24 @@
         "apiVersion": "networking.k8s.io/v1",
         "kind": "NetworkPolicy",
         "metadata": {
+          "name": "default-deny-egress",
+          "namespace": "acme-system",
+          "labels": {},
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"note\": \"ENV-VALUE-MARKER-4f9c2a7e1b3d\"}"
+          }
+        },
+        "spec": {
+          "podSelector": {},
+          "policyTypes": [
+            "Egress"
+          ]
+        }
+      },
+      {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
           "name": "allow-all-egress",
           "namespace": "acme-system",
           "labels": {},

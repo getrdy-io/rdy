@@ -19,13 +19,20 @@
 #   daemonsets    "namespace/name" of the node agent DaemonSet, read by name when no cheaper signal named the
 #                 plugin. At most 4 per entry. The guard (`ALLOWED`) and examples/rbac/rdy-readonly-cni.yaml
 #                 list the same pairs, and a test holds the three in step.
+#   role          "base": the plugin that gives pods their network and does not enforce policy by itself (Flannel,
+#                 the AWS VPC CNI, Azure CNI). "policy": it enforces policy and can run on top of a base plugin
+#                 (Calico, Cilium, the Azure network policy manager). "full": it does both and runs alone.
+#                 One policy plugin on top of a base plugin is the policy plugin, like Canal. Anything else
+#                 with more than one family is ambiguous.
 #   enforces      "yes": the plugin enforces NetworkPolicy. "no": it does not (Flannel alone). "env": it does
 #                 when a setting on its DaemonSet says so (the AWS VPC CNI, `ENABLE_NETWORK_POLICY`).
 #   pod_cidr      "node": the pod ranges are the `spec.podCIDRs` of the nodes. "own": the plugin allocates
 #                 pod addresses from its own pool (a Calico IPPool, a Cilium cluster pool, the VPC), so the
 #                 node field says nothing.
 #   source        https URL of the public page the entry came from.
-#   checked_on    YYYY-MM-DD, the day someone read that page.
+#   verified      true when someone read the source page for this entry and found the names. Only then is
+#                 checked_on set (YYYY-MM-DD, the day). false means the names are from memory of the project's
+#                 manifests and need a check against a live cluster (ADR 0046).
 #
 # The file holds no free text. The check prints fixed words and the names it finds.
 
@@ -39,23 +46,11 @@ node_reasons = ["CalicoIsUp"]
 crd_groups = ["crd.projectcalico.org", "projectcalico.org"]
 network_types = []
 daemonsets = ["kube-system/calico-node", "calico-system/calico-node"]
+role = "policy"
 enforces = "yes"
 pod_cidr = "own"
-source = "https://docs.tigera.io/calico/latest/about"
-checked_on = "2026-11-17"
-
-[[cni]]
-id = "rke2-calico"
-name = "Calico (RKE2)"
-family = "calico"
-node_reasons = []
-crd_groups = []
-network_types = []
-daemonsets = ["kube-system/rke2-calico"]
-enforces = "yes"
-pod_cidr = "own"
-source = "https://docs.rke2.io/networking/basic_network_options"
-checked_on = "2026-11-17"
+source = "https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises"
+verified = false
 
 [[cni]]
 id = "cilium"
@@ -65,10 +60,11 @@ node_reasons = ["CiliumIsUp"]
 crd_groups = ["cilium.io"]
 network_types = []
 daemonsets = ["kube-system/cilium"]
+role = "policy"
 enforces = "yes"
 pod_cidr = "own"
-source = "https://docs.cilium.io/en/stable/overview/intro/"
-checked_on = "2026-11-17"
+source = "https://docs.cilium.io/en/stable/installation/k8s-install-helm/"
+verified = false
 
 [[cni]]
 id = "rke2-cilium"
@@ -78,10 +74,11 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/rke2-cilium"]
+role = "policy"
 enforces = "yes"
 pod_cidr = "own"
 source = "https://docs.rke2.io/networking/basic_network_options"
-checked_on = "2026-11-17"
+verified = false
 
 [[cni]]
 id = "anetd"
@@ -91,10 +88,11 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/anetd"]
+role = "policy"
 enforces = "yes"
 pod_cidr = "node"
 source = "https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2"
-checked_on = "2026-11-17"
+verified = false
 
 [[cni]]
 id = "flannel"
@@ -104,9 +102,11 @@ node_reasons = ["FlannelIsUp"]
 crd_groups = []
 network_types = []
 daemonsets = ["kube-flannel/kube-flannel-ds", "kube-system/kube-flannel-ds"]
+role = "base"
 enforces = "no"
 pod_cidr = "node"
-source = "https://github.com/flannel-io/flannel"
+source = "https://github.com/flannel-io/flannel/blob/master/Documentation/kube-flannel.yml"
+verified = true
 checked_on = "2026-11-17"
 
 [[cni]]
@@ -117,10 +117,11 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/canal", "kube-system/rke2-canal"]
+role = "full"
 enforces = "yes"
 pod_cidr = "node"
 source = "https://docs.tigera.io/calico/latest/getting-started/kubernetes/flannel/install-for-flannel"
-checked_on = "2026-11-17"
+verified = false
 
 [[cni]]
 id = "aws-vpc-cni"
@@ -130,9 +131,11 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/aws-node"]
+role = "base"
 enforces = "env"
 pod_cidr = "own"
 source = "https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html"
+verified = true
 checked_on = "2026-11-17"
 
 [[cni]]
@@ -143,10 +146,25 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/azure-npm"]
+role = "policy"
 enforces = "yes"
 pod_cidr = "own"
 source = "https://learn.microsoft.com/en-us/azure/aks/use-network-policies"
-checked_on = "2026-11-17"
+verified = false
+
+[[cni]]
+id = "azure-cns"
+name = "Azure CNI"
+family = "azure-cns"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/azure-cns"]
+role = "base"
+enforces = "no"
+pod_cidr = "own"
+source = "https://learn.microsoft.com/en-us/azure/aks/azure-cni-overview"
+verified = false
 
 [[cni]]
 id = "weave"
@@ -156,10 +174,11 @@ node_reasons = ["WeaveIsUp"]
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/weave-net"]
+role = "full"
 enforces = "yes"
 pod_cidr = "own"
 source = "https://github.com/rajch/weave"
-checked_on = "2026-11-17"
+verified = false
 
 [[cni]]
 id = "antrea"
@@ -169,10 +188,11 @@ node_reasons = []
 crd_groups = ["crd.antrea.io"]
 network_types = []
 daemonsets = ["kube-system/antrea-agent"]
+role = "full"
 enforces = "yes"
 pod_cidr = "node"
-source = "https://antrea.io/docs/"
-checked_on = "2026-11-17"
+source = "https://antrea.io/docs/main/docs/getting-started/"
+verified = false
 
 [[cni]]
 id = "kube-router"
@@ -182,10 +202,11 @@ node_reasons = []
 crd_groups = []
 network_types = []
 daemonsets = ["kube-system/kube-router"]
+role = "full"
 enforces = "yes"
 pod_cidr = "node"
-source = "https://www.kube-router.io/"
-checked_on = "2026-11-17"
+source = "https://www.kube-router.io/docs/user-guide/"
+verified = false
 
 [[cni]]
 id = "kube-ovn"
@@ -195,10 +216,11 @@ node_reasons = []
 crd_groups = ["kubeovn.io"]
 network_types = []
 daemonsets = ["kube-system/kube-ovn-cni"]
+role = "full"
 enforces = "yes"
 pod_cidr = "own"
-source = "https://kubeovn.github.io/docs/stable/en/"
-checked_on = "2026-11-17"
+source = "https://kubeovn.github.io/docs/stable/en/start/one-step-install/"
+verified = false
 
 [[cni]]
 id = "ovn-kubernetes"
@@ -208,10 +230,11 @@ node_reasons = []
 crd_groups = ["k8s.ovn.org"]
 network_types = ["OVNKubernetes"]
 daemonsets = []
+role = "full"
 enforces = "yes"
 pod_cidr = "own"
-source = "https://ovn-kubernetes.io/"
-checked_on = "2026-11-17"
+source = "https://github.com/ovn-org/ovn-kubernetes"
+verified = false
 
 [[cni]]
 id = "openshift-sdn"
@@ -221,7 +244,8 @@ node_reasons = []
 crd_groups = []
 network_types = ["OpenShiftSDN"]
 daemonsets = []
+role = "full"
 enforces = "yes"
 pod_cidr = "own"
 source = "https://docs.openshift.com/container-platform/latest/networking/cluster-network-operator.html"
-checked_on = "2026-11-17"
+verified = false

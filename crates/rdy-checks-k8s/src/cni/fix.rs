@@ -27,7 +27,7 @@ pub(super) fn overlap_pod(avoid: &str) -> String {
 /// The fix for a service range that overlaps a range the spec says to avoid.
 pub(super) fn overlap_service(avoid: &str) -> String {
     format!(
-        "The service range is chosen when the cluster is built and is hard to change. Ask the vendor whether the product can use another range, or build the cluster with a service range outside {avoid} (kubeadm: `--service-cidr`). See it now: `kubectl get svc kubernetes -n default`."
+        "The service range is chosen when the cluster is built and is hard to change. Ask the vendor whether the product can use another range, or build the cluster with a service range outside {avoid} (kubeadm: `--service-cidr`). See it now: `kubectl get servicecidr`, or `kubectl get svc kubernetes -n default`."
     )
 }
 

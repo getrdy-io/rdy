@@ -33,6 +33,18 @@ pub(super) enum Enforces {
     Env,
 }
 
+/// What a plugin does next to others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum Role {
+    /// It gives pods their network and does not enforce policy by itself.
+    Base,
+    /// It enforces policy and can run on top of a base plugin.
+    Policy,
+    /// It does both and runs alone.
+    Full,
+}
+
 /// Where the pod ranges of a plugin are written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -54,10 +66,13 @@ pub(super) struct Entry {
     pub(super) crd_groups: Vec<String>,
     pub(super) network_types: Vec<String>,
     pub(super) daemonsets: Vec<String>,
+    pub(super) role: Role,
     pub(super) enforces: Enforces,
     pub(super) pod_cidr: PodCidr,
     pub(super) source: String,
-    pub(super) checked_on: String,
+    pub(super) verified: bool,
+    #[serde(default)]
+    pub(super) checked_on: Option<String>,
 }
 
 impl Entry {
@@ -237,8 +252,15 @@ fn check_entry(entry: &Entry) -> Result<(), String> {
     {
         return Err("the source must be an https URL".to_owned());
     }
-    if entry.checked_on.parse::<Date>().is_err() {
-        return Err("checked_on must be a date, YYYY-MM-DD".to_owned());
+    match (&entry.checked_on, entry.verified) {
+        (Some(day), true) if day.parse::<Date>().is_ok() => {}
+        (None, false) => {}
+        _ => {
+            return Err(
+                "a verified entry has checked_on (a date, YYYY-MM-DD) and an unverified one has none"
+                    .to_owned(),
+            );
+        }
     }
     Ok(())
 }

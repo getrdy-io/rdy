@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/rke2-calico"
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/rke2-cilium"
   },
   "status": 404,
   "body": {
@@ -9,10 +9,10 @@
     "apiVersion": "v1",
     "metadata": {},
     "status": "Failure",
-    "message": "daemonsets.apps \"rke2-calico\" not found",
+    "message": "daemonsets.apps \"rke2-cilium\" not found",
     "reason": "NotFound",
     "details": {
-      "name": "rke2-calico",
+      "name": "rke2-cilium",
       "kind": "daemonsets.apps"
     },
     "code": 404

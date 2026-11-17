@@ -12,7 +12,7 @@
       "namespace": "kube-system"
     },
     "data": {
-      "ClusterConfiguration": "apiServer:\n  extraArgs:\n    authorization-mode: Node,RBAC\n  timeoutForControlPlane: 4m0s\napiVersion: kubeadm.k8s.io/v1beta3\ncertificatesDir: /etc/kubernetes/pki\nclusterName: acme\ncontrollerManager: {}\ndns: {}\netcd:\n  local:\n    dataDir: /var/lib/etcd\nimageRepository: registry.example\nkind: ClusterConfiguration\nkubernetesVersion: v1.30.2\nnetworking:\n  dnsDomain: cluster.local\n  podSubnet: 10.244.0.0/16\n  serviceSubnet: 172.20.0.0/16\nscheduler: {}\n",
+      "ClusterConfiguration": "apiServer:\n  extraArgs:\n    authorization-mode: Node,RBAC\n    oidc-client-secret: ENV-VALUE-MARKER-4f9c2a7e1b3d\n  timeoutForControlPlane: 4m0s\napiVersion: kubeadm.k8s.io/v1beta3\ncertificatesDir: /etc/kubernetes/pki\nclusterName: acme\ncontrollerManager: {}\ndns: {}\netcd:\n  local:\n    dataDir: /var/lib/etcd\nimageRepository: registry.example\nkind: ClusterConfiguration\nkubernetesVersion: v1.30.2\nnetworking:\n  dnsDomain: cluster.local\n  podSubnet: 10.244.0.0/16\n  serviceSubnet: 172.20.0.0/16\nscheduler: {}\n",
       "ClusterStatus": "apiEndpoints:\n  acme-node-1:\n    advertiseAddress: 192.0.2.10\n"
     }
   }

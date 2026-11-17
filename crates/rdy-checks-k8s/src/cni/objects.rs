@@ -427,15 +427,45 @@ struct PolicySpec {
 #[derive(Debug, Clone, Default, Deserialize)]
 struct Selector {
     #[serde(default, rename = "matchLabels")]
-    match_labels: Option<std::collections::BTreeMap<String, IgnoredAny>>,
+    match_labels: Option<MapCount>,
     #[serde(default, rename = "matchExpressions")]
     match_expressions: Option<Count>,
 }
 
 impl Selector {
     fn selects_all(&self) -> bool {
-        self.match_labels.as_ref().is_none_or(|m| m.is_empty())
+        self.match_labels.is_none_or(|m| m.0 == 0)
             && self.match_expressions.is_none_or(|c| c.0 == 0)
+    }
+}
+
+/// The count of the entries of a map, with keys and values dropped as they are read.
+#[derive(Debug, Clone, Copy, Default)]
+struct MapCount(usize);
+
+impl<'de> Deserialize<'de> for MapCount {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Counter;
+        impl<'de> Visitor<'de> for Counter {
+            type Value = MapCount;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a map")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<MapCount, A::Error> {
+                let mut n = 0_usize;
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {
+                    n = n.saturating_add(1);
+                }
+                Ok(MapCount(n))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<MapCount, E> {
+                Ok(MapCount(0))
+            }
+        }
+        deserializer.deserialize_any(Counter)
     }
 }
 

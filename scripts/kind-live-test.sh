@@ -91,8 +91,9 @@ sed -e "s/<target-namespace>/$NS/g" "$cni" > "$work/cni.yaml"
 created=""
 cleanup() {
     k delete -f "$work/cni.yaml" --ignore-not-found --wait=false > /dev/null 2>&1 || true
+    # Wait for these deletes (no --wait=false), so a second run does not meet a Terminating namespace.
     for ns in $created; do
-        k delete namespace "$ns" --ignore-not-found --wait=false > /dev/null 2>&1 || true
+        kw delete namespace "$ns" --ignore-not-found > /dev/null 2>&1 || true
     done
     k delete -f "$rbac" --ignore-not-found --wait=false > /dev/null 2>&1 || true
     k delete namespace "$NS" --ignore-not-found --wait=false > /dev/null 2>&1 || true
@@ -176,6 +177,11 @@ echo "step 2: the rdy-readonly service account"
 k apply -f "$rbac" > /dev/null
 # The k8s.cni Roles. Two of them live in namespaces a kind cluster does not have, so make those first.
 for ns in calico-system kube-flannel; do
+    # A namespace that is still Terminating from an earlier run would refuse the Role: wait for it to go.
+    phase=$(k get namespace "$ns" -o jsonpath='{.status.phase}' 2> /dev/null || true)
+    if [ "$phase" = Terminating ]; then
+        kw wait --for=delete "namespace/$ns" --timeout=120s > /dev/null 2>&1 || true
+    fi
     if ! k get namespace "$ns" > /dev/null 2>&1; then
         k create namespace "$ns" > /dev/null
         created="$created $ns"

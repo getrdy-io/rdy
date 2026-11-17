@@ -295,16 +295,16 @@ async fn a_default_deny_egress_policy_warns_when_the_spec_lists_egress() {
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert_eq!(
         finding.message,
-        "Namespace acme-system has a default-deny egress policy (default-deny-egress, allow-dns) that allows egress only to the destinations it lists, and rdy does not match host names against them, and the product needs egress to registry.acme.example:443, 10.20.0.5:5432"
+        "Namespace acme-system has a default-deny egress policy (default-deny-egress) that blocks all egress. The product needs egress to registry.acme.example:443, 10.20.0.5:5432"
     );
     assert_eq!(
         fix_of(&finding),
         "Namespace `acme-system` has a default-deny egress policy. Add a NetworkPolicy there that allows egress from the product's pods to `registry.acme.example:443`, `10.20.0.5:5432`, and to the cluster DNS. See the current ones: `kubectl get networkpolicy -n acme-system`."
     );
-    assert!(notes(&finding).contains("Only namespace policies are read"));
+    assert!(notes(&finding).contains("Only namespace NetworkPolicy objects are read"));
     assert_eq!(
         finding.observed["policies"]["default_deny_egress"],
-        json!(["default-deny-egress", "allow-dns"])
+        json!(["default-deny-egress"])
     );
     // The policy that selects one app is not a default-deny.
     assert_eq!(engine(&rig, finding, None).status, Status::Warn);
@@ -320,7 +320,7 @@ async fn a_default_deny_without_rules_blocks_all_egress_and_warns() {
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert!(
         finding.message.contains(
-            "that blocks all egress, and the product needs egress to registry.acme.example:443"
+            "that blocks all egress. The product needs egress to registry.acme.example:443"
         ),
         "{}",
         finding.message
@@ -350,7 +350,7 @@ async fn an_allow_all_egress_rule_lifts_the_default_deny() {
         .await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     assert!(
-        notes(&finding).contains("one of its rules allows all destinations"),
+        notes(&finding).contains("another policy that selects every pod allows all destinations"),
         "{}",
         notes(&finding)
     );
@@ -365,9 +365,9 @@ async fn an_ingress_only_default_deny_is_not_an_egress_deny() {
         .await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     assert!(
-        finding
-            .message
-            .contains("no default-deny egress policy in acme-system (namespace policies only)"),
+        finding.message.contains(
+            "no default-deny egress policy in acme-system (namespace NetworkPolicy only)"
+        ),
         "{}",
         finding.message
     );
@@ -980,4 +980,98 @@ async fn the_check_only_registers_what_it_reads() {
             .any(|info| info.id == "k8s.cni")
     );
     let _: &Value = &json!(null);
+}
+
+// ---- the PR #78 fix round ---------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_namespace_that_does_not_exist_is_skipped_and_asks_for_no_grant() {
+    let rig = rig("namespaces-missing");
+    let finding = rig.finding(json!({"network_policy": "enforced"})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    // No refusal, no grant: nobody can apply a Role in a namespace that is missing.
+    assert!(grants(&finding).is_empty(), "{finding:?}");
+    let paths = rig.paths();
+    for ns in ["calico-system", "kube-flannel"] {
+        assert!(
+            paths.contains(&format!("/api/v1/namespaces/{ns}")),
+            "{paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .all(|p| !p.contains(&format!("namespaces/{ns}/daemonsets"))),
+            "a DaemonSet was asked for in the missing {ns}: {paths:?}"
+        );
+    }
+    // The other 14 pairs, all in kube-system, were asked for.
+    assert_eq!(
+        paths.iter().filter(|p| p.contains("/daemonsets/")).count(),
+        14,
+        "{paths:?}"
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_policy_that_lists_destinations_is_not_a_default_deny() {
+    let rig = rig("restricting-policy");
+    let finding = rig
+        .finding(json!({"needs_egress": ["registry.acme.example:443"]}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        finding.message.contains("no default-deny egress policy"),
+        "{}",
+        finding.message
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_default_deny_on_a_plugin_that_does_not_enforce_is_a_note_not_a_warning() {
+    let rig = rig("flannel-default-deny");
+    let finding = rig
+        .finding(json!({"needs_egress": ["registry.acme.example:443"]}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        notes(&finding).contains(
+            "the network plugin does not enforce NetworkPolicy, so it blocks nothing today"
+        ),
+        "{}",
+        notes(&finding)
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn calico_over_the_vpc_cni_is_calico_and_enforces() {
+    let rig = rig("calico-over-vpc-cni");
+    let finding = rig.finding(json!({"network_policy": "enforced"})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["plugin"]["id"], "calico");
+    assert_eq!(finding.observed["enforces_network_policy"], "yes");
+    rig.audit();
+}
+
+#[tokio::test]
+async fn every_result_says_which_policy_objects_are_not_read() {
+    for case in [
+        "kubeadm-flannel",
+        "k3s-flannel",
+        "calico-crd",
+        "openshift-ovn",
+        "nodes-forbidden",
+    ] {
+        let rig = self::rig(case);
+        let finding = rig.finding(json!({})).await;
+        let count = finding
+            .notes
+            .iter()
+            .filter(|n| n.starts_with("Only namespace NetworkPolicy objects are read."))
+            .count();
+        assert_eq!(count, 1, "{case}: {:?}", finding.notes);
+        rig.audit();
+    }
 }

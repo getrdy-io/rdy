@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use super::cidr::Net;
 use super::fix;
 use super::objects::{DaemonSetFacts, NodeFacts, OcpFacts, PolicyFacts};
-use super::table::{Enforces, Entry, PodCidr, Table};
+use super::table::{Enforces, Entry, PodCidr, Role, Table};
 use crate::namespace::Read;
 
 /// The longest text from the server that goes into a sentence, in characters.
@@ -233,6 +233,25 @@ pub(super) fn name_plugin<'t>(table: &'t Table, signals: Vec<(&'t Entry, Signal)
         families.remove("flannel");
         families.remove("calico");
         families.insert("canal");
+    }
+    // One policy plugin on top of base plugins is the policy plugin, like Canal: Calico over the AWS VPC
+    // CNI or Azure CNI, Cilium in chaining mode. The base plugin stays in the signals.
+    let role_of = |family: &str| {
+        signals
+            .iter()
+            .find(|(e, _)| e.family == family)
+            .map(|(e, _)| e.role)
+    };
+    let policy: Vec<&str> = families
+        .iter()
+        .copied()
+        .filter(|f| role_of(f) == Some(Role::Policy))
+        .collect();
+    let others_are_base = families
+        .iter()
+        .all(|f| policy.contains(f) || role_of(f) == Some(Role::Base));
+    if families.len() > 1 && policy.len() == 1 && others_are_base {
+        families = policy.into_iter().collect();
     }
     if families.len() > 1 {
         return Named::Several(
@@ -510,7 +529,17 @@ pub(super) fn judge(table: &Table, params: &K8sCni, found: &Gathered) -> Finding
     judge_enforcement(&named, &enforcement, k3s, enforced, &mut sink);
     judge_nodes(nodes, &mut sink);
     let pods = judge_ranges(&named, nodes, ocp, &found.service, &avoid, &mut sink);
-    judge_policies(found, &needs, &mut sink);
+    judge_policies(
+        found,
+        &needs,
+        matches!(enforcement, Enforcement::No),
+        &mut sink,
+    );
+    // One note on every result: these objects are not read, so "no default-deny" never means "no policy".
+    sink.notes.push(
+        "Only namespace NetworkPolicy objects are read. CiliumNetworkPolicy, CiliumClusterwideNetworkPolicy, Calico GlobalNetworkPolicy and AdminNetworkPolicy are not, so other policy may apply."
+            .to_owned(),
+    );
 
     finish(params, found, &named, &enforcement, nodes, ocp, pods, sink)
 }
@@ -796,7 +825,7 @@ fn list_ranges(ranges: &[String]) -> String {
     }
 }
 
-fn judge_policies(found: &Gathered, needs: &[String], sink: &mut Sink) {
+fn judge_policies(found: &Gathered, needs: &[String], enforcement_none: bool, sink: &mut Sink) {
     let wants = !needs.is_empty();
     let Some(namespace) = found.namespace.as_deref() else {
         if wants {
@@ -843,36 +872,48 @@ fn judge_policies(found: &Gathered, needs: &[String], sink: &mut Sink) {
             fix::cut_policies(namespace)
         ));
     }
-    let deny: Vec<&PolicyFacts> = page
+    // 03: a default-deny policy is one that selects all pods and has no egress rules. A policy that selects
+    // every pod and lists destinations is a restriction, not a default-deny, and is not judged.
+    let selecting: Vec<&PolicyFacts> = page
         .items
         .iter()
         .filter(|p| p.selects_all && p.egress)
         .collect();
+    let deny: Vec<&PolicyFacts> = selecting
+        .iter()
+        .copied()
+        .filter(|p| p.egress_rules.is_empty())
+        .collect();
     if deny.is_empty() {
         sink.quiet.push(format!(
-            "no default-deny egress policy in {namespace} (namespace policies only)"
+            "no default-deny egress policy in {namespace} (namespace NetworkPolicy only)"
         ));
         return;
     }
     let names: Vec<String> = deny.iter().take(LISTED).map(|p| shown(&p.name)).collect();
-    let rules: Vec<_> = deny.iter().flat_map(|p| p.egress_rules.iter()).collect();
-    if rules.iter().any(|r| !r.has_to && !r.has_ports) {
+    // Policies add up: a rule with no destination and no port in another policy that selects every pod
+    // allows all egress again.
+    if selecting
+        .iter()
+        .flat_map(|p| p.egress_rules.iter())
+        .any(|r| !r.has_to && !r.has_ports)
+    {
         sink.notes.push(format!(
-            "Namespace {namespace} has an egress policy that selects every pod ({}), and one of its rules allows all destinations.",
+            "Namespace {namespace} has a default-deny egress policy ({}), and another policy that selects every pod allows all destinations.",
             names.join(", ")
         ));
         return;
     }
-    let how = if rules.is_empty() {
-        "blocks all egress"
-    } else {
-        "allows egress only to the destinations it lists, and rdy does not match host names against them"
-    };
-    if wants {
+    if enforcement_none {
+        sink.notes.push(format!(
+            "Namespace {namespace} has a default-deny egress policy ({}), and the network plugin does not enforce NetworkPolicy, so it blocks nothing today.",
+            names.join(", ")
+        ));
+    } else if wants {
         sink.issues.push(Issue {
             level: Level::Warn,
             message: format!(
-                "Namespace {namespace} has a default-deny egress policy ({}) that {how}, and the product needs egress to {}",
+                "Namespace {namespace} has a default-deny egress policy ({}) that blocks all egress. The product needs egress to {}",
                 names.join(", "),
                 list_ranges(needs)
             ),
@@ -880,12 +921,10 @@ fn judge_policies(found: &Gathered, needs: &[String], sink: &mut Sink) {
         });
     } else {
         sink.notes.push(format!(
-            "Namespace {namespace} has a default-deny egress policy ({}) that {how}. The spec lists no egress need.",
+            "Namespace {namespace} has a default-deny egress policy ({}) that blocks all egress. The spec lists no egress need.",
             names.join(", ")
         ));
     }
-    sink.notes
-        .push("Only namespace policies are read: Calico GlobalNetworkPolicy, CiliumClusterwideNetworkPolicy and AdminNetworkPolicy are not.".to_owned());
 }
 
 fn capitalise(text: &str) -> String {
@@ -1005,7 +1044,7 @@ fn observed(
             "default_deny_egress": page
                 .items
                 .iter()
-                .filter(|p| p.selects_all && p.egress)
+                .filter(|p| p.selects_all && p.egress && p.egress_rules.is_empty())
                 .take(8)
                 .map(|p| shown(&p.name))
                 .collect::<Vec<_>>(),

@@ -76,7 +76,7 @@ rules:
       - anetd
       - canal
       - rke2-canal
-      - rke2-calico
+      - azure-cns
       - rke2-cilium
       - aws-node
       - azure-npm

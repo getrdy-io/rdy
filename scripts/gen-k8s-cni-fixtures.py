@@ -224,9 +224,24 @@ kube = true
                 order.append((ns, name, entry["family"]))
         order.sort(key=lambda row: row[2] != family)  # stable: the hinted family first
         skipped = set()
+        missing = self.ds.get("missing_ns", set())
+        asked = {"kube-system"}
         for ns, name, _ in order:
             if ns in skipped:
                 continue
+            if ns not in asked:
+                # The check asks whether a namespace exists before it asks for a DaemonSet in it.
+                asked.add(ns)
+                npath = f"/api/v1/namespaces/{ns}"
+                if ns in missing:
+                    skipped.add(ns)
+                    write(self.name, f"api/ns-{ns}.json", {"request": request(npath), "status": 404, "body": not_found("namespaces", ns)})
+                    # The DaemonSet answers a refusal, which is not a grant anyone can give: the check
+                    # never asks, and the file proves it by the test that no such request is made.
+                    write(self.name, f"api/ds-{ns}-unasked.json", {"request": request(f"/apis/apps/v1/namespaces/{ns}/daemonsets/{name}"), "status": 403, "body": forbidden("daemonsets", "apps", ns, name)})
+                    continue
+                write(self.name, f"api/ns-{ns}.json", {"request": request(npath), "status": 200,
+                                                         "body": {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}, "spec": {"finalizers": ["kubernetes"]}, "status": {"phase": "Active"}}})
             path = f"/apis/apps/v1/namespaces/{ns}/daemonsets/{name}"
             if ns in refused:
                 skipped.add(ns)
@@ -344,7 +359,7 @@ def service_cidr(version, ranges):
 
 def kubeadm_config(service_subnet, pod_subnet="10.244.0.0/16"):
     text = (
-        "apiServer:\n  extraArgs:\n    authorization-mode: Node,RBAC\n  timeoutForControlPlane: 4m0s\n"
+        f"apiServer:\n  extraArgs:\n    authorization-mode: Node,RBAC\n    oidc-client-secret: {MARKER}\n  timeoutForControlPlane: 4m0s\n"
         "apiVersion: kubeadm.k8s.io/v1beta3\ncertificatesDir: /etc/kubernetes/pki\nclusterName: acme\n"
         "controllerManager: {}\ndns: {}\netcd:\n  local:\n    dataDir: /var/lib/etcd\n"
         "imageRepository: registry.example\nkind: ClusterConfiguration\nkubernetesVersion: v1.30.2\n"
@@ -489,11 +504,11 @@ c.groups = [("crd.projectcalico.org", ["v1"])]
 c.service = ("kubeadm", "10.96.0.0/12")
 c.policies = [DENY_ALL]
 
-c = case("egress-allow-all", "An egress policy that selects every pod and allows every destination")
+c = case("egress-allow-all", "A default-deny egress policy, and another policy that selects every pod and allows every destination")
 c.nodes = nodes_of(3, kind="calico")
 c.groups = [("crd.projectcalico.org", ["v1"])]
 c.service = ("kubeadm", "10.96.0.0/12")
-c.policies = [policy("allow-all-egress", types=["Egress"], egress=[{}])]
+c.policies = [DENY_EGRESS, policy("allow-all-egress", types=["Egress"], egress=[{}])]
 
 c = case("ingress-deny-only", "A default-deny policy for ingress only: egress is open")
 c.nodes = nodes_of(3, kind="calico")
@@ -525,6 +540,27 @@ c.groups = [("crd.projectcalico.org", ["v1"])]
 c.service = ("kubeadm", "10.96.0.0/12")
 
 # ---- plugins named by cheap signals -----------------------------------------------------------------------------
+
+c = case("restricting-policy", "A policy that selects every pod and lists destinations is not a default-deny")
+c.nodes = nodes_of(3, kind="calico")
+c.groups = [("crd.projectcalico.org", ["v1"])]
+c.service = ("kubeadm", "10.96.0.0/12")
+c.policies = [ALLOW_DNS]
+
+c = case("flannel-default-deny", "A default-deny egress policy on Flannel, which does not enforce it")
+c.nodes = nodes_of(3, kind="flannel", cidrs=pod24("10.244"))
+c.service = ("kubeadm", "10.96.0.0/12")
+c.policies = [DENY_EGRESS]
+
+c = case("calico-over-vpc-cni", "Calico policy on EKS, where the VPC CNI is the base plugin")
+c.nodes = nodes_of(3, kubelet="v1.30.4-eks-a737599")
+c.groups = [("crd.projectcalico.org", ["v1"])]
+c.service = ("kubeadm", "172.20.0.0/16")
+
+c = case("namespaces-missing", "No plugin is named, and calico-system and kube-flannel do not exist")
+c.nodes = nodes_of(3)
+c.ds = {"found": None, "missing_ns": {"calico-system", "kube-flannel"}}
+c.service = ("kubeadm", "10.96.0.0/12")
 
 c = case("calico-crd", "Calico: the node condition and the API group name it, so no DaemonSet is read")
 c.nodes = nodes_of(3, kind="calico")

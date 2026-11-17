@@ -33,6 +33,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::core::v1::Namespace;
 use kube::api::ListParams;
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
@@ -323,11 +324,14 @@ impl CniCheck {
                 .namespaced::<Kubeadm>("kube-system")
                 .get("kubeadm-config")
                 .await,
-            Kubeadm::cluster_configuration,
+            // The document is parsed here, so the whole ClusterConfiguration never leaves `read`.
+            |map| {
+                map.cluster_configuration()
+                    .map(|text| service_subnet(&text))
+            },
         )?;
         match kubeadm {
-            Read::Ok(Some(text)) => {
-                let ranges = service_subnet(&text);
+            Read::Ok(Some(ranges)) => {
                 if ranges.is_empty() {
                     out.unread.push(Unread {
                         what: "kubeadm-config",
@@ -412,13 +416,32 @@ async fn read_daemonsets(
     // A stable sort: the entries of the named family first, the rest in file order.
     order.sort_by_key(|(_, _, entry)| Some(entry.family.as_str()) != family);
     let mut probes: Vec<Probe> = Vec::new();
+    // Namespaces to skip: one the server refused, or one that does not exist (a Role cannot be applied in
+    // a namespace that is missing, so a refusal there is no grant anyone can give). `checked` holds the
+    // namespaces asked about, so each is asked once. kube-system always exists.
     let mut refused: Vec<&str> = Vec::new();
+    let mut checked: Vec<&str> = vec!["kube-system"];
     for (namespace, name, entry) in order {
         if refused.contains(&namespace) {
             continue;
         }
         if out_of_time(ctx) {
             return Ok((probes, true));
+        }
+        if !checked.contains(&namespace) {
+            checked.push(namespace);
+            let exists = read(
+                mapper,
+                client.all::<Namespace>().get(namespace).await,
+                |_| (),
+            )?;
+            if matches!(exists, Read::Missing) {
+                refused.push(namespace);
+                continue;
+            }
+            if out_of_time(ctx) {
+                return Ok((probes, true));
+            }
         }
         let result = read(
             mapper,

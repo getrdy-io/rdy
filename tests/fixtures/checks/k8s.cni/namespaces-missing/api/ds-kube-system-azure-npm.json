@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/rke2-calico"
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/azure-npm"
   },
   "status": 404,
   "body": {
@@ -9,10 +9,10 @@
     "apiVersion": "v1",
     "metadata": {},
     "status": "Failure",
-    "message": "daemonsets.apps \"rke2-calico\" not found",
+    "message": "daemonsets.apps \"azure-npm\" not found",
     "reason": "NotFound",
     "details": {
-      "name": "rke2-calico",
+      "name": "azure-npm",
       "kind": "daemonsets.apps"
     },
     "code": 404

@@ -23,7 +23,9 @@ resource that holds secrets or env cluster wide, and cut every object down while
 2. **DaemonSets are read by name, and only when needed.** After steps 1 the check asks for DaemonSets only
    when no plugin was named, or the one named needs a DaemonSet setting (the VPC CNI). One `GET` per name
    and namespace pair of `data/cni.toml` (16 pairs: 14 in `kube-system`, `calico-system/calico-node`,
-   `kube-flannel/kube-flannel-ds`), the named family first, then the table order, stopping at the first that
+   `kube-flannel/kube-flannel-ds`; a namespace other than `kube-system` is read by `GET` first, through the
+   existing `get namespaces` grant, and its pairs are skipped when it does not exist, because a refusal in
+   a namespace that is missing is a grant nobody can give), the named family first, then the table order, stopping at the first that
    exists. A kubelet version hint (`-eks-`, `-gke.`, `+rke2`) only orders the reads. A refusal in a
    namespace skips the rest of it. At most 16 requests, inside the 20 s timeout. No DaemonSet list exists
    in the guard.
@@ -53,15 +55,24 @@ resource that holds secrets or env cluster wide, and cut every object down while
    - Flannel on k3s is partial, not a block. k3s runs its own network policy controller unless it was
      started with `--disable-network-policy`, which rdy cannot read. The cluster is k3s when a kubelet
      version has `+k3s`. Flannel on any other cluster is a block when enforcement is required.
-   - Flannel with Calico is Canal, which enforces. Signals of two other plugins, or no plugin, are partial.
+   - Flannel with Calico is Canal, which enforces. Each table entry has a role: base (Flannel, the AWS VPC
+     CNI, Azure CNI), policy (Calico, Cilium, the Azure network policy manager) or full. One policy plugin
+     on top of base plugins is the policy plugin, like Canal. Anything else with two families, and no
+     plugin, is partial.
    - The pod ranges are `Node.spec.podCIDRs` only for a plugin that uses node IPAM (`pod_cidr = "node"`),
      or the OpenShift `Network` object. For a plugin with its own pool, or an unknown plugin, `avoid_cidrs`
      is partial for the pod side.
    - The AWS VPC CNI enforces when `ENABLE_NETWORK_POLICY` is `true`, does not when it is `false`, and is
      partial when it is absent or unreadable.
-   - A default-deny egress policy is one that selects every pod and governs egress. It is lifted by a rule
-     with no destination and no port in any such policy. Host names in `needs_egress` are never matched
-     against rules, so a restricting policy warns and says so.
+   - A default-deny egress policy is 03's: it selects all pods, governs egress and has no rules. A policy
+     that lists destinations is not one. A rule with no destination and no port in another policy that
+     selects every pod lifts it. On a plugin that does not enforce, it is a note. Every result says that
+     only namespace NetworkPolicy objects are read.
+   - `cni.toml` entries carry `verified`. Only Flannel and the AWS VPC CNI were read from a page for this
+     ticket; the rest are `verified = false` with no date. The AWS `ENABLE_NETWORK_POLICY` env on the
+     `aws-node` container is the name 03 gives and is unverified against a live cluster: if it is wrong,
+     EKS is partial, never a false block. `rke2-calico` is not an entry: RKE2 installs Calico through the
+     Tigera operator (`calico-system/calico-node`).
    - A range from the server that is not a range (not the spec's grammar) is a note and is never compared.
 9. **Deferred.** The restart evidence of crash-looping plugin pods (03 says it follows `k8s.dns`) is not
    read: it would add a pod read that is PR #62's. A ready-below-desired DaemonSet is not reported either.

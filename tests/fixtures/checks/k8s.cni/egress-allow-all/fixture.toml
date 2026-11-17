@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-cni-egress-allow-all"
-summary = "An egress policy that selects every pod and allows every destination"
+summary = "A default-deny egress policy, and another policy that selects every pod and allows every destination"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

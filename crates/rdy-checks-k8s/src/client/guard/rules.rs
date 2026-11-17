@@ -201,8 +201,9 @@ pub const ALLOWED: &[Allowed] = &[
             "k8s.storageclass",
             "k8s.rbac",
             "k8s.namespace",
+            "k8s.cni",
         ],
-        reads: "Pod Security labels; whether the target namespace exists; its phase and deletion conditions",
+        reads: "Pod Security labels; whether the target namespace exists; its phase and deletion conditions; k8s.cni: whether calico-system and kube-flannel exist, before it asks for a DaemonSet there",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -376,7 +377,7 @@ pub const ALLOWED: &[Allowed] = &[
             },
             Access::GetIn {
                 namespace: "kube-system",
-                name: "rke2-calico",
+                name: "azure-cns",
             },
             Access::GetIn {
                 namespace: "kube-system",
