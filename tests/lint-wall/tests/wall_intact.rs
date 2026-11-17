@@ -586,6 +586,16 @@ fn the_release_workflow_gates_on_a_stale_agent_catalog_with_the_pinned_command()
             );
         }
     }
+    // The job has no `if:`: a condition could skip the gate, and a skipped job counts as passed.
+    let job = text
+        .split("\n  agents-stale:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  check:").next())
+        .expect("the agents-stale job is missing");
+    assert!(
+        job.lines().all(|l| !l.trim_start().starts_with("if:")),
+        "the agents-stale job must not have an `if:` line"
+    );
     // The step sits in a job of the same reusable workflow, so release.yml's check job fails with it.
     assert!(
         text.contains("agents-stale:\n    name:"),

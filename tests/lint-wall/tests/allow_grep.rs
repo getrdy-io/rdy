@@ -277,9 +277,14 @@ struct Findings {
     /// takes the place of the built-in one, so the literals of `include_str!(concat!("../data/", "x"))`
     /// no longer say what path the build reads. Every include check refuses a file that does it.
     shadows_include_macro: bool,
-    /// `#[macro_use]` on an `extern crate`: it brings in every macro of that crate, under names the source
-    /// does not show. A check crate has none.
-    macro_use_extern: bool,
+    /// An `extern crate` item, with or without `#[macro_use]` (`#[cfg_attr(all(), macro_use)]` and
+    /// `#[r#macro_use]` are the same thing in other clothes). It can bring in every macro of a crate, under
+    /// names the source does not show. A check crate has none.
+    extern_crate: bool,
+    /// An item or import named `std` or `core` (`mod std { pub use dep::*; }`, `use dep as core;`). It
+    /// makes `std::include_str!` mean some other crate's macro, which the path check trusts. A check crate
+    /// has none.
+    shadows_std: bool,
     /// The string literals in the arguments of every `fx!` call (the firewall tests) and every `expect!`
     /// call (the disk tests), with any delimiter.
     fx_literals: Vec<String>,
@@ -345,6 +350,9 @@ fn note_use_shadow(findings: &mut Findings, tree: &syn::UseTree, path: &mut Vec<
             }
         }
         syn::UseTree::Name(n) => {
+            if matches!(n.ident.to_string().as_str(), "std" | "core") && !path.is_empty() {
+                findings.shadows_std = true;
+            }
             let name = n.ident.to_string().replace("r#", "");
             let builtin = matches!(path.first().map(String::as_str), Some("std" | "core"));
             if INCLUDE_MACROS.contains(&name.as_str()) && !builtin {
@@ -358,14 +366,18 @@ fn note_use_shadow(findings: &mut Findings, tree: &syn::UseTree, path: &mut Vec<
             let renamed = |ident: &proc_macro2::Ident| {
                 INCLUDE_MACROS.contains(&ident.to_string().replace("r#", "").as_str())
             };
+            if matches!(r.rename.to_string().as_str(), "std" | "core") {
+                findings.shadows_std = true;
+            }
             if renamed(&r.ident) || renamed(&r.rename) {
                 findings.shadows_include_macro = true;
             }
         }
         // A plain `use a::*` that brings in a macro named like a built-in is refused by rustc (E0659,
-        // ambiguous with the built-in). `#[macro_use]` on an `extern crate` is not, and is refused in a
-        // check crate by `macro_use_extern`. A macro of the crate's own is found where it is defined, in
-        // any file of the crate (see the reach test).
+        // ambiguous with the built-in). An `extern crate` is refused in a check crate (`extern_crate`), and
+        // so is an item or import named `std` or `core` (`shadows_std`), which would make a `std::`
+        // path mean something else. A macro of the crate's own is found where it is defined, in any
+        // file of the crate (see the reach test).
         syn::UseTree::Glob(_) => {}
     }
 }
@@ -532,6 +544,37 @@ fn scan_with(
                 let bang =
                     matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '!');
                 let plain = id.to_string().replace("r#", "");
+                let next_ident = match trees.get(i + 1) {
+                    Some(TokenTree::Ident(n)) => Some(n.to_string().replace("r#", "")),
+                    _ => None,
+                };
+                // `macro_rules` is a name a metavariable can stand in for (`$m! $n { .. }` with
+                // `def!(macro_rules concat ())`), so a `macro_rules` that is not followed by `!` is refused,
+                // and so is `$m!` below.
+                if plain == "macro_rules" && !bang {
+                    findings.shadows_include_macro = true;
+                }
+                // `extern crate`, and an item or an import named `std` or `core`, written in macro tokens.
+                if plain == "extern" && next_ident.as_deref() == Some("crate") {
+                    findings.extern_crate = true;
+                }
+                if matches!(next_ident.as_deref(), Some("std" | "core"))
+                    && matches!(
+                        plain.as_str(),
+                        "mod"
+                            | "struct"
+                            | "enum"
+                            | "union"
+                            | "trait"
+                            | "type"
+                            | "fn"
+                            | "const"
+                            | "static"
+                            | "as"
+                    )
+                {
+                    findings.shadows_std = true;
+                }
                 // `macro_rules! concat { .. }` inside the tokens of another macro, or with a name that a
                 // metavariable fills in (`macro_rules! $n { .. }`, then `def!(concat)`).
                 if bang
@@ -575,6 +618,13 @@ fn scan_with(
             // `$h [$a]`: the hash of an attribute is a `tt` the caller passes. Nothing in the source
             // of the macro says what the attribute is, so it is refused.
             TokenTree::Punct(p) if p.as_char() == '$' => {
+                // `$m!`: a macro whose name a metavariable fills in can be `macro_rules`, or `include_str`
+                // under another name.
+                if matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
+                    && matches!(trees.get(i + 2), Some(TokenTree::Punct(b)) if b.as_char() == '!')
+                {
+                    findings.shadows_include_macro = true;
+                }
                 if matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
                     && let Some(TokenTree::Group(g)) = trees.get(i + 2)
                     && g.delimiter() == Delimiter::Bracket
@@ -627,6 +677,15 @@ struct Finder {
     findings: Findings,
 }
 
+impl Finder {
+    /// Notes an item named `std` or `core`.
+    fn note_std(&mut self, ident: &proc_macro2::Ident) {
+        if matches!(ident.to_string().replace("r#", "").as_str(), "std" | "core") {
+            self.findings.shadows_std = true;
+        }
+    }
+}
+
 impl<'ast> syn::visit::Visit<'ast> for Finder {
     fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
         let name = attr
@@ -674,10 +733,53 @@ impl<'ast> syn::visit::Visit<'ast> for Finder {
     }
 
     fn visit_item_extern_crate(&mut self, item: &'ast syn::ItemExternCrate) {
-        if item.attrs.iter().any(|a| a.path().is_ident("macro_use")) {
-            self.findings.macro_use_extern = true;
-        }
+        self.findings.extern_crate = true;
         syn::visit::visit_item_extern_crate(self, item);
+    }
+
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_mod(self, item);
+    }
+
+    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_struct(self, item);
+    }
+
+    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_enum(self, item);
+    }
+
+    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_union(self, item);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_trait(self, item);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_type(self, item);
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        self.note_std(&item.sig.ident);
+        syn::visit::visit_item_fn(self, item);
+    }
+
+    fn visit_item_const(&mut self, item: &'ast syn::ItemConst) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_const(self, item);
+    }
+
+    fn visit_item_static(&mut self, item: &'ast syn::ItemStatic) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_static(self, item);
     }
 
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
@@ -734,7 +836,16 @@ fn findings_of(source: &str) -> Findings {
                         + stripped.matches("include_bytes!").count()
                 ],
                 // Whitespace is gone from `stripped`, so this is `macro_rules!concat` or `..as concat;`.
-                macro_use_extern: stripped.contains("macro_use"),
+                extern_crate: stripped.contains("externcrate"),
+                shadows_std: [
+                    "mod", "struct", "enum", "union", "trait", "type", "fn", "const", "static",
+                ]
+                .iter()
+                .any(|kw| {
+                    stripped.contains(&format!("{kw}std"))
+                        || stripped.contains(&format!("{kw}core"))
+                }) || stripped.contains("asstd")
+                    || stripped.contains("ascore"),
                 shadows_include_macro: stripped.contains("macro_rules!$")
                     || INCLUDE_MACROS.iter().any(|name| {
                         stripped.contains(&format!("macro_rules!{name}"))
@@ -856,9 +967,14 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
                     "{rel}: defines or imports a macro named concat, include, include_str or include_bytes"
                 ));
             }
-            if found.macro_use_extern {
+            if found.extern_crate {
                 bad.push(format!(
-                    "{rel}: #[macro_use] on an extern crate brings in macros under names this scan cannot see"
+                    "{rel}: extern crate can bring in macros under names this scan cannot see"
+                ));
+            }
+            if found.shadows_std {
+                bad.push(format!(
+                    "{rel}: an item or import named std or core makes `std::include_str!` mean another macro"
                 ));
             }
             if found.include_data
@@ -896,10 +1012,9 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
 fn no_crate_of_the_workspace_shadows_concat_or_the_includes() {
     // A macro named `concat` or `include_str` in any crate could be brought into a check crate by name
     // (`#[macro_export]` and a path, or a re-export), and no crate needs those names. So the definition
-    // is refused everywhere under crates/, not only in the check crates.
+    // is refused in every `.rs` file of the repository, not only in the check crates.
     let base = root();
-    let mut files = Vec::new();
-    rust_files(&base.join("crates"), &mut files);
+    let files = repo_rust_files(&base);
     assert!(files.len() > 50, "found only {} source files", files.len());
     let mut bad = Vec::new();
     for file in files {
@@ -1543,6 +1658,16 @@ fn a_shadowed_concat_or_include_macro_fails_the_include_checks() {
         ),
         ("the name as an argument", "def!(concat);"),
         ("a name in a list", "def!(a, include_str, b);"),
+        // A metavariable can be `macro_rules` itself, or the name of a macro call.
+        (
+            "a metavariable for macro_rules",
+            "macro_rules! def { ($m:ident $n:ident ()) => { $m! $n { ($lit:literal) => { \"../secret.txt\" } } }; } def!(macro_rules concat ());",
+        ),
+        (
+            "a metavariable call",
+            "macro_rules! m { ($m:ident) => { $m!(\"x\") }; }",
+        ),
+        ("macro_rules alone", "def!(macro_rules, x);"),
     ];
     for (what, definition) in shadowed {
         let found = findings_of(&format!("{definition}\n{call}"));
@@ -1589,20 +1714,80 @@ fn a_shadowed_concat_or_include_macro_fails_the_include_checks() {
 }
 
 #[test]
-fn macro_use_on_an_extern_crate_is_seen() {
-    for (what, source, want) in [
-        ("macro_use", "#[macro_use] extern crate shim;", true),
-        ("with a list", "#[macro_use(a, b)] extern crate shim;", true),
+fn an_extern_crate_and_an_item_named_std_or_core_are_seen() {
+    for (what, source, extern_crate, std) in [
+        ("macro_use", "#[macro_use] extern crate shim;", true, false),
         (
-            "another attribute",
-            "#[allow(unused)] extern crate shim;",
+            "with a list",
+            "#[macro_use(a, b)] extern crate shim;",
+            true,
             false,
         ),
-        ("a plain extern crate", "extern crate alloc;", false),
-        // A file that does not parse is judged by its text.
-        ("unparsed", "fn ( #[macro_use] extern crate shim;", true),
+        (
+            "in cfg_attr",
+            "#[cfg_attr(all(), macro_use)] extern crate shim;",
+            true,
+            false,
+        ),
+        (
+            "a raw name",
+            "#[r#macro_use] extern crate shim;",
+            true,
+            false,
+        ),
+        ("no attribute", "extern crate alloc;", true, false),
+        (
+            "in a macro body",
+            "macro_rules! m { () => { extern crate shim; }; }",
+            true,
+            false,
+        ),
+        ("unparsed", "fn ( extern crate shim;", true, false),
+        (
+            "a module named std",
+            "mod std { pub use dep::*; }",
+            false,
+            true,
+        ),
+        ("a module named core", "mod core {}", false, true),
+        ("a struct", "struct std;", false, true),
+        ("a function", "fn core() {}", false, true),
+        ("a const", "const std: u8 = 1;", false, true),
+        ("a use rename", "use dep as std;", false, true),
+        ("a use leaf", "use dep::core;", false, true),
+        (
+            "in a macro body",
+            "macro_rules! m { () => { mod std {} }; }",
+            false,
+            true,
+        ),
+        (
+            "a rename in a macro body",
+            "macro_rules! m { () => { use a as core; }; }",
+            false,
+            true,
+        ),
+        ("unparsed module", "fn ( mod std { }", false, true),
+        // Not shadows.
+        ("a std path", "use std::fs;", false, false),
+        ("a std group", "use std::{io, fmt};", false, false),
+        (
+            "a core path call",
+            "fn f() { core::mem::drop(1); }",
+            false,
+            false,
+        ),
+        ("another module", "mod standard {}", false, false),
+        (
+            "another attribute",
+            "#[allow(unused)] mod m {}",
+            false,
+            false,
+        ),
     ] {
-        assert_eq!(findings_of(source).macro_use_extern, want, "{what}");
+        let found = findings_of(source);
+        assert_eq!(found.extern_crate, extern_crate, "{what}: extern crate");
+        assert_eq!(found.shadows_std, std, "{what}: std or core");
     }
 }
 
