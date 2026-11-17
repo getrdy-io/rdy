@@ -1,0 +1,2 @@
+kernel/net/bridge/br_netfilter.ko.xz: kernel/net/llc/llc_extra.ko.xz
+kernel/net/llc/llc.ko.xz:
