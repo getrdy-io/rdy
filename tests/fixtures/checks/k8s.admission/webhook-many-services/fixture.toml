@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-webhook-many-services"
+summary = "Ten Fail webhooks on ten Services: only eight are read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
