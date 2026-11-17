@@ -898,18 +898,18 @@ fn the_root_tip_has_the_two_forms_of_c16() {
         "acme-platform",
         ">=4.2",
         "0.1.0",
-        vec![needs_root("host.ports"), needs_root("host.lsm")],
+        vec![needs_root("host.lsm"), needs_root("host.firewall")],
     );
     report.signature.trust_source = Some(TrustSource::System);
     assert_eq!(
         tip_of(&report),
-        "Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for\n     sudo."
+        "Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks\n     for sudo."
     );
     report.signature.trust_source = Some(TrustSource::User);
     report.signature.product = Some("acme-platform".to_owned());
     assert_eq!(
         tip_of(&report),
-        "Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for\n     sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo\n     rdy trust add acme-platform --key <file>"
+        "Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks\n     for sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root:\n     sudo rdy trust add acme-platform --key <file>"
     );
 }
 
@@ -928,9 +928,9 @@ fn one_check_that_needs_root_gives_no_tip() {
 fn the_c16_text_is_in_the_plan() {
     let doc = std::fs::read_to_string(repo().join("docs/plan/07-cli-ux.md")).unwrap_or_default();
     for line in [
-        "Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for",
-        "     sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo",
-        "     rdy trust add acme-platform --key <file>",
+        "Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks",
+        "     for sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root:",
+        "     sudo rdy trust add acme-platform --key <file>",
     ] {
         assert!(doc.contains(line), "07 C.16 lost {line:?}");
     }
