@@ -313,7 +313,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `note: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
@@ -2711,13 +2711,14 @@ checks that did not finish are `TIMEOUT` or `SKIP`, as in the terminal.
 
 "What to do next" by verdict: `ready` "Everything the spec asks for passed."; `ready_with_warnings` "Nothing
 blocks the install. Read the warnings."; `ready_with_warnings` with `nothing_verified` "rdy checked nothing on
-this machine. Every check in the spec is for another OS. Ask the vendor if that is expected."; `not_ready`
-with blocks "Fix the N blocks below, then run rdy again."; `not_ready` with only unrun checks "rdy could not
-check N required items. Follow the fix for each, then run rdy again." Then for all: "To share this result,
-send the .json file from the same folder." and, if `metadata.contact` exists, "Questions: <contact>" as plain
-text, never a link. Legend: "BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it."
-Rule: "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional
-things are wrong. READY if every check ran and passed." The same three sentences are in `rdy run --help`.
+this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that
+is expected, or follow the fix for each skipped check."; `not_ready` with blocks "Fix the N blocks below, then
+run rdy again."; `not_ready` with only unrun checks "rdy could not check N required items. Follow the fix for
+each, then run rdy again." Then for all: "To share this result, send the .json file from the same folder."
+and, if `metadata.contact` exists, "Questions: <contact>" as plain text, never a link. Legend: "BLOCK: fix
+before install. WARN: fix if you can. SKIP: rdy could not check it." Rule: "NOT READY if anything blocks or a
+required check could not run. READY with warnings if only optional things are wrong. READY if every check ran
+and passed." The same three sentences are in `rdy run --help`.
 
 #### Look
 
