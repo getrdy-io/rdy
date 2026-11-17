@@ -1,0 +1,26 @@
+{
+  "entry": {
+    "distro_min": {
+      "rhel": "4.18.0-305"
+    },
+    "id": "host.kernel"
+  },
+  "result": {
+    "expected": {
+      "distro_min": {
+        "rhel": "4.18.0-305"
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Kernel `5.15.0-91-generic` has no minimum in the spec for this OS.",
+    "notes": [],
+    "observed": {
+      "base": "5.15.0",
+      "build": "91",
+      "distro": "ubuntu",
+      "release": "5.15.0-91-generic"
+    },
+    "partial": null
+  }
+}

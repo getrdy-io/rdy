@@ -1,0 +1,17 @@
+rdy 0.1.0
+spec    acme-win-agent >=2.0   (acme-win-agent.yaml)
+sig     verified, key 9F3A6C21D4E87B05, trusted by you, signed 2027-03-02
+host    acme-vm-03.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+
+  SKIP     host.memory  Does not apply here. This check is for windows only.
+  SKIP     host.disk    Does not apply here. This check is for windows only.
+
+0 blocks, 0 warnings, 0 passed, 2 not applicable
+
+Report written to ./rdy-report-acme-win-agent-20270309T112240Z/
+  rdy-report-acme-win-agent-20270309T112240Z.html
+  rdy-report-acme-win-agent-20270309T112240Z.json
+  spec.yaml
+  spec.yaml.minisig
+READY with warnings: nothing was checked

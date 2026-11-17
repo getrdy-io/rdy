@@ -33,6 +33,9 @@ below.
 | PC-46 | 02 "Scheduling, timeouts and hangs", Watchdog, "One writer" bullet | It says that when the watchdog loses the write race it waits for `Done` and then does nothing. M1-043 adds a backstop: once the state is `Done`, a process that is still alive `loser_wait` (5 s) after the watchdog fires is killed and exits with the code stored by `WriteState::finish`. It covers a print to a blocked stdout after the report is written. | Add the backstop to the bullet. The M2 upload prompt after the result (07 section 5) must disarm or re-bound the watchdog first, or it is killed at deadline plus 15 s. | should-fix | M1-043 review |
 | PC-47 | 09-docs-site.md, section 5, "Examples are stored as JSON" bullet | It says the renderer validates each example against its schema. M1-084 does not validate in the render, because `jsonschema` as a normal dependency of `xtask` fails the license policy (MIT-0 through `borrow-or-share`). The test suite validates each example, with rdy-spec's validator, and decodes it with `parse_unverified` (ADR 0034). | Amend the bullet to: "Examples are stored as JSON in the schema. The test suite checks each one against its schema (ADR 0034). The renderer shows each as YAML and reads it back to the same value." Restore the render-time check if the license policy allows the crate. | should fix before M1 | M1-084 review (PR #89), ADR 0034 |
 | PC-49 | 08 Appendix C, Normalisation table | The table lists `producer.version`, `commit` and `target` only. M1-051 `normalize` also scrubs `producer.rdy_spec` (`<rdy_spec>`), which moves with every release of the crate. `normalize_across_jobs` also resets `run.options.jobs` to 1, because the report records the jobs value and the `jobs = 1` against `jobs = 8` comparison varies it. The table's last two rows (certificate serials and digests as `<serial>` and `<sha256>`) are not built. | Add `producer.rdy_spec` to the version row. Add a row for `run.options.jobs`: set to 1, in `normalize_across_jobs` only (the jobs comparison). Mark the serial and digest row as deferred to M1-090, which owns the first golden that holds a generated certificate. | should-fix | M1-051 review (PR #111) |
+| PC-50 | 07 section 4.1 (files that cannot be written after the verdict), 02 "Watchdog" | 07 says that when the files cannot be written, `--json` stdout gets the Report with `complete: false`. M1-176 prints stdout before it claims the write state and writes the files, because a blocked stdout is the one write that can hang for good and the watchdog must still own the report while it does (M1-043 carry). So the document is already on stdout when the files fail. | With `--json`, a failed file write after the verdict leaves the document on stdout as printed and puts the summary and the error on stderr, exit 70. Without `--json`, stdout stays empty. The exit code is the authority: 07 section 4.1 and the `complete` doc in `rdy-spec` say that a printed report can read `complete: true` with exit 70. cli-ux signed off. A script checks the exit code (`set -o pipefail`, or stdout to a file and `$?`), never the document alone; stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` Check the number at merge. | should-fix | M1-176 |
+| PC-51 | 11 backlog, M1-176 exit test ("proved with the real binary") and M1-088 (watchdog clause) | The exit test needs the shipped `rdy` to hang on a check that never yields, and to end within the deadline plus grace. The shipped binary cannot do either: ADR 0011 decision 4 gives it no hook, so it has only the real families (none hangs) and the fixed five minute deadline. | M1-176 proves the spin clause with a test binary that calls `rdy_cli::run` with a one second hook deadline and the real watchdog (`crates/rdy-cli/tests/run_watchdog.rs`, a pipe run and a spin run). The blocked-pipe clause is also proved on the real unsteered binary by `crates/rdy-cli/tests/run_watchdog_binary.rs`, which is `#[ignore]`d because it takes about 5 min 10 s, and is run by hand (no nightly test job exists). M1-088's watchdog clause (blocked stdout pipe, exit 70, `complete: false` in the folder) is the same case: it relies on that test and does not repeat it. Check the number at merge. | should-fix | M1-176 (PR #34 review) |
+| PC-52 | M1-043 carry (macOS SIGCHLD-ignored check), M1-176 | The carry asks for a check that the SIGCHLD-ignored test really ignores SIGCHLD on macOS. M1-176 tried a behavioural probe (a child's `wait` fails with ECHILD when the ignore holds). The macos-x64 CI run on ee62985e failed that probe in `sigchld_ignored` (0.195 s), so macOS does not auto-reap the way the probe assumes, or the ignore does not survive `exec` there. The runner itself works there (the rest of the test passes without the probe). | The probe is Linux only (`/proc` SigIgn plus ECHILD). The macOS carry stays open. Owner: qa-engineer, a follow-up to find out how SIGCHLD-ignored behaves on macOS (does the ignore survive `bash -c 'trap "" CHLD; exec ...'`, and what does a child of an ignoring parent report) and to write a probe that holds there. Check the number at merge. | should-fix | M1-176 (macos-x64 CI) |
 
 ## Decisions made
 
@@ -165,6 +168,18 @@ install.sh path still works. Taken: deferred to an M3 decision (05, 06).
   needed.
 - The free spec draft offer in the launch post is left out until you decide on the paid spec-authoring
   offer (10).
+
+### 8. Two Kubernetes verdicts (correction-43)
+
+No change now. The checks ship as built, and either answer is a small change to one check.
+
+- **k8s.dns, CoreDNS below its desired replicas.** M1-162 (PR #62) blocks when fewer replicas are ready
+  than desired. k8s-expert suggests a block only when none is ready, and a warn when some but not all are
+  ready, since DNS still answers. k8s-expert also suggests a block for a headless DNS Service, which pods
+  cannot use as a nameserver. Taken until you decide: the block, as built.
+- **k8s.ingress, two default classes.** M1-163 (PR #65) gives a note. A warn may fit better: the
+  `DefaultIngressClass` admission plugin, on by default, makes the API server reject an Ingress with no
+  class while two classes are marked default. Taken until you decide: the note, as built.
 
 ## Process notes from the planning pass
 
@@ -379,3 +394,48 @@ the corrections log of `11-backlog.md`.
   INV-11 names the local IPC of exactly two allowlisted commands as a third exception, M1-128 allows exactly
   those destinations (both the `/run` and the `/var/run` paths), and 05 Appendix A T5 accepts unauthenticated
   SNTP.
+- **Correction-38, review follow-ups from PR #34 and PR #35.** The env harness gets a Timeout class for a hang the
+  check survived (M1-179, `core: no`), so host.time_sync needs no `PENDING` row. The watchdog's partial report
+  keeps the action log in M2 (M2-118), and host.time_sync asks its servers at once in M2 (M2-119). M1-130 takes
+  three carries from PR #34. No test-pinned document changed.
+- **Correction-39, what `--no-network` means.** rdy and its children open only `AF_UNIX` sockets.
+  That local IPC still runs: the commands 05 INV-11 names and rdy's own `Probe::unix_get` to a
+  socket a check declares (INV-28). INV-11's exception now covers exactly `chronyc`, `timedatectl`
+  and `firewall-cmd`. Under `--no-network` `chronyc` is not run, because its loopback UDP is an
+  `AF_INET` socket. The facade refuses `tcp`, `udp` and lookups with `RULE_NO_NETWORK` (M1-059).
+  M1-059's strace test flags any family but `AF_UNIX`, and M1-128 limits the `AF_UNIX`
+  destinations.
+- **Correction-40, the unsigned banner may name its flag.** M1-126's exit test banned `--allow-unsigned` from
+  every stderr line, but the unsigned banner's `sig` line names it on purpose: it is the loud warning of
+  product rule 3. The rule now covers fix, hint and error lines (M1-126, 07 rule 8, 01 section 4.7). PR #42 also re-wraps
+  07 C.12 to 07's own wrap rule.
+- **Correction-41, host facts and a reserved product name.** No row filled `report.host.os` from os-release,
+  so the header printed `linux`. New M1-180 (core) does it, and the env goldens and README transcripts depend
+  on it. A product named `rdy` would print `fix from rdy:` like rdy's own lines; M2-120 makes `ProductSlug`
+  refuse it before rdy-spec's first crates.io release. The renderer refuses it in M1 (PR #42).
+- **Correction-42, the printed banner, the HTML size cap and five M2 tickets.** A print banner fixed in the
+  page margin cannot be built and proven in headless Chrome. The full banners stay in the page flow and print
+  once, at the top of page one, and every printed page carries the banner title in its top margin as fixed
+  text that rdy writes. Nothing covers the first lines (07 D.3, 01 section 6, M1-081). Past the 5 MiB cap the
+  action table loses rows first, then Found and Needed lines (07 D.4). M1-141 tests the Found and Needed
+  labels and lines. New M2-121 to M2-123 take the 2026-11-06 follow-ups, and new M2-124 adds the engine
+  progress observer and the full 07 section 3 line. 07 D.5 allows a test-only indicatif draw target. M1-175
+  also builds k8s.dns, and new M2-125 reads the RKE2 and OpenShift Corefiles that M1-162 leaves out.
+- **Correction-43, the 03 sections of k8s.crds and k8s.ingress, and two M2 tickets.** PR #64 (M1-164) and
+  PR #65 (M1-163) change their own 03 sections, and k8s-expert and security-reviewer signed off on both.
+  The 03 text lands with each PR; this entry approves it. k8s.crds reads discovery (`GET /apis` and
+  `GET /apis/<group>/<version>`), not CRD objects, so "installed" means "served": aggregated and built-in
+  groups count, a terminating CRD stays listed, and storage versions and deprecation are not visible. The
+  operator Deployment is a GET by name through an optional Role of one namespace and one name
+  (`examples/rbac/rdy-readonly-operator.yaml`). A missing Deployment warns and says the operator may be a
+  StatefulSet or OLM-managed. A 404 on a version that `/apis` listed blocks. Versions follow a fixed
+  grammar with pre-releases below their release, and a run reads at most 32 discovery documents (ADR 0045).
+  k8s.ingress lists Services only in the target namespace, through an optional Role
+  (`examples/rbac/rdy-readonly-target-namespace.yaml`, ADR 0044). Controllers match exactly. A pending load
+  balancer warns when strictly older than 10 minutes, counted from creation. The retirement warning names
+  the managed and bundled copies. "No default class" warns only when `controller` is set, and is not judged
+  on GKE and OpenShift. A required Gateway API served at `v1` with no accepted class warns. `route` is outside
+  the GKE and OpenShift "not verified" exception. Two default classes are a note. M1-163 and M1-164 must
+  leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
+  verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
+  namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.

@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/containerd",
+    "--version"
+  ],
+  "stdout": "containerd github.com/containerd/containerd/v2 v2.0.1 88aa2f531d6c2922003cc7929e51daf1c14caa0a\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

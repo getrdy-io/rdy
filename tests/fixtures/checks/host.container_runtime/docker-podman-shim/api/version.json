@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/version",
+    "query": ""
+  },
+  "status": 200,
+  "body": {
+    "Platform": {
+      "Name": "linux/amd64/rhel-9.3"
+    },
+    "Components": [
+      {
+        "Name": "Podman Engine",
+        "Version": "4.9.4",
+        "Details": {
+          "APIVersion": "4.9.4",
+          "Arch": "amd64",
+          "Os": "linux"
+        }
+      }
+    ],
+    "Version": "4.9.4",
+    "ApiVersion": "1.43",
+    "MinAPIVersion": "1.12",
+    "Os": "linux",
+    "Arch": "amd64",
+    "KernelVersion": "5.14.0-362.el9.x86_64"
+  },
+  "delay_ms": 0
+}

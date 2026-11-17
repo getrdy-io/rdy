@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-no-default-route"
+summary = "Air-gapped host with a local route only, spec asks for 1400"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

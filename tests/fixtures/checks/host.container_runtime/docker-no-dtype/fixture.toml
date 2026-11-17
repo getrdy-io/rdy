@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-no-dtype"
+summary = "overlay2 on an xfs volume made without ftype, so d_type is false"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

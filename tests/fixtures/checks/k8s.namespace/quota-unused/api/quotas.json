@@ -1,0 +1,34 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/resourcequotas",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ResourceQuotaList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "ResourceQuota",
+        "metadata": {
+          "name": "compute",
+          "namespace": "acme-system"
+        },
+        "spec": {
+          "hard": {
+            "requests.cpu": "8",
+            "requests.memory": "64Gi",
+            "pods": "50",
+            "persistentvolumeclaims": "10",
+            "requests.storage": "500Gi"
+          }
+        }
+      }
+    ]
+  }
+}

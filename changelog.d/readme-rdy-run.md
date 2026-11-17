@@ -1,1 +1,1 @@
-- The README now says `rdy run` works on `main`, lists the seven host checks it runs, and shows the pinned release install path.
+- The README now says `rdy run` works on `main`, lists the host and network checks it runs, shows a real run, and shows the pinned release install path.

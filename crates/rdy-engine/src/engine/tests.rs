@@ -3,12 +3,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rdy_spec::result::{Bucket, ErrorKind, FixSource, Need as WireNeed, SkipKind, Status};
+use rdy_spec::result::{Bucket, ErrorKind, FixSource, Need as WireNeed, Report, SkipKind, Status};
 use rdy_spec::sig::{Policy, TrustStore};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use super::*;
-use crate::check::{CheckMeta, OsSupport, Support};
+use crate::check::{
+    Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Finding, OsSupport, Support,
+};
 use crate::family::{BuildError, Built, Family};
 use crate::privilege::{Elevation, ProcessIds};
 use crate::redact::{Redactor, TagKey};
@@ -307,6 +309,211 @@ async fn the_run_deadline_ends_a_check_that_has_not_started() {
     assert_eq!(boom.status, Status::Skipped);
 }
 
+static NET_CHECK: CheckInfo = CheckInfo {
+    family: "net",
+    ..info("net.egress", &[Need::Network])
+};
+static KUBE_CHECK: CheckInfo = CheckInfo {
+    family: "k8s",
+    ..info("k8s.version", &[Need::KubeContext])
+};
+static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
+static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
+
+/// Counts the checks that ran in both test families, net and k8s.
+static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct Counting(&'static CheckInfo);
+
+impl Check for Counting {
+    fn info(&self) -> &'static CheckInfo {
+        self.0
+    }
+
+    fn run<'a>(&'a self, _: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            NET_RAN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Finding::pass("ran"))
+        })
+    }
+}
+
+struct CountingFamily(&'static str, &'static [&'static CheckInfo]);
+
+impl Family for CountingFamily {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        self.1
+    }
+
+    fn build(&self, entry: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        let info = self
+            .1
+            .iter()
+            .copied()
+            .find(|info| info.id == entry.id.as_str())
+            .ok_or_else(|| BuildError::Unsupported("not a fake".to_owned()))?;
+        Ok(Built::new(Box::new(Counting(info))))
+    }
+}
+
+const NET_SPEC: &str = "\
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme
+checks:
+  - id: net.egress
+    endpoints: [\"registry.acme.example:443\"]
+  - id: k8s.version
+    min: \"1.28\"
+";
+
+async fn run_net(network: bool) -> Executed {
+    let mut registry = Registry::new();
+    registry
+        .register(CountingFamily("net", &NET_CHECKS))
+        .expect("registers");
+    registry
+        .register(CountingFamily("k8s", &KUBE_CHECKS))
+        .expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(NET_SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = network;
+    engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await
+}
+
+#[tokio::test]
+async fn no_network_skips_network_and_kubernetes_checks_as_missing_need_with_no_connect() {
+    let done = run_net(false).await;
+    assert_eq!(done.results.len(), 2);
+    for result in &done.results {
+        assert_eq!(result.status, Status::Skipped, "{}", result.key);
+        assert_eq!(
+            result.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "{}",
+            result.key
+        );
+    }
+    // A skipped check never ran its body (the counter is shared with a test that runs in parallel, so
+    // the status is the proof here), so nothing was asked of the probe.
+    let net = done
+        .capabilities
+        .iter()
+        .find(|c| c.need == WireNeed::Network)
+        .expect("the network need was probed");
+    assert!(!net.available);
+    assert!(
+        done.log
+            .actions
+            .iter()
+            .all(|a| a.kind != rdy_spec::result::ActionKind::Connect
+                || a.outcome == rdy_spec::result::ActionOutcome::Denied),
+        "{:?}",
+        done.log.actions
+    );
+}
+
+/// Declares a network peer and no network need, then dials. Only the facade stops it.
+static DIALS: CheckInfo = CheckInfo {
+    family: "net",
+    peers: &[crate::check::PeerClass::SpecHosts],
+    ..info("net.egress", &[])
+};
+static DIAL_CHECKS: [&CheckInfo; 1] = [&DIALS];
+
+struct Dials;
+
+impl Check for Dials {
+    fn info(&self) -> &'static CheckInfo {
+        &DIALS
+    }
+
+    fn run<'a>(&'a self, ctx: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            ctx.probe().lookup("registry.acme.example").await?;
+            Ok(Finding::pass("dialed"))
+        })
+    }
+}
+
+struct DialFamily;
+
+impl Family for DialFamily {
+    fn name(&self) -> &'static str {
+        "net"
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        &DIAL_CHECKS
+    }
+
+    fn build(&self, _: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        Ok(Built::new(Box::new(Dials)))
+    }
+}
+
+#[tokio::test]
+async fn a_check_that_dials_under_no_network_ends_as_missing_need_not_an_error() {
+    let mut registry = Registry::new();
+    registry.register(DialFamily).expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"registry.acme.example:443\"]\n",
+    );
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = false;
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    let result = find(&done, "net.egress");
+    assert_eq!(result.status, Status::Skipped, "{}", result.message);
+    assert_eq!(result.skip_kind, Some(SkipKind::MissingNeed));
+    assert_eq!(
+        result.fix.as_deref(),
+        Some("Run again without --no-network.")
+    );
+    // The refusal is in the log as a denied call, and nothing connected.
+    let lookups: Vec<_> = done
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.kind == rdy_spec::result::ActionKind::Lookup)
+        .collect();
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].outcome, rdy_spec::result::ActionOutcome::Denied);
+}
+
+#[tokio::test]
+async fn with_network_allowed_the_network_check_runs() {
+    let before = NET_RAN.load(std::sync::atomic::Ordering::SeqCst);
+    let done = run_net(true).await;
+    let net = done
+        .results
+        .iter()
+        .find(|r| r.key == "net.egress")
+        .expect("a result");
+    assert_eq!(net.status, Status::Pass);
+    assert!(NET_RAN.load(std::sync::atomic::Ordering::SeqCst) > before);
+}
+
 #[tokio::test]
 async fn no_network_leaves_the_network_need_unmet() {
     // The need is in no check of this family, so ask the probe directly through `capabilities`.
@@ -377,4 +584,113 @@ fn a_refused_declared_secret_is_reported_and_counted() {
         1,
         "the refusal is counted"
     );
+}
+
+fn watch_base() -> Report {
+    use rdy_spec::result::{
+        Host, HostOs, HostOsFamily, Identity, Producer, Run, RunOptions as WireOptions, Signature,
+        SpecRef,
+    };
+    Report::new(
+        Producer::new("0.1.0", "0.1.0", "x86_64-unknown-linux-musl"),
+        Run::new(
+            "00000000-0000-4000-8000-000000000000",
+            "2027-02-08T10:00:00.000Z",
+            "2027-02-08T10:05:00.000Z",
+            300_000,
+            WireOptions::new(8, 300_000),
+        ),
+        SpecRef::new("acme", "0".repeat(64), "spec.yaml", 10),
+        Signature::unsigned(),
+        Host::new("build-01", HostOs::new(HostOsFamily::Linux), "x86_64"),
+        Identity::new(Some(1000), None, false),
+        Vec::new(),
+    )
+}
+
+/// Runs `text` with a watchdog board made before the run, as `rdy run` does. Returns the board and the
+/// final results.
+async fn run_with_board(text: &str, spec_arg: &str) -> (Arc<Board>, Executed) {
+    let engine = engine(Replay::new());
+    let spec = loaded(text);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.spec_arg = spec_arg.to_owned();
+    let board = engine.board(&spec, &plan, watch_base(), options.deadline, spec_arg);
+    options.board = Some(Arc::clone(&board));
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    (board, done)
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_watchdog_board_gets_a_slot_per_entry_and_holds_what_the_final_results_hold() {
+    let (board, done) = run_with_board(SPEC, "'my specs/a.yaml'").await;
+    // The scheduler runs six checks; the board has all seven slots, the plan's skip included, and each
+    // result sits where its entry is.
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert!(!report.complete);
+    assert_eq!(report.checks, done.results);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_skipped_entry_before_a_ran_check_keeps_its_own_slot() {
+    // `net.egress` first: the scheduler's index 0 is the second spec entry, and must land in slot 1.
+    let text = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"registry.acme.example:443\"]\n  - id: host.memory\n    min: 1Gi\n";
+    let (board, done) = run_with_board(text, "<spec>").await;
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    let keys: Vec<&str> = report.checks.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys, ["net.egress", "host.memory"]);
+    assert_eq!(report.checks[0].status, Status::Skipped);
+    assert_eq!(report.checks[1].status, Status::Block);
+    assert_eq!(report.checks, done.results);
+}
+
+#[test]
+fn a_board_made_before_the_run_shows_skips_done_and_the_rest_as_run_deadline() {
+    // Nothing has run: a hang before the first check. The plan's skip is its own result, and the
+    // entries that would have run are `run_deadline` skips, so a report from this moment is honest.
+    let engine = engine(Replay::new());
+    let spec = loaded(SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let board = engine.board(
+        &spec,
+        &plan,
+        watch_base(),
+        Duration::from_secs(300),
+        "<spec>",
+    );
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert!(!report.complete);
+    assert_eq!(report.checks.len(), 7);
+    let net = report.checks.last().expect("a last entry");
+    assert_eq!(net.skip_kind, Some(SkipKind::NotInBuild));
+    assert!(
+        report.checks[..6]
+            .iter()
+            .all(|r| r.skip_kind == Some(SkipKind::RunDeadline))
+    );
+}
+
+#[test]
+fn a_host_set_later_replaces_the_stand_in_in_the_partial_report() {
+    use rdy_spec::result::{Host, HostOs, HostOsFamily};
+    let engine = engine(Replay::new());
+    let spec = loaded(SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let board = engine.board(
+        &spec,
+        &plan,
+        watch_base(),
+        Duration::from_secs(300),
+        "<spec>",
+    );
+    assert!(board.set_host(Host::new(
+        "real-host",
+        HostOs::new(HostOsFamily::Linux),
+        "x86_64"
+    )));
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert_eq!(report.host.hostname, "real-host");
 }

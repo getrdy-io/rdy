@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-limit-ok"
+summary = "A container max of 64Gi and a default limit of 32Gi"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

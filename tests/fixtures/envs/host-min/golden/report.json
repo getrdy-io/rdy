@@ -2,14 +2,43 @@
   "actions": [
     {
       "at_ms": 0,
-      "bytes": 192,
+      "bytes": 135,
       "check": null,
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/etc/os-release",
+      "path": "/proc/self/status",
       "seq": 1,
       "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 48,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/auxv",
+      "seq": 2,
+      "truncated": false
+    },
+    {
+      "api": "hostname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 3
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 4
     },
     {
       "at_ms": 0,
@@ -19,7 +48,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/meminfo",
-      "seq": 2,
+      "seq": 5,
       "truncated": false
     },
     {
@@ -30,7 +59,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/proc/self/cgroup",
-      "seq": 3
+      "seq": 6
     }
   ],
   "actions_dropped": {},
@@ -83,12 +112,12 @@
     "container": false,
     "host_id": null,
     "hostname": "host-min.example",
-    "kernel": null,
+    "kernel": "5.14.0-362.el9.x86_64",
     "os": {
       "family": "linux",
-      "id": "rhel",
-      "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
-      "version": "9.2"
+      "id": null,
+      "pretty_name": null,
+      "version": null
     }
   },
   "identity": {

@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 
 use crate::family::OS;
 
-mod release;
+pub(crate) mod release;
 mod rules;
 
 #[cfg(test)]

@@ -2,12 +2,13 @@
 
 use rdy_engine::check::CheckInfo;
 
-use crate::{access, admission, rbac, storageclass, version};
+use crate::{access, admission, namespace, rbac, storageclass, version};
 
 /// Every `k8s.*` check this crate has built, in catalog order.
-static INFOS: [&CheckInfo; 5] = [
+static INFOS: [&CheckInfo; 6] = [
     &access::INFO,
     &admission::INFO,
+    &namespace::INFO,
     &rbac::INFO,
     &storageclass::INFO,
     &version::INFO,
@@ -27,4 +28,24 @@ static INFOS: [&CheckInfo; 5] = [
 )]
 pub(crate) fn infos() -> &'static [&'static CheckInfo] {
     &INFOS
+}
+
+#[cfg(test)]
+mod tests {
+    /// A check that reaches the Kubernetes API must name `kube_context` or `network`, so `--no-network`
+    /// skips it at the need gate. A check that handles the facade refusal itself is listed here.
+    const HANDLES_REFUSAL: &[&str] = &[];
+
+    #[test]
+    fn every_check_that_reaches_the_api_gates_on_the_network() {
+        for info in super::infos() {
+            assert!(
+                !info.reaches_network()
+                    || info.gates_on_network()
+                    || HANDLES_REFUSAL.contains(&info.id),
+                "{} reaches the network and does not declare a network or kube_context need",
+                info.id
+            );
+        }
+    }
 }

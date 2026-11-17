@@ -81,7 +81,9 @@ fn direct_only() -> &'static CheckInfo {
 }
 
 fn hub_over(backend: impl Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 fn target(text: &str) -> Target {

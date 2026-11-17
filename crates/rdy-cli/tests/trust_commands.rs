@@ -287,8 +287,16 @@ fn other_commands_with_key_leave_the_store_unchanged() {
         &fixture("minisign-c/acme-platform.yaml.minisig"),
     );
     for args in [
-        vec!["run", &spec, "--key", &b],
-        vec!["run", &spec, "--key", &b, "--allow-unsigned"],
+        // Offline: the fixture spec lists net.egress, which must look nothing up (M1-095).
+        vec!["run", &spec, "--key", &b, "--no-network"],
+        vec![
+            "run",
+            &spec,
+            "--key",
+            &b,
+            "--allow-unsigned",
+            "--no-network",
+        ],
         vec!["verify", &spec, "--key", &b],
     ] {
         let out = home.run(&args);

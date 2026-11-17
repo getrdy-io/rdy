@@ -29,7 +29,9 @@ Founder decision of 2026-10-28: M1 is extended, not cut. Every M1 ticket stays. 
 6. **clap's own errors exit 64, not 2.** In rdy, 2 means NOT READY.
 7. **No colour-only meaning, no Unicode except the spinner.** Every status is a word. Static text is ASCII.
 8. **No hint, fix or suggestion names `--allow-unsigned` or `run --key`** (01 section 4.7), including the
-   did-you-mean for a mistyped flag. Secrets never go on argv.
+   did-you-mean for a mistyped flag. The rule covers hint, fix and error lines. The banner and the `sig`
+   header line may name the flag that allowed the run (`UNSIGNED (allowed by --allow-unsigned)`), because
+   that is the loud warning of product rule 3. Secrets never go on argv.
 9. **The watchdog never touches stdout.** If a run hangs, `--json` stdout may be empty. The partial Report is
    in the report folder (5.2).
 10. **The HTML report** puts the banner, the verdict and the blocks first, reads in DOM order, prints with
@@ -78,7 +80,7 @@ On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 | `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction or on a network share). Windows keeps the ACL the folder inherits, and `--out-dir C:\` lets other local users read the report, so keep the default |
 | `--no-report` | M1 | Write no files |
 | `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs |
-| `--no-network` | M1 | Open no sockets. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
+| `--no-network` | M1 | Open no network sockets: rdy and its children open only `AF_UNIX` sockets. That local IPC still runs: the commands 05 INV-11 names (`timedatectl` and `firewall-cmd` to the system bus) and the sockets a check declares (INV-28, such as the Docker or containerd socket). `chronyc` is not run. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
 | `--jobs <n>` | M1 | Checks at once. Default 8. Above 32 is capped with a note. 0 is a usage error |
 | `--timeout <time>` | M2 | See below |
 | `--dry-run` | M2 | Print what each check would read, contact and need. Runs nothing. One ticket with SEC-40 |
@@ -131,12 +133,14 @@ files indented under it (not with `--no-report`); (8) the banner's first line ag
 | --- | --- |
 | `spec` | `<product> <version>   (<file as typed>)`, with `, revision N` when the spec has a `serial` |
 | `sig` | `verified, key <id>, <trust>, signed <date>` with `<trust>` one of `trusted by you`, `trusted on this machine`, `key given with --key, not pinned`; or `UNSIGNED (allowed by --allow-unsigned)` |
-| `host`, `user`, `proxy` | `<hostname>   <os> <version>   <arch>`; `<login> (root)` or `(not root)`; the proxy in effect with user info stripped, left out when none |
+| `host`, `user`, `proxy` | `<hostname>   <os> <version>   <arch>`, where `<os> <version>` are `os.id` and `os.version` of the report (M1-180), and the OS family alone (`linux`) when they are null; `<login> (root)` or `(not root)`; the proxy in effect with user info stripped, left out when none |
 | `cluster` | `<context>, <server>, user <kubeconfig user>`, plus `, credential plugin: <name>` and `, TLS verification is OFF` when they apply. The user is the entry name in the kubeconfig. The identity the API server sees comes later (ADR 0031). Printed before the first request, so the user sees which cluster rdy is about to touch. `no kubeconfig found` when none, with the hint `Pass --kubeconfig <file> or set KUBECONFIG.` (on Linux it adds where k3s, RKE2 and kubeadm keep a root-only kubeconfig: copy it to `~/.kube/config` and `chmod 600` it; the JSON sample in appendix C shows the short form). `ignored: --no-network is set` with `--no-network`, plus `(--kube-context <name> was given)` when a kube flag was passed. Left out when the spec has no Kubernetes checks |
 | `limits` (M2) | `20 s per check (set by --timeout)`. Left out without `--timeout` |
 
-**The root Tip.** Shown when two or more checks were skipped with `missing_need: root`: `Tip: 2 checks need root:
-host.ports, host.lsm. Run rdy as root to include them. rdy never asks for sudo.` As root, rdy reads only
+**The root Tip.** Shown when two or more checks were skipped with `missing_need: root`, or ran as `partial`
+with `root` in `partial.missing` from a want that is not `evidence_only` (02 "Needs"). No M1 check has a hard
+root need, so in M1 only the second case fires it, for example a run without root: `Tip: 2 checks need root:
+host.lsm, host.firewall. Run rdy as root to include them. rdy never asks for sudo.` As root, rdy reads only
 `/etc/rdy/trust.yaml` (ADR 0002 decision 4). So when `trust_source` is `user`, the Tip adds `As root, rdy reads
 only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo rdy trust add acme-platform --key <file>`;
 without it, following the Tip lands in `spec_key_unknown`. Both forms are goldens (C.16).
@@ -158,6 +162,9 @@ a bucket. Read the bucket from the result; never recompute it. One entry per che
   signature is verified and the key is pinned (`trust_source` is `system` or `user`); otherwise it is `the
   spec file (not verified)`, because an unsigned or one-run-key spec can carry any text under any name (01
   section 2.6). The terminal shows the vendor's fix only; the HTML adds rdy's text below it.
+- A status this version does not know prints as `UNKNOWN` (it counts as not run). The key column is
+  at most 40 cells wide: a longer key is printed whole and its message follows it, and the lines under
+  it hang at the column of the 40 cell case.
 - Lines wrap at word boundaries with a hanging indent under the message. Width is the terminal width, or
   `COLUMNS`, or 100, clamped to 60 to 100. `error:` and `fix:` lines in errors never wrap.
 
@@ -290,6 +297,10 @@ The text after the colon lists the checks running now, cut to the width with `..
 before the check list prints and leaves no trace in scrollback. The spinner is Braille when Unicode is allowed
 (Appendix D.1) and `- \ | /` otherwise. The rules for the code are in the ticket.
 
+M1 draws less than this. M1-142 shows the count and the elapsed time only, as `Running 8 checks, 4 s`,
+because the engine has no progress observer the CLI can use. The `Probing:` phase, the `3 of 8` count, the
+running names with the `...` cut and the dim elapsed time come with M2-124.
+
 ## 4. `--json` and the stable-output promise
 
 ### 4.1 What goes where
@@ -302,7 +313,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report with `complete: false`. The error text is on stderr. There is no `.json` file |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
@@ -434,6 +445,10 @@ $ wc -c < result.json
 Stdout can be empty, as here, or cut short. It is never promised to be a document. With `--no-report`, or
 before the folder exists, there is no partial report at all. A script that sees exit 70 and an empty file
 reads the newest `rdy-report-*` folder, or just runs again.
+
+A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
+host was not read before the run stopped, not that the machine is called that (the report has the arch of the
+build and nothing else of the host). The report also has no `capabilities` and no action log.
 
 ## 6. Colour, symbols and Windows
 
@@ -2331,14 +2346,14 @@ host    acme-vm-03.corp.example   rhel 9.4   x86_64
 user    jdoe (not root)
 
   SKIP     host.cpu     Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
   SKIP     host.memory  Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
   SKIP     host.disk    Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
 
 0 blocks, 0 warnings, 0 passed, 3 required checks not run
 
@@ -2436,14 +2451,14 @@ Two forms, both excerpts of the line under the check list. The first is for a ke
 with no pinned key. The second is for a key pinned as a normal user (`trust_source: user`).
 
 ```text
-Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for
-     sudo.
+Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks
+     for sudo.
 ```
 
 ```text
-Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for
-     sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo
-     rdy trust add acme-platform --key <file>
+Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks
+     for sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root:
+     sudo rdy trust add acme-platform --key <file>
 ```
 
 ### C.17 Sample: READY (2.5)
@@ -2575,9 +2590,9 @@ needs JavaScript. `@media print` sets `color-scheme: light`, black text on white
 the screen theme, so a dark-mode browser cannot print light text on white; the border styles stay; every
 section is expanded (no `<details>` anywhere); `break-inside: avoid` on each check. Page breaks come only
 before Passed, the capabilities section and the action log, so the verdict, blocks and required checks not
-run share page one (01 section 6). The banner is `position: fixed` in the page margin so it prints on every
-page, and the body gets a print `padding-top` equal to the banner height so the banner never covers the first
-lines. The footer link prints its URL as text.
+run share page one (01 section 6). In print the full banners stay in the page flow and print once, at the top
+of page one. When a banner is shown, every printed page also carries its title in the top page margin, as
+fixed text that rdy writes. Nothing covers the first lines of a page. The footer link prints its URL as text.
 
 ### D.4 Accessibility, size, embedded JSON, link and tests
 
@@ -2589,8 +2604,10 @@ motion. The "Jump to" links are in-page `href="#<id>"` links.
 
 The embedded `<script type="application/json" id="rdy-result" data-sha256="<hex>">` holds the exact bytes of
 the `.json` file with the `\u003c`, `\u003e`, `\u0026` escapes (ADR 0003). Typical size under 300 KiB; hard
-cap 5 MiB: past it the action table is cut to the rows that fit and ends with "N more entries are in the
-embedded JSON"; checks are never cut.
+cap 5 MiB. Checks are never cut. Past the cap the action table loses rows first and ends with "N more entries
+are in the embedded JSON". Then Found and Needed lines go, and each check that lost lines ends with "N more
+lines are in the embedded JSON." Found and Needed come from the report the JSON writer emits, and the page
+still meets the 5 MiB cap.
 
 The footer holds two links, both visible as text: `https://getrdy.io/?ref=report&product=<product>`, with
 `rel="noopener noreferrer"` so no referrer is sent, and the source repository. The only parameters on the first
@@ -2620,7 +2637,7 @@ checked by `cargo deny`.
 
 | Crate | Purpose | Notes |
 | --- | --- | --- |
-| `indicatif` | The live progress line (section 3) | Pulls `console`. Both MIT. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()` |
+| `indicatif` | The live progress line (section 3) | Pulls `console`. Both MIT. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()`. A test-only draw target (`term_like_with_hz`) is allowed behind `cfg(test)` or a test hook, never in a release path |
 | `anstream` | Colour stripping and Windows console handling (section 6) | MIT or Apache-2.0. Replaces `atty`, which is banned; TTY checks use `std::io::IsTerminal` |
 | `unicode-width` | Pad columns by display width (section 6) | MIT or Apache-2.0 |
 
@@ -2813,6 +2830,10 @@ could not verify or write.
   `Command::get_matches` and `Error::exit` are banned by clippy `disallowed-methods`" and the test.
 - docs/plan/01-spec-format.md section 5.3 ticket "Summary line grammar and nothing-verified last line": its
   samples are the ones in 2.4. Fix: the exit test also covers the `(1 timed out)` and `(1 failed)` suffixes.
+- This file, C.12 (found by M1-086): the three `fix from rdy:` lines were wrapped one word early, as if they
+  stood at column 29 as in 2.7, but C.12 has an 11 character key column and the message column is 24. By the
+  rule of 2.2 (wrap before the word that would pass the width) `how` stays on the first line. Fixed in
+  place: the golden `tests/fixtures/terminal/not-ready-nothing-ran.txt` and the renderer follow the rule.
 
 ## Decisions needing an ADR
 
@@ -2871,7 +2892,7 @@ M1 total 44.5 hours in 26 tickets, on top of the other slices. Core total 33.5 h
 - [M1] Refuse --password on argv and read key passwords from env or file | owner: rust-engineer | est: 1h | depends on: clap command tree in rdy-cli exposed as library rdy_cli | exit test: `--password` exits 64 with the reason of 10, and `RDY_KEY_PASSWORD` and `--password-file -` sign a spec in CI without a prompt. | core: yes
 - [M1] `--no-network` and `--jobs` flags | owner: rust-engineer | est: 1.5h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: `--no-network` skips network and Kubernetes checks as `missing_need` with `run.options.network` false, `strace -f -e trace=socket` shows zero `socket(2)` calls and the action log has no `connect` entries, `--no-network --kube-context x` prints the `cluster` line of 2.1 and exits by verdict, `--jobs 500` prints a cap note, and `--jobs 0` exits 64. | core: yes
 - [M1] Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | owner: cli-ux | est: 1.5h | depends on: askama HTML report with inline CSS, dark mode and print | exit test: a script reads the CSS variables and fails any text or border pair under 4.5:1 in light, dark, dark-preferred print and light print (D.2), and the golden HTML for B.1 to B.3 matches. | core: yes
-- [M1] Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | owner: cli-ux | est: 2h | depends on: HTML print override, labels and legend; Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | exit test: `_bytes`, `_ms` and `_percent` values print as sizes, milliseconds and percents, the footer link has only `ref=report` and the product with `rel="noopener noreferrer"`, and print has a top padding equal to the banner height. | core: yes
+- [M1] Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | owner: cli-ux | est: 2h | depends on: HTML print override, labels and legend; Extends "askama HTML report with inline CSS, dark mode and print": colour tokens and the contrast script | exit test: `_bytes`, `_ms` and `_percent` values print as sizes, milliseconds and percents, the footer link has only `ref=report` and the product with `rel="noopener noreferrer"`, and print keeps the banners in the flow, covers nothing, and repeats the banner title in the top margin of every page. | core: yes
 - [M1] HTML next-step sentences and the nothing-verified wording | owner: cli-ux | est: 1h | depends on: Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | exit test: golden HTML carries the sentences of D.7 by verdict, including the `nothing_verified` sentence for C.13. | core: no
 - [M1] HTML structure test: headings, landmarks, tables and links | owner: cli-ux | est: 1.5h | depends on: Extends "HTML print override, labels and legend": Found and Needed rendering and the footer link | exit test: a Rust test over the three goldens asserts heading levels never skip, `lang` is set, every `h3` has a status word, tables have `th scope`, ids are unique, every `href="#id"` has a target in the document, and no other `href` or `src` is anything but `data:`, the footer link or the repo link. | core: yes
 - [M1] HTML untrusted strings in bdi with bidi controls shown as escapes | owner: cli-ux | est: 1h | depends on: HTML structure test: headings, landmarks, tables and links | exit test: a hostname holding U+202E and a vendor `fix` holding U+2066 render inside `<bdi>` as `\u{202e}` and `\u{2066}`, and the structure test asserts it. | core: no

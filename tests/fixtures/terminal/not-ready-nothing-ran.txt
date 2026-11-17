@@ -1,0 +1,24 @@
+rdy 0.1.0-alpha.2
+spec    acme-edge >=1.0   (acme-edge.yaml)
+sig     verified, key 9F3A6C21D4E87B05, trusted by you, signed 2026-12-02
+host    acme-vm-03.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+
+  SKIP     host.cpu     Not run. This version of rdy has no host checks yet. (required)
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
+  SKIP     host.memory  Not run. This version of rdy has no host checks yet. (required)
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
+  SKIP     host.disk    Not run. This version of rdy has no host checks yet. (required)
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
+
+0 blocks, 0 warnings, 0 passed, 3 required checks not run
+
+Report written to ./rdy-report-acme-edge-20261207T191244Z/
+  rdy-report-acme-edge-20261207T191244Z.html
+  rdy-report-acme-edge-20261207T191244Z.json
+  spec.yaml
+  spec.yaml.minisig
+NOT READY: 3 required checks were not run

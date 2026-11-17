@@ -7,7 +7,7 @@ requirements, before the install. It tells you what is wrong and how to fix it. 
 binary with no runtime, and it works offline.
 
 > **Pre-release.** rdy is under active development. `rdy run`, the command that does the main job, works
-> on `main` today, with seven host checks. There is no tagged release yet, so the install command below
+> on `main` today, with thirteen host checks and two network checks. There is no tagged release yet, so the install command below
 > is the shape it will have, and for now you build from source. See [Status](#status) for what works
 > and what is coming.
 
@@ -58,25 +58,52 @@ so it needs `--allow-unsigned`. A spec from your vendor does not:
 
 ```console
 $ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
-warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.
-0 blocks, 0 warnings, 3 passed, 1 required check not run, 1 not applicable
-NOT READY: 1 required check was not run
+WARNING: UNSIGNED SPEC
+examples/specs/acme-quickstart.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+(three more lines of warning left out here)
+
+rdy 0.1.0-alpha.0
+spec    acme-quickstart >=1.0   (examples/specs/acme-quickstart.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    vm   linux   x86_64
+user    uid 0 (root)
+
+  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443 (dns),
+                             license.acme.example:443 (dns)
+                             fix from the spec file (not verified): Ask your network team to allow
+                             these endpoints through the proxy.
+  WARN     host.disk/root    `/` has 22.9 GiB free on `/` (ext4). 24 GiB is recommended and 20 GiB
+                             is the least.
+                             fix from the spec file (not verified): Free space on / or mount a
+                             larger volume.
+  PASS     host.cpu          4 vCPUs found, 4 needed
+  PASS     host.memory       13.4 GiB found, 8 GiB needed
+  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+
+1 block, 1 warning, 2 passed, 1 not applicable
+
+WARNING: UNSIGNED SPEC
+NOT READY
 $ echo $?
 2
 ```
 
-Read it like this. Three checks passed (CPU, memory, disk). The spec also asks for `net.egress`, which
-this build does not have yet, so rdy says it did not run it. A required check that did not run is never
-a pass, so the verdict is `NOT READY`. The unsigned warning appears because the example is unsigned.
-Real specs are signed, and then you drop `--allow-unsigned`.
+This is a real run from a build of `main`, on a Linux VM. Two things were cut for width: the long
+warning text, and a note on the memory line about the cgroup the shell runs in. Your numbers will differ.
+
+Read it like this. Problems come first, each with its fix under it. The `registry.acme.example` name is
+made up and does not resolve, so `net.egress` blocks, and the verdict is `NOT READY`. The example is
+unsigned, so you get the warning. Real specs are signed, and then you drop `--allow-unsigned`. To see
+what a run looks like with no network, add `--no-network`. Then `net.egress` is reported as not run, and
+a required check that did not run is never a pass: the verdict stays `NOT READY`.
 
 `READY` exits 0, `READY with warnings` exits 1, `NOT READY` exits 2. Exit 64 means the input must
 change (a bad flag, a spec with no valid signature). Exit 70 means rdy itself failed. Without
 `--no-report`, rdy also writes a new report folder with the JSON report and a copy of the spec. With
 `--json`, stdout carries only the JSON result, the same bytes as the file.
 
-On `main` today the terminal shows the summary and the verdict. The per-check list and the HTML report
-are not wired into `rdy run` yet. The per-check results are in the JSON.
+On `main` today the terminal shows the per-check list, the summary and the verdict. The report folder
+holds the JSON report and a copy of the spec. The HTML report is not written by `rdy run` yet.
 
 ## Why it is safe to run
 
@@ -98,7 +125,8 @@ not in the code yet.
   `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
   lists, your proxy, your DNS servers and the Kubernetes API server you chose. Redirects are recorded,
-  never followed (the egress policy is built, the checks that use it are coming). A vendor portal is
+  never followed (the egress policy is built, and `net.egress` and `net.mtu` use it; `--no-network` turns
+  every network check off). A vendor portal is
   planned, and it is optional.
 - **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
 - **No telemetry.**
@@ -122,11 +150,11 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 
 | Family | Checks | Status |
 | --- | --- | --- |
-| Host | CPU, memory, disk, OS, SELinux and AppArmor, firewall, security agents | Runs in `rdy run` on Linux |
-| Host | ports | Coming before 0.1.0 |
-| Host | kernel, cgroups, time sync, sysctl, container runtime | Planned after 0.1.0 |
+| Host | CPU, memory, disk, OS, kernel, cgroups, time sync, ports, SELinux and AppArmor, firewall, security agents, sysctl, container runtime | Runs in `rdy run` on Linux |
+| Network | egress (lookup, connect, TLS) | Runs in `rdy run`. Direct only: no HTTP request and no proxy yet |
+| Network | MTU | Runs in `rdy run` |
 | Network | egress through a proxy, proxy settings, TLS interception | Coming before 0.1.0. The probe layer under them is built |
-| Network | DNS, registry, MTU, bandwidth | Planned after 0.1.0 |
+| Network | DNS, registry, bandwidth | Planned after 0.1.0 |
 | Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission | Built and tested on fixtures. Not registered in `rdy run` yet |
 | Kubernetes | nodes | Coming before 0.1.0 |
 | Kubernetes | admission webhooks, namespace, DNS, ingress, CRDs, CNI | Planned after 0.1.0 |
@@ -135,8 +163,8 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 | GPU | driver, CUDA, VRAM, device plugin | Planned (M4) |
 
 A spec may name a check this build does not have. rdy counts it as not run and never reports it as a
-pass. On `main` that includes every `net.*` and `k8s.*` check, and the host checks marked coming or
-planned above.
+pass. On `main` that includes every `k8s.*` check, the `net.*` checks other than `net.egress` and
+`net.mtu`, and every `gpu.*` and `aws.*` check.
 
 ## Write your own spec
 
@@ -167,10 +195,11 @@ rdy spec lint examples/specs/acme-quickstart.yaml
 ```
 
 That lint run is real. It prints `examples/specs/acme-quickstart.yaml: 0 errors, 0 warnings` and exits 0.
-Now run a spec:
+Now run a spec. `--no-network` opens no connections, and `--jobs N` sets how many checks run at once:
 
 ```sh
 rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
+rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-network --jobs 2
 ```
 
 The example specs are unsigned, so rdy prints a warning. `rdy run examples/specs/acme-platform.yaml
@@ -184,11 +213,15 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
 
 **Works on `main` today**
 
-- `rdy run <spec>`: it verifies the spec, runs the checks that exist, skips the rest as not run, writes
-  the JSON report and exits 0, 1 or 2 by the verdict. `--json` puts the report on stdout.
-- Seven host checks, on Linux, registered in `rdy run`: `host.cpu`, `host.memory`, `host.disk`,
-  `host.os`, `host.lsm` (SELinux and AppArmor), `host.firewall` and `host.security_agents`. On macOS
-  and Windows they report not run.
+- `rdy run <spec>`: it verifies the spec, runs the checks that exist, prints each result with its fix,
+  skips the rest as not run, writes the JSON report and exits 0, 1 or 2 by the verdict. `--json` puts
+  the report on stdout. `--no-network` and `--jobs` are there too.
+- Thirteen host checks, on Linux, registered in `rdy run`: `host.cpu`, `host.memory`, `host.disk`,
+  `host.os`, `host.kernel`, `host.cgroups`, `host.time_sync`, `host.ports`, `host.lsm` (SELinux and
+  AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
+  macOS and Windows they report not run.
+- Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
+  and ALPN, direct) and `net.mtu`. `--no-network` skips them and says so.
 - The spec format, the schema and a spec linter (`rdy spec lint`).
 - Signing: key generation, `rdy spec sign` and `rdy trust add|list|remove`. `rdy run` checks the
   signature and refuses a bad one.
@@ -201,8 +234,8 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
 **Next**
 
 - Registering the Kubernetes checks in `rdy run`.
-- The human terminal list of results and the HTML report from `rdy run`.
-- Host ports, the egress, proxy and TLS interception checks, and Kubernetes nodes.
+- The HTML report from `rdy run`.
+- The egress HTTP request and proxy path, the proxy and TLS interception checks, and Kubernetes nodes.
 
 **Before 0.1.0**
 
