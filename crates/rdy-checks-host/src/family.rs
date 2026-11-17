@@ -16,6 +16,7 @@ use crate::container_runtime::{self, ContainerRuntimeCheck};
 use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::kernel::{self, Kernel};
 use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
@@ -87,17 +88,6 @@ static TIME_SYNC: CheckInfo = info(
     &[],
 );
 
-static KERNEL: CheckInfo = info(
-    "host.kernel",
-    "Kernel version and modules",
-    CheckMeta {
-        title: "Kernel",
-        remediation: "Use a kernel at or above the minimum. Load a missing module now and at boot with `modprobe br_netfilter && echo br_netfilter | sudo tee /etc/modules-load.d/vendor.conf`, using the module from the result.",
-    },
-    2,
-    &[],
-);
-
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &disk::INFO,
@@ -112,14 +102,14 @@ static CHECKS: [&CheckInfo; 13] = [
     &container_runtime::INFO,
     &cgroups::INFO,
     &os::INFO,
-    &KERNEL,
+    &kernel::INFO,
 ];
 
 /// The `host` family: `host.disk`, `host.memory`, `host.ports`, `host.lsm`, `host.security_agents`,
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.cgroups` ([`CgroupsCheck`]), `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
+/// `host.cgroups` ([`CgroupsCheck`]), `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.kernel` ([`Kernel`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.ports` ([`Ports`]), `host.security_agents` ([`SecurityAgents`]) and
 /// `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
@@ -142,7 +132,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 2] = ["host.time_sync", "host.kernel"];
+static STUBS: [&str; 1] = ["host.time_sync"];
 
 impl Family for HostFamily {
     fn name(&self) -> &'static str {
@@ -182,6 +172,9 @@ impl Family for HostFamily {
         }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
+        }
+        if let CheckParams::HostKernel(kernel) = &params {
+            return Ok(Built::new(Box::new(Kernel::from_params(kernel))));
         }
         if let CheckParams::HostLsm(lsm) = &params {
             return Ok(Built::new(Box::new(Lsm::new(lsm))));
