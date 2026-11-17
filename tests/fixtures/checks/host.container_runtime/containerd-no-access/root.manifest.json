@@ -1,0 +1,9 @@
+{
+  "symlinks": {
+    "run/containerd/containerd.sock": "socket:[1000]"
+  },
+  "unreadable": [
+    "run/containerd",
+    "var/lib/kubelet"
+  ]
+}

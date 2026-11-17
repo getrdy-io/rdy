@@ -35,8 +35,9 @@ static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const CHILD_ENV: &str = "RDY_RUN_INTERRUPT_CHILD";
 const DIR_ENV: &str = "RDY_RUN_INTERRUPT_DIR";
-const UNSIGNED: &str =
-    "warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.\n";
+const UNSIGNED: &str = "WARNING: UNSIGNED SPEC";
+const INTERRUPTED: &str =
+    "error: interrupted. No report was written.\nfix: run rdy again and let it finish\n";
 const HARD_LIMIT: Duration = Duration::from_secs(60);
 
 const FULL: OsSupport = OsSupport {
@@ -272,10 +273,12 @@ fn interrupt_child(scenario: &str, signal: Signal) -> Result<Outcome, Box<dyn Er
 
 fn assert_interrupted_cleanly(outcome: &Outcome) -> Result<(), Box<dyn Error>> {
     assert_eq!(outcome.status.code(), Some(70), "{:?}", outcome.status);
-    // The unsigned-spec warning comes first (the run had started); the two lines are the end of stderr.
+    // The unsigned-spec banner comes first (the run had started); the two lines are the end of stderr.
+    assert!(outcome.stderr.starts_with(UNSIGNED), "{}", outcome.stderr);
+    assert!(outcome.stderr.ends_with(INTERRUPTED), "{}", outcome.stderr);
     assert_eq!(
-        outcome.stderr.strip_prefix(UNSIGNED),
-        Some("error: interrupted. No report was written.\nfix: run rdy again and let it finish\n"),
+        outcome.stderr.matches("error: interrupted").count(),
+        1,
         "{}",
         outcome.stderr
     );

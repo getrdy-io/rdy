@@ -1,0 +1,5 @@
+{
+  "symlinks": {
+    "var/run/crio/crio.sock": "socket:[1000]"
+  }
+}

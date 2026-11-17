@@ -86,3 +86,15 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.time_sync/refused-range/expect.json"
+value = "169.254.169.123"
+reason = "The Amazon time address, named as the spec entry that host.time_sync must refuse; the golden records it, no test sends a packet to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.time_sync/named-server-metadata/net.json"
+value = "169.254.169.123"
+reason = "The resolver answer that host.time_sync must refuse (the Amazon time address behind a name); no test sends a packet to it"

@@ -161,14 +161,29 @@ const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[
 /// be a test module: it, or a module above it, is declared under `#[cfg(test)]`.
 const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
     (
+        "crates/rdy-checks-host/src/cgroups/tests.rs",
+        &["../../../../tests/fixtures/checks/host.cgroups/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.cgroups, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/disk/tests.rs",
         &["../../../../tests/fixtures/checks/host.disk/"],
         "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",
     ),
     (
+        "crates/rdy-checks-host/src/container_runtime/tests.rs",
+        &["../../../../tests/fixtures/checks/host.container_runtime/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.container_runtime, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/family/tests.rs",
         &["../../../../examples/specs/acme-platform.yaml"],
         "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
+        "crates/rdy-checks-host/src/kernel/tests.rs",
+        &["../../../../tests/fixtures/checks/host.kernel/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.kernel, because a check crate test may not read files",
     ),
     (
         "crates/rdy-checks-host/src/firewall/tests.rs",
@@ -186,6 +201,26 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
             "../../../../tests/fixtures/envs/base-firewalld/",
         ],
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
+    ),
+    (
+        "crates/rdy-checks-net/src/family/tests.rs",
+        &["../../../../examples/specs/acme-platform.yaml"],
+        "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
+        "crates/rdy-checks-net/src/mtu/tests.rs",
+        &["../../../../tests/fixtures/checks/net.mtu/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/net.mtu, because a check crate test may not read files",
+    ),
+    (
+        "crates/rdy-checks-host/src/ports/tests.rs",
+        &["../../../../tests/fixtures/checks/host.ports/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.ports, because a check crate test may not read files",
+    ),
+    (
+        "crates/rdy-checks-host/src/time_sync/tests.rs",
+        &["../../../../tests/fixtures/checks/host.time_sync/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.time_sync, because a check crate test may not read files",
     ),
     (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",

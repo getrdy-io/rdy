@@ -57,6 +57,9 @@ pub mod startup;
 #[doc(hidden)]
 pub mod style;
 
+#[doc(hidden)]
+pub mod terminal;
+
 mod spec_cmds;
 
 #[doc(hidden)]
@@ -247,6 +250,7 @@ where
                                 privilege,
                                 hooks,
                                 registry,
+                                color: cli.global.color,
                                 rig,
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await

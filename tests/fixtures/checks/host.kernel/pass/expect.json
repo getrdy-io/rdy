@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "btf": true,
+    "id": "host.kernel",
+    "min": "5.4",
+    "modules": [
+      "overlay",
+      "br_netfilter",
+      "nf_conntrack"
+    ]
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "source": "min",
+        "version": "5.4"
+      },
+      "btf": true,
+      "min": "5.4",
+      "modules": [
+        "overlay",
+        "br_netfilter",
+        "nf_conntrack"
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3 required modules are loaded or built in. BTF type information is present.",
+    "notes": [],
+    "observed": {
+      "base": "5.14.0",
+      "btf": true,
+      "build": "362",
+      "distro": "rhel",
+      "modules": {
+        "br_netfilter": "built_in",
+        "nf_conntrack": "loaded",
+        "overlay": "loaded"
+      },
+      "release": "5.14.0-362.el9.x86_64"
+    },
+    "partial": null
+  }
+}

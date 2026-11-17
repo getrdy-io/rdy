@@ -1,0 +1,18 @@
+WARNING: UNSIGNED SPEC
+spec.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+rdy <version>
+spec    acme-min >=1.0   (spec.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    host-min.example   linux   x86_64
+user    uid 1000 (not root)
+
+  PASS     host.memory  31.3 GiB found, 16 GiB needed
+
+0 blocks, 0 warnings, 1 passed
+
+WARNING: UNSIGNED SPEC
+READY

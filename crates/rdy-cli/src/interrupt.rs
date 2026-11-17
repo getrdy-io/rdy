@@ -176,8 +176,7 @@ impl Interrupt {
         }
         // The last thing before the text: put the terminal back again and drop what was typed during the
         // kill and the folder removal, so those keys neither echo nor reach the shell (security review).
-        let restored_again = restore();
-        let _ = restored_again;
+        let _ = restore();
         // Once the document has started on stdout, nothing more goes there.
         let to_stdout = json && !self.stdout_used.load(Ordering::SeqCst);
         emit(&error, to_stdout, &mut out, &mut err);

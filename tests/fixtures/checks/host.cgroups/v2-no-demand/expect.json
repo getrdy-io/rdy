@@ -1,0 +1,39 @@
+{
+  "entry": {
+    "id": "host.cgroups"
+  },
+  "result": {
+    "expected": {
+      "controllers": [],
+      "version": "any"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "cgroup v2 in use",
+    "notes": [],
+    "observed": {
+      "cmdline": [],
+      "controllers": {},
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "memory",
+        "misc",
+        "pids",
+        "rdma"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io",
+        "memory",
+        "pids"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {}
+    },
+    "partial": null
+  }
+}
