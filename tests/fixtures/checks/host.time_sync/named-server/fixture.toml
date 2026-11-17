@@ -1,0 +1,12 @@
+schema = 1
+name = "named-server"
+summary = "The time server is a name that the system resolver answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false
