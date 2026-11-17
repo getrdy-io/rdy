@@ -1,0 +1,21 @@
+{
+  "entry": {
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [],
+      "version": "v2"
+    },
+    "fix": "Run rdy on the host itself, not in a container, and make sure `/sys/fs/cgroup` is mounted and readable by this user.",
+    "level": "warn",
+    "message": "rdy could not see a cgroup file system, so the cgroup version is not known",
+    "notes": [],
+    "observed": {
+      "cmdline": [],
+      "layout": null
+    },
+    "partial": null
+  }
+}
