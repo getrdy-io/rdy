@@ -4,4 +4,4 @@ rdy reads the cluster through the kubeconfig you give it, or the one on your mac
 
 The Remediation text is the general fix for the check. A finding can carry a more specific fix of its own. When it does, rdy prints that fix instead. Where the fix names a command, run it against the same cluster you checked.
 
-The Reads line lists the API paths each check reads. It is one list for every operating system. rdy does not yet list the reads for each system on its own.
+The API reads line lists each Kubernetes API resource the check reads, the verbs it uses and what rdy keeps from the response. The Reads line lists local paths. Kubernetes checks read no local paths, so it says none. Neither list splits by operating system. The API reads line does not list the three self-review requests that `k8s.access` and `k8s.rbac` send, so those checks may show none.
