@@ -104,6 +104,34 @@ pub fn render_html(report: &RedactedReport) -> Result<String, HtmlError> {
     fit_page(&mut View::new(report)?, MAX_PAGE_BYTES)
 }
 
+/// A page that [`render_page`] made from a [`RedactedReport`]. The output folder writes only this type
+/// (`OutputDir::write_html`), so no text but a rendered page lands in the `.html` file (M1-181).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HtmlPage(String);
+
+impl HtmlPage {
+    /// The page as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The page as bytes, as they are written to the file.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+/// [`render_html`], with the page kept in an [`HtmlPage`] so the caller can render first and write later.
+///
+/// # Errors
+///
+/// The errors of [`render_html`].
+pub fn render_page(report: &RedactedReport) -> Result<HtmlPage, HtmlError> {
+    render_html(report).map(HtmlPage)
+}
+
 /// Renders `view`. Over `max` bytes, the action table is cut to the most rows that fit and the page is
 /// rendered again. If it is still over, Found and Needed lines are cut to the most that fit. The checks
 /// themselves and the embedded JSON are never cut (07 D.4).
