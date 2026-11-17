@@ -652,7 +652,15 @@ impl ProbeHub {
     /// the roots of `Probe::http` with `Roots::Bundled`. The OS store is not touched.
     ///
     /// Only the feature `testing` builds it; a release build cannot add a root.
+    ///
+    /// # Panics
+    ///
+    /// If the bundled set was already built, because it would silently ignore the root.
     pub fn trust_as_public(&self, root_der: &[u8]) {
+        assert!(
+            self.tls.bundled.get().is_none(),
+            "trust_as_public must be called before the first TLS call of the hub"
+        );
         self.extra_public
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

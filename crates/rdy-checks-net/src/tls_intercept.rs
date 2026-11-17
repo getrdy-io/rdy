@@ -43,7 +43,7 @@ use rdy_engine::check::{
     Need, Os, OsSupport, Partial, PeerClass, Support,
 };
 use rdy_engine::probe::net::{Route, TlsChain, TrustFailure, TrustVerdict};
-use rdy_engine::probe::{NetFailure, ProbeError};
+use rdy_engine::probe::{NetFailure, NoRoots, ProbeError};
 use rdy_spec::Target;
 use rdy_spec::check::{CheckParams, NetEgress, NetTlsIntercept};
 use rdy_spec::scalar::Host;
@@ -195,6 +195,8 @@ struct Seen {
     system: &'static str,
     system_roots: usize,
     protocol: Option<&'static str>,
+    /// Why the OS store gave no roots, when it did not.
+    no_roots: Option<NoRoots>,
 }
 
 fn verdict_id(verdict: TrustVerdict) -> &'static str {
@@ -206,8 +208,11 @@ fn verdict_id(verdict: TrustVerdict) -> &'static str {
             TrustFailure::NotYetValid => "not_yet_valid",
             TrustFailure::NameMismatch => "name_mismatch",
             TrustFailure::BadSignature => "bad_signature",
-            _ => "policy",
+            _ => "rejected_by_rustls_policy",
         },
+        TrustVerdict::Unavailable(NoRoots::Empty) => "no_store",
+        TrustVerdict::Unavailable(NoRoots::Unreadable) => "store_unreadable",
+        TrustVerdict::Unavailable(NoRoots::Overridden) => "store_overridden",
         TrustVerdict::Unavailable(_) => "no_store",
         _ => "unknown",
     }
@@ -221,6 +226,10 @@ impl Seen {
             system: verdict_id(chain.system),
             system_roots: chain.system_roots,
             protocol: chain.protocol,
+            no_roots: match chain.system {
+                TrustVerdict::Unavailable(why) => Some(why),
+                _ => None,
+            },
         }
     }
 }
@@ -356,7 +365,10 @@ impl TlsInterceptCheck {
             .collect();
 
         let mut finding = match worst {
-            None if done.is_empty() => Finding::pass("no host to test"),
+            // A check that tested nothing does not pass (03 gives no pass_by_absence for it).
+            None if done.is_empty() => {
+                Finding::warn("no host to test: set `hosts` or add a TLS `net.egress` endpoint")
+            }
             // Nothing was learned. That is not a pass: nobody can say there is no interception.
             None => Finding::warn(format!(
                 "no host could be tested ({} not tested); net.egress shows why",
@@ -371,7 +383,7 @@ impl TlsInterceptCheck {
                 let mut parts: Vec<String> = flagged
                     .iter()
                     .take(NAMED)
-                    .map(|(t, class)| format!("{} ({})", t.label, class.phrase()))
+                    .map(|(t, class)| format!("{} ({})", t.label, class.phrase(no_roots_of(t))))
                     .collect();
                 if flagged.len() > NAMED {
                     parts.push(format!("and {} more", flagged.len() - NAMED));
@@ -389,16 +401,18 @@ impl TlsInterceptCheck {
                 continue;
             }
             seen_classes.push(*class);
-            fixes.extend(class.fix(os, &t.host, t.port, forbid));
+            fixes.extend(class.fix(os, &t.host, t.port, forbid, no_roots_of(t)));
         }
         if !fixes.is_empty() {
             finding = finding.with_fix(fixes.join(" "));
         }
 
         // A system store that held no roots is a fact about the machine, said once.
-        if store_empty(done) {
-            finding = finding
-                .with_note("no OS trust store found: only the public roots could judge the chains");
+        if let Some(why) = done.iter().find_map(no_roots_of) {
+            finding = finding.with_note(format!(
+                "{}: only the public roots could judge the chains",
+                why.phrase()
+            ));
         }
 
         let mut not_verified: Vec<String> = Vec::new();
@@ -437,8 +451,10 @@ impl TlsInterceptCheck {
     }
 }
 
-/// Whether the OS store gave no roots for the chains of this run.
-fn store_empty(done: &[Tested]) -> bool {
-    done.iter()
-        .any(|t| matches!(&t.what, What::Chain { seen, .. } if seen.system == "no_store"))
+/// Why the OS store gave no roots for this host's chain, when it did not.
+fn no_roots_of(t: &Tested) -> Option<NoRoots> {
+    match &t.what {
+        What::Chain { seen, .. } => seen.no_roots,
+        What::Untested(_) => None,
+    }
 }

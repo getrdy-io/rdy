@@ -143,7 +143,7 @@ fn every_class_has_its_own_id_and_every_fix_passes_the_audit() {
     for class in Class::ALL {
         for os in [Os::Linux, Os::Macos, Os::Windows] {
             for forbid in [false, true] {
-                let fix = class.fix(os, "web.acme.test", 443, forbid);
+                let fix = class.fix(os, "web.acme.test", 443, forbid, None);
                 assert_eq!(fix.is_none(), class == Class::Public, "{class:?}");
                 let Some(text) = fix else { continue };
                 if let Err(error) = rdy_engine::fixtext::check(&text) {
@@ -161,7 +161,7 @@ fn every_class_has_its_own_id_and_every_fix_passes_the_audit() {
 #[test]
 fn a_clock_fix_points_at_host_time_sync_and_never_says_inspection() {
     let fix = Class::ClockOrExpiry
-        .fix(Os::Linux, "web.acme.test", 443, false)
+        .fix(Os::Linux, "web.acme.test", 443, false, None)
         .expect("a fix");
     assert!(fix.contains("host.time_sync"), "{fix}");
     assert!(fix.contains("timedatectl"), "{fix}");
@@ -463,6 +463,136 @@ async fn a_set_expected_issuer_or_pin_makes_the_result_partial_and_says_so() {
     let partial = ran.finding().partial.as_ref().expect("partial");
     assert!(partial.note.contains("expected_issuer"), "{}", partial.note);
     assert!(partial.note.contains("pin_sha256"), "{}", partial.note);
+    // A partial pass is a warning: the setting is never read as met.
+    assert_eq!(ran.result().status, Status::Warn);
+}
+
+#[tokio::test]
+async fn a_pin_that_is_not_checked_is_never_read_as_met() {
+    let ca = TestCa::root("Acme Test Public Root");
+    let web = server(&ca, NAME, Validity::Always).await;
+    let run = TestRun::new(machine(NAME, web.addr(), Vec::new()));
+    run.trust_as_public(&der(&ca));
+    let mut extra = hosts_of(NAME, &web);
+    extra["pin_sha256"] = json!([format!("{:0>64}", "ab")]);
+    let ran = run_with(run, extra).await;
+    let partial = ran.finding().partial.as_ref().expect("partial");
+    assert!(partial.note.contains("pin_sha256"), "{}", partial.note);
+    assert_eq!(ran.result().status, Status::Warn);
+}
+
+#[tokio::test]
+async fn an_overridden_or_unreadable_store_gets_its_own_words_and_fix() {
+    let ca = TestCa::root("Acme Inspection Root");
+    let web = server(&ca, NAME, Validity::Always).await;
+    let replay = machine(NAME, web.addr(), Vec::new()).system_roots_overridden();
+    let ran = run_with(TestRun::new(replay), hosts_of(NAME, &web)).await;
+    assert_eq!(ran.host(0)["class"], "no_trust_store");
+    assert_eq!(ran.host(0)["os_store"], "store_overridden");
+    let fix = ran.finding().fix.as_deref().expect("a fix");
+    assert!(fix.contains("Unset SSL_CERT_FILE"), "{fix}");
+    assert!(!fix.contains("ca-certificates"), "{fix}");
+    assert!(
+        ran.finding().message.contains("SSL_CERT_FILE"),
+        "{}",
+        ran.finding().message
+    );
+}
+
+#[test]
+fn the_no_trust_store_words_follow_the_reason() {
+    for (why, phrase, fix) in [
+        (None, "no OS trust store found", "ca-certificates"),
+        (
+            Some(NoRoots::Empty),
+            "no OS trust store found",
+            "ca-certificates",
+        ),
+        (Some(NoRoots::Unreadable), "could not be read", "can read"),
+        (
+            Some(NoRoots::Overridden),
+            "SSL_CERT_FILE",
+            "Unset SSL_CERT_FILE",
+        ),
+    ] {
+        assert!(Class::NoTrustStore.phrase(why).contains(phrase), "{why:?}");
+        let text = Class::NoTrustStore
+            .fix(Os::Linux, "web.acme.test", 443, false, why)
+            .expect("a fix");
+        assert!(text.contains(fix), "{why:?}: {text}");
+        rdy_engine::fixtext::check(&text).expect("passes the audit");
+    }
+}
+
+#[test]
+fn the_openssl_hint_has_no_brackets_in_the_servername_and_none_for_an_address() {
+    let name = Class::Untrusted
+        .fix(Os::Linux, "web.acme.test", 443, false, None)
+        .expect("a fix");
+    assert!(
+        name.contains("-connect web.acme.test:443 -servername web.acme.test`"),
+        "{name}"
+    );
+    let v6 = Class::Untrusted
+        .fix(Os::Linux, "[fd00::1]", 443, false, None)
+        .expect("a fix");
+    assert!(v6.contains("-connect [fd00::1]:443`"), "{v6}");
+    assert!(!v6.contains("-servername"), "{v6}");
+    let v4 = Class::Untrusted
+        .fix(Os::Linux, "192.0.2.7", 443, false, None)
+        .expect("a fix");
+    assert!(!v4.contains("-servername"), "{v4}");
+}
+
+#[tokio::test]
+async fn no_host_to_test_is_a_warning_and_not_a_pass() {
+    let run = TestRun::new(Replay::new());
+    let spec = spec_with(&[json!({"id": "net.tls_intercept"})]);
+    let (check, hosts, entry) = built(&spec, 0);
+    assert!(hosts.is_empty());
+    let ctx = run.context_for_hosts(
+        &INFO,
+        "net.tls_intercept",
+        Os::Linux,
+        [Need::Network],
+        hosts,
+    );
+    let outcome = check.run(&ctx).await;
+    let finding = outcome.as_ref().expect("a finding");
+    assert_eq!(finding.level, Level::Warn);
+    assert!(finding.message.contains("`hosts`"), "{}", finding.message);
+    let result = map_outcome(&INFO, &entry, &ctx, outcome, 0, 0);
+    assert_eq!(result.status, Status::Warn);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_host_that_runs_past_its_budget_is_not_tested_with_a_reason() {
+    use rdy_engine::sched::{End, Planned};
+    // The lookup alone takes longer than the 10 s host budget.
+    let replay = Replay::new()
+        .host("slow.acme.test", ["192.0.2.5".parse().expect("ip")])
+        .lookup_delay("slow.acme.test", Duration::from_secs(30));
+    let spec = spec_with(&[entry(&json!({"hosts": ["slow.acme.test"]}))]);
+    let (check, hosts, _) = built(&spec, 0);
+    let run = TestRun::new(replay);
+    let scheduler = run.scheduler(1, Os::Linux, [Need::Network]);
+    let check: std::sync::Arc<dyn Check> = std::sync::Arc::new(check);
+    let mut ran = scheduler
+        .run(vec![
+            Planned::new(check, "net.tls_intercept").with_hosts(hosts),
+        ])
+        .await;
+    let End::Done(outcome) = ran.remove(0).end else {
+        panic!("the check did not finish");
+    };
+    let finding = (*outcome).expect("a finding and not a timeout");
+    assert_eq!(finding.level, Level::Warn);
+    assert_eq!(finding.observed["hosts"][0]["class"], "not_tested");
+    assert_eq!(
+        finding.observed["hosts"][0]["reason"],
+        "a step ran out of time"
+    );
+    assert!(finding.partial.is_some());
 }
 
 #[tokio::test]

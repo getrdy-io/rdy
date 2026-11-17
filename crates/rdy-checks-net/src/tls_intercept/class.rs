@@ -8,6 +8,7 @@
 //! host text, never a name or a value read from the peer's certificate.
 
 use rdy_engine::check::{Level, Os};
+use rdy_engine::probe::NoRoots;
 use rdy_engine::probe::net::{TrustFailure, TrustVerdict};
 
 /// What one host's chain turned out to be.
@@ -103,15 +104,15 @@ impl Class {
     }
 
     /// One phrase for the message line, after the host.
-    pub(super) fn phrase(self) -> &'static str {
+    pub(super) fn phrase(self, why: Option<NoRoots>) -> &'static str {
         match self {
             Self::Public => "chain validates against the public roots",
             Self::MachineOnly => "chain is trusted by this machine only",
             Self::UnknownCa => "issuer's CA is not installed on this machine",
             Self::ClockOrExpiry => "certificate is expired or not valid yet",
             Self::NameMismatch => "certificate is not valid for this name",
-            Self::Untrusted => "chain was refused by the TLS rules",
-            Self::NoTrustStore => "no OS trust store found",
+            Self::Untrusted => "chain was rejected by rustls policy or has a bad signature",
+            Self::NoTrustStore => why.map_or("no OS trust store found", NoRoots::phrase),
         }
     }
 
@@ -123,6 +124,7 @@ impl Class {
         host: &str,
         port: u16,
         forbid_interception: bool,
+        why: Option<NoRoots>,
     ) -> Option<String> {
         let install = match os {
             Os::Windows => {
@@ -163,20 +165,37 @@ impl Class {
             Self::NameMismatch => format!(
                 "The certificate of {host} is not valid for that name. Check the name in the spec, or ask the server's owner for a certificate that names it."
             ),
-            Self::Untrusted => format!(
-                "The certificate chain of {host} was refused for a reason other than its issuer: a bad signature, an old hash or a key that does not fit. Run `openssl s_client -connect {host}:{port} -servername {host}` to see the chain and ask the server's owner to reissue it."
-            ),
-            Self::NoTrustStore => {
-                let store = match os {
-                    Os::Linux => {
-                        "Install it with `apt-get install ca-certificates` or `dnf install ca-certificates`."
-                    }
-                    _ => "Check that the OS certificate store is intact.",
+            Self::Untrusted => {
+                // An address host sends no SNI, so no -servername; a name is bare, with no brackets.
+                let name = host.trim_matches(['[', ']']);
+                let sni = if name.parse::<std::net::IpAddr>().is_ok() {
+                    String::new()
+                } else {
+                    format!(" -servername {name}")
                 };
                 format!(
-                    "This machine has no CA store rdy can read, so {host} cannot be judged against it. {store}"
+                    "The certificate chain of {host} was rejected by rustls policy or has a bad signature, not a problem with its issuer: an old hash, a missing subject alternative name or a key that does not fit. Run `openssl s_client -connect {host}:{port}{sni}` to see the chain and ask the server's owner to reissue it."
                 )
             }
+            Self::NoTrustStore => match why {
+                Some(NoRoots::Overridden) => format!(
+                    "SSL_CERT_FILE or SSL_CERT_DIR is set and rdy does not read it on this OS, so {host} cannot be judged against the OS store. Unset SSL_CERT_FILE and SSL_CERT_DIR and run again."
+                ),
+                Some(NoRoots::Unreadable) => format!(
+                    "The OS trust store could not be read, so {host} cannot be judged against it. Check that SSL_CERT_FILE and SSL_CERT_DIR, if set, name files this user can read, and that the OS store is intact."
+                ),
+                _ => {
+                    let store = match os {
+                        Os::Linux => {
+                            "Install it with `apt-get install ca-certificates` or `dnf install ca-certificates`."
+                        }
+                        _ => "Check that the OS certificate store is intact.",
+                    };
+                    format!(
+                        "This machine has no CA store rdy can read, so {host} cannot be judged against it. {store}"
+                    )
+                }
+            },
         })
     }
 }
