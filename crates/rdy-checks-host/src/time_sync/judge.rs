@@ -39,6 +39,8 @@ pub(crate) enum Tool<T> {
     Absent,
     /// It ran but gave nothing usable. The text says why.
     Unusable(String),
+    /// It was not run, because the run has `--no-network` (`chronyc` talks to chronyd over loopback UDP).
+    Offline,
 }
 
 impl<T> Tool<T> {
@@ -47,6 +49,7 @@ impl<T> Tool<T> {
             Self::Got(_) => "ok".to_owned(),
             Self::Absent => "not installed".to_owned(),
             Self::Unusable(why) => format!("unusable: {why}"),
+            Self::Offline => "not run: --no-network is set".to_owned(),
         }
     }
 }
@@ -60,6 +63,8 @@ pub(crate) enum Attempt {
     Rejected(Reject),
     /// The probe refused the address: it is in a refused range.
     Refused,
+    /// The facade refused the exchange: the run has `--no-network`.
+    Offline,
     /// No reply in time.
     Silent,
     /// The lookup or the socket failed. The text says how.
@@ -332,10 +337,17 @@ fn unverified(message: &str, fix: String, note: &str) -> Finding {
 /// The vendor asked for an offset and no source gave one.
 fn not_measured(facts: &Facts) -> Finding {
     let attempts: Vec<&Attempt> = facts.servers.iter().map(|(_, a)| a).collect();
+    let offline =
+        facts.chronyc == Tool::Offline || attempts.iter().any(|a| matches!(a, Attempt::Offline));
     let all_refused =
         !attempts.is_empty() && attempts.iter().all(|a| matches!(a, Attempt::Refused));
     let any_refused = attempts.iter().any(|a| matches!(a, Attempt::Refused));
-    let (message, fix) = if all_refused {
+    let (message, fix) = if offline {
+        (
+            "Offset not measured, --no-network is set.",
+            "Run again without `--no-network` to measure the clock offset.",
+        )
+    } else if all_refused {
         (
             "Offset not measured, server in a refused range.",
             REFUSED_FIX,
@@ -469,6 +481,9 @@ fn notes_of(facts: &Facts, state: State) -> Vec<String> {
                     "{who}: offset not measured, server in a refused range{tail}"
                 ));
             }
+            Attempt::Offline => {
+                notes.push(format!("{who}: offset not measured, --no-network is set."))
+            }
             Attempt::Silent => notes.push(format!("{who}: no reply within {SNTP_WAIT}.")),
             Attempt::NotAsked(why) => notes.push(format!("{who}: not measured, {why}.")),
             Attempt::Rejected(why) => notes.push(format!("{who}: {why}.")),
@@ -500,6 +515,9 @@ fn notes_of(facts: &Facts, state: State) -> Vec<String> {
     }
     if let Tool::Unusable(why) = &facts.chronyc {
         notes.push(format!("chronyc gave no answer: {why}."));
+    }
+    if facts.chronyc == Tool::Offline {
+        notes.push("chronyc was not run, because --no-network is set.".to_owned());
     }
     notes
 }
@@ -558,6 +576,11 @@ fn server_json(server: &str, attempt: &Attempt) -> Value {
             "server": server,
             "result": "refused_range",
             "detail": "offset not measured, server in a refused range",
+        }),
+        Attempt::Offline => json!({
+            "server": server,
+            "result": "offline",
+            "detail": "offset not measured, --no-network is set",
         }),
         Attempt::Silent => json!({"server": server, "result": "silent"}),
         Attempt::NotAsked(why) => {
