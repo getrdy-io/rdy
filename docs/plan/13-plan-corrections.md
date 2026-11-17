@@ -539,6 +539,6 @@ the corrections log of `11-backlog.md`.
   second of PR #91 and PR #70 to merge deletes it. A pin matches the leaf only (SEC-100-1), and a pin equal
   to a later certificate is partial until new M2-135 (2.5 h) records the verified path. `last_sha256` is
   always the last certificate's hash, and `root_sha256` is null when that certificate is not self-signed;
-  new M2-136 (1.5 h) replaces `root_sha256` with the real anchor's, through `TrustStore` root subjects. New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores.
-  03 net.tls_intercept's Source line says so; PR #91 edits its Thresholds line. No new M1 ticket. No
-  test-pinned document changed.
+  new M2-136 (1.5 h) replaces `root_sha256` with the real anchor's, through `TrustStore` root subjects.
+  New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores. 03 net.tls_intercept's
+  Source line says so; PR #91 edits its Thresholds line. No new M1 ticket. No test-pinned document changed.
