@@ -597,7 +597,7 @@ the corrections log of `11-backlog.md`.
   heading or Appendix A row changed, and no test-pinned text changed.
 - **Correction-56, the family namespace in M1, the k8s registrations of M1-162 to M1-165, and the
   autoscaler status ConfigMap.** From the reviews of the M1-175 build and the M1-113 k8s review.
-  Correction 49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
+  Correction-49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
   no `k8s:` block (03's "Spec block" was never in 01), 07 puts `--namespace` on `rdy bundle` only, and the
   client never uses the kubeconfig's namespace (ADR 0031 decision 12). So k8s.storageclass never reads
   claim evidence, k8s.ingress and k8s.cni read no Service or NetworkPolicy of the install namespace, and

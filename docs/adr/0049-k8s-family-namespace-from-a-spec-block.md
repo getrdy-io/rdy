@@ -10,7 +10,8 @@ namespace of the claim evidence of `k8s.storageclass`, the LoadBalancer Services
 NetworkPolicies of `k8s.cni`, and the fallback of `k8s.admission` and `k8s.namespace` when their entry
 names none. In M1 nothing sets it. rdy/v1 has no `k8s:` block: 03 section 4 sketched one, but 01 never
 took it. 07 puts `--namespace` on `rdy bundle` only. The client never uses the kubeconfig's namespace
-(ADR 0031 decision 12). So in M1 those reads never happen, and the checks say what they did not read.
+(ADR 0031 decision 12). So in M1 those reads never happen. k8s.storageclass leaves the claim evidence
+out without a note; the others say what they did not read.
 
 Two sources were proposed for M2: a spec key or a `rdy run` flag. Either one changes a contract: the
 rdy/v1 spec schema, or the command surface.
@@ -38,8 +39,9 @@ rdy/v1 spec schema, or the command surface.
   vendor signs again, or one the portal writes. If design partners hit this often, a later ticket adds
   `rdy run --namespace` as an override, with the header and `run.options` saying which source set it,
   after cli-ux and security review. That ticket supersedes decision 3.
-- The no-namespace fix lines of `k8s.admission`, `k8s.namespace`, `k8s.ingress` and `k8s.cni` name a
-  key that exists once M2-142 lands.
+- The no-namespace fixes of `k8s.admission` and `k8s.namespace` already name a real key, the entry's
+  `namespace`. Only the `k8s.ingress` fix of PR #65 names the missing block, and the `k8s.cni` fix names
+  no key. M2-142 makes both name the block.
 
 ## Alternatives
 
