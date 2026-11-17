@@ -174,14 +174,14 @@ fn a_proxied_run_reads_each_variable_sets_the_proxy_in_time_and_hides_the_passwo
             .iter()
             .find(|a| a["kind"] == "env" && a["check"].is_null() && has_proxy_names(a))
             .unwrap_or_else(|| panic!("{name}: no proxy set-up entry in {actions:?}"));
-        let first_read = actions
+        // The privilege snapshot differs by OS (a file read, a native call, an env read), so compare with
+        // every other run-level entry: the proxy entry has the lowest sequence number.
+        let lowest = actions
             .iter()
-            .find(|a| a["kind"] == "read")
-            .unwrap_or_else(|| panic!("{name}: no read entry"));
-        assert!(
-            setup["seq"].as_u64() < first_read["seq"].as_u64(),
-            "{name}: {setup} {first_read}"
-        );
+            .filter(|a| a["check"].is_null())
+            .filter_map(|a| a["seq"].as_u64())
+            .min();
+        assert_eq!(setup["seq"].as_u64(), lowest, "{name}: {actions:?}");
         let check = &doc["checks"][0];
         assert_eq!(check["status"], "pass", "{name}: {check}");
         let endpoint = &check["observed"]["endpoints"][0];
@@ -292,6 +292,20 @@ fn under_no_network_a_bad_proxy_url_is_a_note_and_a_refused_password_is_still_ex
         ),
         &offline,
     );
+    assert_eq!(ran.code, 70, "{}", ran.stderr);
+
+    // The chosen variable does not parse and another one holds a password the set refuses: the refusal
+    // wins, so the run does not go on with that password unhidden.
+    let ran = call(
+        machine(
+            "HTTPS_PROXY",
+            "socks5://svc:Canary-pw-1@proxy.acme.test:1080",
+            &heads,
+        )
+        .env("http_proxy", "http://svc:pw5ab@proxy.acme.test:3128"),
+        &offline,
+    );
+    assert!(!ran.stderr.contains("pw5ab") && !ran.stdout.contains("pw5ab"));
     assert_eq!(ran.code, 70, "{}", ran.stderr);
 }
 

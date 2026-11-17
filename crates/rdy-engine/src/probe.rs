@@ -952,7 +952,9 @@ impl ProbeHub {
         }
         // Every other variable that is set may reach output too (`net.proxy` reports them), so the
         // secrets of each one that parses go into the set as well. One that does not parse is left
-        // alone: only the variable the run uses is an error. A refusal is an error for its variable.
+        // alone: only the variable the run uses is an error. A refusal is an error for its variable, and it
+        // replaces a parse error of the chosen one, because the run may go on (`--no-network`) and the
+        // password must not stay unhidden.
         for (other, text) in set.iter().skip(1) {
             if text == &value {
                 continue;
@@ -962,7 +964,11 @@ impl ProbeHub {
                 for secret in parsed.secrets() {
                     accepted &= self.add_known_secret(&secret);
                 }
-                if !accepted && result.is_ok() {
+                let replaceable = match &result {
+                    Ok(_) => true,
+                    Err(first) => matches!(first.error, ProxyError::Url(_)),
+                };
+                if !accepted && replaceable {
                     result = Err(ProxyEnvError {
                         var: other,
                         error: ProxyError::SecretRefused,
