@@ -171,6 +171,12 @@ const PENDING: &[Pending] = &[
         why: "M1-095 merged the staged connector with six scripted net.json cases and no reviewed expect.json. M1-096 completes the result (HTTP stage and failure classes), so it adds the expect.json files and reviews the levels once",
     },
     Pending {
+        check: "net.tls_intercept",
+        classes: &[Class::Pass, Class::NonPass, Class::Timeout],
+        owner: "M1-100",
+        why: "M1-099 merged the classes and tests them against loopback servers with chains generated at test time, which a static fixture file cannot hold. M1-100 adds the evidence (issuer, root hash as a placeholder, store location), the generated-chain fixture rig and the reviewed expect.json files for the classes and the timeout",
+    },
+    Pending {
         check: "host.time_sync",
         classes: &[Class::Timeout],
         owner: "M1-179",
