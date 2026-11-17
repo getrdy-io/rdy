@@ -5,7 +5,7 @@
 //! A Report must validate and equal the `.json` file byte for byte. An error object must validate and
 //! carry the row's stable code.
 //!
-//! Proven here, with the real binary: exit 0, 1 and 2 (synthetic one-check specs on `host.cpu`, so the
+//! Proven here, with the real binary: exit 0, 1 and 2 on Linux legs only (synthetic one-check specs on `host.cpu`, so the
 //! verdict does not depend on the machine), `--no-report`, and exit 64 for a bad flag, a missing file,
 //! malformed YAML, a schema-invalid spec, an expired spec, an unsigned spec, a tampered signature, an
 //! unknown key and (Unix) an insecure trust store, and exit 70 `report_write` before any check.
@@ -28,6 +28,8 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+// Used by the Linux verdict tests and the Unix signed tests only.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn report_validator() -> Validator {
     let path = repo().join("crates/rdy-spec/schema/result.v1.schema.json");
     let text = std::fs::read_to_string(&path)
@@ -40,7 +42,8 @@ fn report_validator() -> Validator {
         .unwrap_or_else(|e| panic!("schema does not build: {e}"))
 }
 
-/// A one-check spec on `host.cpu`. Every machine has at least one CPU and none has 100000.
+/// A one-check spec on `host.cpu`. Every machine has at least one CPU and none has 100000. The verdicts
+/// are stable on Linux only: `host.cpu` reports "not yet on this OS" on macOS and Windows.
 fn cpu_spec(min: u32, severity: &str) -> String {
     format!(
         "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-json\nchecks:\n  - id: host.cpu\n    min: {min}\n    severity: {severity}\n    fix: \"Use a machine with more cores.\"\n"
@@ -94,6 +97,7 @@ fn assert_valid(validator: &Validator, doc: &Value, row: &str) {
 }
 
 /// The `.json` files in the folders under `parent`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn json_files(parent: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for dir in std::fs::read_dir(parent).into_iter().flatten().flatten() {
@@ -123,6 +127,10 @@ fn copy(from: &Path, dir: &Path, name: &str) {
         .unwrap_or_else(|e| panic!("cannot copy {}: {e}", from.display()));
 }
 
+// Linux only, because `host.cpu` is not built for macOS and Windows yet (see `cpu_spec`). No check gives
+// a stable pass, warn and block on all five legs, so exit 0, 1 and 2 are proved on the Linux legs; the
+// error rows below run everywhere.
+#[cfg(target_os = "linux")]
 #[test]
 fn exit_0_1_and_2_print_the_report_that_the_json_file_holds() {
     // (row, spec, exit code)
@@ -167,6 +175,7 @@ fn exit_0_1_and_2_print_the_report_that_the_json_file_holds() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn no_report_still_prints_the_whole_report_and_makes_no_folder() {
     for (spec, exit) in [(cpu_spec(1, "block"), 0), (cpu_spec(100_000, "block"), 2)] {
