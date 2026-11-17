@@ -509,3 +509,17 @@ the corrections log of `11-backlog.md`.
   the same. The real-time `Fake::Block` test is M1-051's and is built. M2-037 takes the cancellation tests of
   08 section 5: running checks marked cancelled, the drop guard that counts live futures, and the verdict
   rule (4 h). 07 C.5 changed, but no test reads it; no 01 block changed.
+- **Correction-51, a proxy password in host.container_runtime evidence, and the proxy carries of M1-098.**
+  From the security review and the build of M1-098. Correction-49 is PR #85. host.container_runtime (M1-150,
+  PR #23) stores the proxy URL of a systemd drop-in, `daemon.json` or the Engine API `/info` as text.
+  `url_userinfo` finds userinfo only after `scheme://`, so a proxy with no scheme (`svc:pw@proxy:3128`)
+  reaches `observed.runtimes[].proxy` whole. New core M1-182 (2 h) stores each proxy as `ProxyUrl::origin`
+  with a credentials flag, as net.proxy does, and proves a canary from all three sources never appears. It
+  adds a `url_userinfo` form for a value with no scheme after a `*_proxy=` key or a Docker proxy JSON key,
+  with corpus cases, and records the residual in 05 I1. The corpus test reads 04 Appendix B, so M1-182's PR
+  edits that row, not this correction. M1-138 depends on M1-182. 05 INV-11: system resolvers also resolve
+  the proxy's name, and INV-11 lists `Probe::proxy_reach` and net.egress's one direct retry under `auto`.
+  M1-107: `Probe::route_for` does not look at `proxy_source` or the scheme, so the k8s client checks the
+  source itself and never uses an `HTTP_PROXY` proxy for an https API server. 03 net.proxy reads the
+  `proxies` of `daemon.json`, which Docker gives precedence over the drop-ins. No test-pinned document
+  changed.

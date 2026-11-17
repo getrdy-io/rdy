@@ -251,7 +251,7 @@ fn a_spec_with_65_hosts_is_a_lint_error_with_the_fix_hint() {
         assert_eq!(ran.code, ExitCode::Blockers, "{name}: {}", ran.stderr);
         assert!(ran.stdout.is_empty(), "{name}: {}", ran.stdout);
         assert!(
-            ran.stderr.contains("65 endpoints. The limit is 64"),
+            ran.stderr.contains("65 endpoints. The limit is 64."),
             "{name}: {}",
             ran.stderr
         );

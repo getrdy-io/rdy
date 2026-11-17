@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-50: M1 181 tickets, 400.5 h, 336 h core; M2 130 tickets, 465.5 h; all milestones 411 tickets,
-1379.5 h, 1315 h core.
+correction-51: M1 182 tickets, 402.5 h, 338 h core; M2 130 tickets, 465.5 h; all milestones 412 tickets,
+1381.5 h, 1317 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -251,6 +251,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   `--allow-unsigned` page is M1-181's. 05 Surface 2 lists the `--key` file swap for M1-132. M1-098 builds
   the `auto` "direct works, proxy fails" sentence. M1-107 never uses an `HTTP_PROXY` proxy for https and
   takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation tests (4 h).
+- 51: new core M1-182: host.container_runtime stores a proxy as `ProxyUrl::origin`, so a password in a URL
+  with no scheme never reaches the report, plus a `url_userinfo` form for it; M1-138 depends on it. 05 INV-11
+  names the proxy lookup, `proxy_reach` and the direct retry. M1-107 checks `proxy_source` itself. 03 net.proxy
+  reads `daemon.json`.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -264,7 +268,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-182 and M2-131, and the next correction is 51 (49 is in #85).
+- The next ticket ids are M1-183 and M2-131, and the next correction is 52 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**

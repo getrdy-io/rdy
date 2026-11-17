@@ -375,7 +375,7 @@ fn an_out_dir_that_is_missing_is_exit_70_with_report_write() {
 }
 
 #[test]
-fn a_one_run_key_is_not_silently_ignored() {
+fn a_one_run_key_that_is_not_a_key_stops_the_run() {
     let ran = call(
         common::unprivileged(),
         pinned(),
@@ -388,9 +388,10 @@ fn a_one_run_key_is_not_silently_ignored() {
             "--no-report",
         ],
     );
-    assert_eq!(ran.code, 70, "{}", ran.stderr);
+    // The key is read before the spec, so a key that is not one stops the run (M1-126).
+    assert_eq!(ran.code, 64, "{}", ran.stderr);
     assert!(
-        ran.stderr.contains("is not yet implemented"),
+        ran.stderr.contains("cannot read RWQ-not-a-key"),
         "{}",
         ran.stderr
     );
@@ -711,7 +712,11 @@ fn a_sidecar_that_is_a_folder_is_exit_64_and_makes_no_folder() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let ran = run_with_sidecar(&spec, out.path(), &[]);
     assert_refused_with_no_folder(&ran, out.path());
-    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+    // 01 section 4.7: a folder where the signature should be is a bad signature, not a bad spec file.
+    assert_eq!(
+        parse(&ran.stdout)["error"]["code"],
+        "spec_signature_invalid"
+    );
 }
 
 #[test]
@@ -756,7 +761,11 @@ fn a_sidecar_that_cannot_be_read_is_exit_64_and_makes_no_folder() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let ran = run_with_sidecar(&spec, out.path(), &[]);
     assert_refused_with_no_folder(&ran, out.path());
-    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+    // 01 section 4.7: permission denied on the sidecar is a bad signature, even with the flag.
+    assert_eq!(
+        parse(&ran.stdout)["error"]["code"],
+        "spec_signature_invalid"
+    );
 }
 
 // --- the words of a skipped entry carry the did-you-mean hint ---
