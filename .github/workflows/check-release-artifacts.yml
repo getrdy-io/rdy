@@ -33,6 +33,12 @@ jobs:
       # The checker is the one in the tagged source. The pinned toolchain gives `cargo`.
       - name: Install the pinned toolchain
         run: rustup toolchain install --no-self-update
+      # A catalog entry whose vendor page nobody read in 180 days stops the release (03 Appendix B,
+      # M1-173). It runs here and not in ci.yml: in a pull request workflow every pull request would
+      # turn red on day 181. The date is the day of this run, in UTC. A failure here keeps sign-release
+      # from running, so no release exists for a stale catalog.
+      - name: Check the security-agent catalog is fresh
+        run: cargo run --locked --quiet --package xtask -- agents-stale --today "$(date -u +%F)"
       - name: Install cargo-audit
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:

@@ -491,6 +491,9 @@ pub enum NetFailure {
 impl NetFailure {
     /// The fixed phrase the action log records. It names the kind of failure and, for a refused
     /// `CONNECT`, the status. It holds no host, no fix hint and nothing the peer sent.
+    ///
+    /// Only the network module (`runtime` or `loopback`) and the unit tests call it.
+    #[cfg(any(feature = "runtime", feature = "loopback", test))]
     pub(crate) fn log_phrase(&self) -> String {
         match self {
             Self::Dns { .. } => "the name did not resolve".to_owned(),

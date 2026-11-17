@@ -455,10 +455,12 @@ fn files_named_ext(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The four clippy commands of CI, exactly. A fifth, or a change to one (`--config`, `--exclude`,
-/// `--cap-lints`, a dropped `--all-targets`), is a change to this list, which is in CODEOWNERS.
+/// The six clippy commands of CI, exactly. A seventh, or a change to one (`--config`, `--exclude`,
+/// `--cap-lints`, a dropped `--all-targets` or `--lib`), is a change to this list, which is in CODEOWNERS.
 const CLIPPY_COMMANDS: &[&str] = &[
     "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --lib -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --features html --lib -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings",
@@ -527,7 +529,7 @@ fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
 }
 
 #[test]
-fn no_workflow_sets_flags_and_the_clippy_steps_are_the_four_pinned_ones() {
+fn no_workflow_sets_flags_and_the_clippy_steps_are_the_six_pinned_ones() {
     let files = workflow_files();
     assert!(files.len() >= 4, "found only {files:?}");
     let mut commands = Vec::new();

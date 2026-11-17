@@ -567,3 +567,54 @@ fn goldens_without_an_action_is_a_usage_error() -> Result<()> {
     assert_eq!(code(&out), Some(64), "{}", stderr(&out));
     Ok(())
 }
+
+/// `agents-stale` reads the embedded catalog, so these tests need no files. Each passes `--today`.
+fn agents_stale(args: &[&str]) -> Result<Output> {
+    let repo = Repo::new()?;
+    let mut all = vec!["agents-stale"];
+    all.extend_from_slice(args);
+    xtask(repo.path(), &all)
+}
+
+#[test]
+fn agents_stale_passes_the_day_the_seed_list_was_read() -> Result<()> {
+    let out = agents_stale(&["--today", "2026-11-17"])?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    assert!(stderr(&out).contains("none checked more than 180 days"));
+    Ok(())
+}
+
+#[test]
+fn agents_stale_exits_one_and_names_each_stale_entry() -> Result<()> {
+    let out = agents_stale(&["--today", "2099-01-01"])?;
+    assert_eq!(code(&out), Some(1));
+    let text = stderr(&out);
+    assert!(text.contains("microsoft-defender-endpoint-linux was checked on"));
+    assert!(text.contains("The release stops here."));
+    assert!(text.contains("crates/rdy-checks-host/data/agents.toml"));
+    Ok(())
+}
+
+#[test]
+fn agents_stale_takes_the_age_limit_from_the_flag() -> Result<()> {
+    let out = agents_stale(&["--today", "2099-01-01", "--max-days", "1000000"])?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    Ok(())
+}
+
+#[test]
+fn agents_stale_refuses_a_today_that_is_not_a_date() -> Result<()> {
+    for today in ["tomorrow", "2026-13-01", "20261117", ""] {
+        let out = agents_stale(&["--today", today])?;
+        assert_eq!(code(&out), Some(70), "{today:?} passed the gate");
+        assert!(stderr(&out).contains("is not a date"), "{today:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn agents_stale_needs_today() -> Result<()> {
+    let out = agents_stale(&[])?;
+    assert_eq!(code(&out), Some(64));
+    Ok(())
+}
