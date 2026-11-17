@@ -210,18 +210,26 @@ fn json_stdout_is_the_same_document_in_every_mode() {
             serde_json::from_str(&ran.stdout).unwrap_or_else(|e| panic!("not JSON: {e}"))
         })
         .collect();
-    let keys = |doc: &serde_json::Value| {
-        let mut fields: Vec<String> = doc
-            .as_object()
-            .map(|map| map.keys().cloned().collect())
-            .unwrap_or_default();
-        fields.sort();
-        let verdict = doc.get("verdict").cloned();
-        let checks = doc.get("checks").and_then(|c| c.as_array()).map(Vec::len);
-        (fields, verdict, checks)
-    };
-    assert_eq!(keys(&documents[0]), keys(&documents[1]));
-    assert_eq!(keys(&documents[0]), keys(&documents[2]));
+    // The whole document, with the fields that count time taken out (`duration_ms`, `started_ms`, `at_ms`).
+    let scrubbed: Vec<serde_json::Value> = documents.into_iter().map(scrub).collect();
+    assert_eq!(scrubbed[0], scrubbed[1]);
+    assert_eq!(scrubbed[0], scrubbed[2]);
+}
+
+/// `value` without any object key that ends in `_ms`.
+fn scrub(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.into_iter()
+                .filter(|(key, _)| !key.ends_with("_ms"))
+                .map(|(key, value)| (key, scrub(value)))
+                .collect(),
+        ),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(scrub).collect())
+        }
+        other => other,
+    }
 }
 
 #[test]
@@ -251,4 +259,36 @@ fn quiet_and_verbose_together_are_a_usage_error() {
     let ran = run(&["--quiet", "--verbose"]);
     assert_eq!(ran.code, 64, "{}", ran.stderr);
     assert!(ran.stdout.is_empty());
+    let short = run(&["-q", "-v"]);
+    assert_eq!(short.code, 64, "{}", short.stderr);
+    assert!(short.stdout.is_empty());
+}
+
+#[test]
+fn quiet_and_verbose_together_with_json_leave_only_the_error_on_stdout() {
+    let ran = run(&["-q", "-v", "--json"]);
+    assert_eq!(ran.code, 64, "{}", ran.stderr);
+    let doc: serde_json::Value =
+        serde_json::from_str(&ran.stdout).unwrap_or_else(|e| panic!("not JSON: {e}"));
+    // One error document, and none of the report.
+    assert!(doc.get("checks").is_none(), "{}", ran.stdout);
+    assert!(
+        doc.get("error").is_some() || doc.get("code").is_some(),
+        "{}",
+        ran.stdout
+    );
+    assert!(!ran.stdout.contains(".. finished"));
+}
+
+#[test]
+fn an_event_line_is_exactly_the_shape_of_the_plan() {
+    let ran = run(&["--verbose"]);
+    for line in events(&ran.stderr) {
+        let ok = ["host.cpu", "host.memory"].iter().any(|key| {
+            line.strip_prefix(&format!("  .. finished {key} (PASS, "))
+                .and_then(|rest| rest.strip_suffix(" ms)"))
+                .is_some_and(|ms| !ms.is_empty() && ms.bytes().all(|b| b.is_ascii_digit()))
+        });
+        assert!(ok, "{line:?}");
+    }
 }

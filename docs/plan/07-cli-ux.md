@@ -272,7 +272,7 @@ banner, every problem with its fix, the summary, the folder line and the verdict
 under each entry `expected`, `observed` (scalars as `key=value`, lists as `key=list(N)`, objects as
 `key=map(N)`) and `took` lines, a `needs` row under the header, one plain line as each check finishes (on a
 pipe too, printed before the header, see C.2), and an `actions` count (C.2). `--verbose` turns the live
-line off. `--quiet` keeps the `Tip:` and the macOS or Windows folder note, because they are about
+line off (the code lands with the second of the two PRs, M1-142 and M1-143, to merge). `--quiet` keeps the `Tip:` and the macOS or Windows folder note, because they are about
 the run and not the list. `--dry-run` (M2) verifies the spec, prints what each check would
 read, contact and need, and ends with `Dry run: nothing was run.` It reads only rdy's own process state and
 the trust store, opens no socket and creates no folder (C.3).

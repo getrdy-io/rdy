@@ -488,18 +488,22 @@ fn a_host_set_later_replaces_the_stand_in_in_the_partial_report() {
     assert_eq!(report.host.hostname, "real-host");
 }
 
-/// What a finish hook was told: key, status and duration.
+/// What a progress hook was told: key, status and duration.
 type Heard = Arc<std::sync::Mutex<Vec<(String, Status, u64)>>>;
 
-fn listener() -> (FinishHook, Heard) {
+// The enum is `non_exhaustive` for other crates only, so inside this crate the pattern always matches.
+#[allow(irrefutable_let_patterns)]
+fn listener() -> (ProgressHook, Heard) {
     let heard: Heard = Arc::default();
     let sink = Arc::clone(&heard);
-    let hook = FinishHook::new(move |done| {
-        sink.lock().expect("lock").push((
-            done.key.to_owned(),
-            done.status.clone(),
-            done.duration_ms,
-        ));
+    let hook = ProgressHook::new(move |event| {
+        if let Progress::Finished(done) = event {
+            sink.lock().expect("lock").push((
+                done.key.to_owned(),
+                done.status.clone(),
+                done.duration_ms,
+            ));
+        }
     });
     (hook, heard)
 }
@@ -508,7 +512,7 @@ fn listener() -> (FinishHook, Heard) {
 async fn the_finish_hook_hears_each_scheduled_check_once_with_its_final_status() {
     let (hook, heard) = listener();
     let mut options = RunOptions::new();
-    options.on_finish = Some(hook);
+    options.on_progress = Some(hook);
     let done = run_with(Replay::new(), false, &options).await;
     let heard = heard.lock().expect("lock").clone();
     // Six checks were scheduled. `net.egress` was skipped by the plan and never ran, so it is not here.
@@ -539,7 +543,7 @@ async fn the_finish_hook_and_the_board_work_together() {
     let mut options = RunOptions::new();
     let board = engine.board(&spec, &plan, watch_base(), options.deadline, "<spec>");
     options.board = Some(Arc::clone(&board));
-    options.on_finish = Some(hook);
+    options.on_progress = Some(hook);
     let done = engine
         .execute(&spec, plan, &privilege(false), &options)
         .await;
@@ -552,7 +556,7 @@ async fn the_finish_hook_and_the_board_work_together() {
 async fn no_finish_hook_changes_nothing() {
     let (hook, _heard) = listener();
     let mut with = RunOptions::new();
-    with.on_finish = Some(hook);
+    with.on_progress = Some(hook);
     let hooked = run_with(Replay::new(), false, &with).await;
     let plain = run_with(Replay::new(), false, &RunOptions::new()).await;
     assert_eq!(hooked.results, plain.results);

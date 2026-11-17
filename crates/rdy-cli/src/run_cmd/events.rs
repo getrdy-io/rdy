@@ -1,10 +1,15 @@
 //! The event lines of `rdy run --verbose` (07 section 2.8 and C.2, M1-143).
 //!
-//! The engine tells a [`FinishHook`] when each scheduled check ends, from the scheduler's tasks. The hook
+//! The engine tells a `ProgressHook` when each scheduled check ends, from the scheduler's tasks. The hook
 //! cannot write to stderr itself: the run holds stderr as a plain `&mut dyn Write`. So the hook puts a
-//! finished line in an [`EventQueue`] and wakes the run, and [`drive`] writes the lines while it waits
-//! for the engine. A line is written as soon as its check ends, on a pipe too, so a run that hangs still
-//! shows what finished. The lines are text on stderr only. Nothing goes to stdout.
+//! finished line in an [`EventQueue`] and wakes the run, and [`Narrated::execute`] writes the lines while
+//! it waits for the engine. A line is written as soon as its check ends, on a pipe too, so the lines are
+//! there before the report text. The lines are text on stderr only. Nothing goes to stdout.
+//!
+//! **A full stderr pipe.** The write is blocking and happens on the run's current-thread runtime. If the
+//! reader of stderr stops reading and the pipe fills, the runtime stalls with it, and the watchdog (a
+//! thread of its own) ends the run with exit 70 and a partial report (07 section 5.2). That is the
+//! same end as a stalled `--json` pipe, and it is why the lines are small and written one at a time.
 
 use std::future::poll_fn;
 use std::io::Write;
@@ -12,13 +17,12 @@ use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 
-use rdy_engine::engine::{Engine, Executed, FinishHook, RunOptions as EngineOptions};
+use rdy_engine::engine::{Engine, Executed, Progress, ProgressHook, RunOptions as EngineOptions};
 use rdy_engine::plan::RunPlan;
 use rdy_engine::privilege::Privilege;
 use rdy_spec::LoadedSpec;
 
 use super::{Look, say};
-use crate::redaction;
 use crate::style::Styler;
 use crate::terminal::event_line;
 
@@ -33,16 +37,15 @@ struct State {
 pub(super) struct EventQueue(Arc<Mutex<State>>);
 
 impl EventQueue {
-    /// The hook to give the engine. The key is redacted, then escaped by [`event_line`].
-    pub(super) fn hook(&self, styler: Styler) -> FinishHook {
+    /// The hook to give the engine. The engine redacts the key, and [`event_line`] escapes it.
+    pub(super) fn hook(&self, styler: Styler) -> ProgressHook {
         let queue = self.clone();
-        FinishHook::new(move |done| {
-            let line = event_line(
-                &redaction::redact_text(done.key),
-                done.status,
-                done.duration_ms,
-                styler,
-            );
+        ProgressHook::new(move |event| {
+            // Events are added over time. This one prints the ones it knows.
+            let Progress::Finished(done) = event else {
+                return;
+            };
+            let line = event_line(done.key, done.status, done.duration_ms, styler);
             let waker = {
                 let mut state = queue.0.lock().unwrap_or_else(PoisonError::into_inner);
                 state.lines.push(line);
@@ -83,7 +86,7 @@ impl<'a> Narrated<'a> {
     ) -> Self {
         let events = verbose.then(|| {
             let queue = EventQueue::default();
-            options.on_finish = Some(queue.hook(look.styler()));
+            options.on_progress = Some(queue.hook(look.styler()));
             (queue, look, stderr)
         });
         Self { engine, events }
