@@ -380,8 +380,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-181 | todo | | `rdy run` writes the HTML report next to the JSON | added 2026-11-17 (correction-45); backlog corrected 2026-11-17 (correction-50): the page of an `--allow-unsigned` run shows the UNSIGNED SPEC banner, the HTML half of M1-126's "both reports say unsigned" (PR #84 review)
 
 - M1-182 | todo | | host.container_runtime stores no proxy password from a URL with no scheme | added 2026-11-17 (correction-51, M1-098 security review)
+- M1-183 | [#98](https://github.com/getrdy-io/rdy/pull/98) | 2026-11-17 | Every spec read refuses a FIFO or a device, and `spec sign` refuses an expired spec | added 2026-11-17 (correction-53, signing review MF-01, PR #97); added 2026-11-17 (correction-53, M1-132 signing review MF-01)
 
-- M1-183 | todo | | Every spec read refuses a FIFO or a device, and `spec sign` refuses an expired spec | added 2026-11-17 (correction-53, M1-132 signing review MF-01)
 
 - M1-184 | todo | | The recording handshake refuses a server without the leaf's key, and TLS results say "no revocation check" | added 2026-11-17 (correction-55, M1-101 TLS review SF-01 and SF-02)
 
