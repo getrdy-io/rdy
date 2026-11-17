@@ -273,7 +273,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-128 | todo | | SEC-22 No-phone-home strace test on Linux CI | backlog corrected 2026-11-06 (correction-37): allows exactly the local IPC destinations of INV-11's third exception: `/run/chrony/chronyd.sock` and `/var/run/chrony/chronyd.sock`, UDP `127.0.0.1:323` and `[::1]:323`, and the D-Bus system bus at `/run/dbus/system_bus_socket` and `/var/run/dbus/system_bus_socket` (PR #35 security review); backlog corrected 2026-11-06 (correction-39): `firewall-cmd` joins the system bus destinations, and a unix socket a check declared (INV-28) is allowed (PR #39 and PR #40 reviews)
 
-- M1-129 | todo | | First run page and M1 example spec | backlog corrected 2026-10-30 (correction-20): owns the top-level spec example (PR #106 review)
+- M1-129 | todo | | Deferred: (1) the first run page links to `install.md`, `run/exit-codes.md` and `unsigned.md`, which land with M1-133 (PR #85), so those links do not resolve on main until it merges; (2) the stale 'quickstart can reach READY today' comment in the signed fixtures (M1-126 item 1) stays, because re-signing three fixtures is its own change; (3) the example is `acme-quickstart.yaml`, not a new file, and the root `examples` entry is its JSON form, checked against the file by xtask
 
 - M1-130 | todo | | SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading | backlog corrected 2026-11-06 (correction-38): `note:` prefix for "report files not written", the `fail_after_verdict` doc, a call-site test for `--json` to `on_stdout`; 2.5 h (PR #34 review)
 
