@@ -92,7 +92,9 @@ fn label(key: &str) -> String {
 /// One decimal place, without a trailing `.0`: `42.5`, `42`.
 fn one_decimal(f: f64) -> String {
     let text = format!("{f:.1}");
-    text.strip_suffix(".0").map_or(text.clone(), str::to_owned)
+    let text = text.strip_suffix(".0").map_or(text.clone(), str::to_owned);
+    // A small negative rounds to -0, which reads as a number nobody wrote.
+    if text == "-0" { "0".to_owned() } else { text }
 }
 
 fn number(key: &str, n: &Number) -> String {
@@ -107,7 +109,12 @@ fn number(key: &str, n: &Number) -> String {
             (None, Some(f)) => format_bytes(f as u64),
             _ => format!("{n} bytes"),
         },
-        Some("ms") => format!("{n} ms"),
+        Some("ms") => match n.as_f64() {
+            Some(f) if n.as_i64().is_none() && n.as_u64().is_none() => {
+                format!("{} ms", one_decimal(f))
+            }
+            _ => format!("{n} ms"),
+        },
         Some("percent") => match n.as_f64() {
             Some(f) if n.as_i64().is_none() && n.as_u64().is_none() => {
                 format!("{}%", one_decimal(f))
@@ -217,8 +224,10 @@ mod tests {
         assert_eq!(text("free_bytes", &json!(2048.0)), ["2 KiB"]);
         assert_eq!(text("free_bytes", &json!(1.5)), ["1.5 bytes"]);
         assert_eq!(text("free_bytes", &json!(-1)), ["-1 bytes"]);
-        // A float under milliseconds keeps its digits. A percent rounds to one decimal.
-        assert_eq!(text("took_ms", &json!(12.25)), ["12.25 ms"]);
+        // A float under milliseconds or percent rounds to one decimal, and never reads -0.
+        assert_eq!(text("took_ms", &json!(12.26)), ["12.3 ms"]);
+        assert_eq!(text("took_ms", &json!(-0.0)), ["0 ms"]);
+        assert_eq!(text("used_percent", &json!(-0.04)), ["0%"]);
         assert_eq!(text("used_percent", &json!(42.54)), ["42.5%"]);
         assert_eq!(text("used_percent", &json!(42.0)), ["42%"]);
         assert_eq!(text("used_percent", &json!(0.04)), ["0%"]);
@@ -268,14 +277,10 @@ mod tests {
     /// the fields out.
     #[test]
     fn without_redaction_every_canary_shows_on_its_line() {
-        let observed = json!({
-            "api_password": "canary-found-key-1",
-            "env": [{"name": "DB_PASSWORD", "value": "canary-found-env-2"}],
-            "cmdline": ["psql", "--password", "canary-found-argv-3"],
-            "log": "Authorization: Bearer canary-found-hdr-4",
-            "kubeconfig": {"users": [{"user": {"token": "canary-found-kube-6"}}]},
-        });
-        let all: Vec<String> = facts(observed.as_object())
+        let planted: Value =
+            serde_json::from_str(include_str!("../../../../tests/data/found-canaries.json"))
+                .expect("the shared canary input is JSON");
+        let all: Vec<String> = facts(planted["observed"].as_object())
             .iter()
             .flat_map(|fact| {
                 fact.lines
@@ -288,10 +293,29 @@ mod tests {
             "Env: Name: DB_PASSWORD; Value: canary-found-env-2",
             "Cmdline: --password",
             "Cmdline: canary-found-argv-3",
-            "Log: Authorization: Bearer canary-found-hdr-4",
-            "Kubeconfig: Users: User: Token: canary-found-kube-6",
+            "Log: Authorization: Bearer canary-found-hdr-4\nok",
+            "Kubeconfig: Token: canary-found-kube-6",
+            "Note: token=canary-found-text-5",
         ] {
             assert!(all.iter().any(|l| l == line), "{line:?} is not in {all:?}");
+        }
+        // And the expected side.
+        let needed: Vec<String> = facts(planted["expected"].as_object())
+            .iter()
+            .flat_map(|fact| {
+                fact.lines
+                    .iter()
+                    .map(|line| format!("{}: {}", fact.label, plain(line)))
+            })
+            .collect();
+        for line in [
+            "Client secret: canary-found-exp-7",
+            "Args: canary-found-exp-8",
+        ] {
+            assert!(
+                needed.iter().any(|l| l == line),
+                "{line:?} is not in {needed:?}"
+            );
         }
     }
 

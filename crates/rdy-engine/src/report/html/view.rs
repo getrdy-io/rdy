@@ -172,6 +172,9 @@ pub(super) struct View {
     pub user: Option<String>,
     pub run_as: &'static str,
     pub banners: Vec<Banner>,
+    /// Our own banner titles joined, which print in the top margin of every page, or `None` with no
+    /// banner. Only fixed words: never text from the report.
+    pub print_mark: Option<String>,
     /// `https://getrdy.io/?ref=report&product=<product>`: the only link out, with the product encoded.
     pub product_link: String,
     pub sections: Vec<Section>,
@@ -268,6 +271,7 @@ impl View {
                 "not root"
             },
             product_link: product_link(&report.spec.product),
+            print_mark: print_mark(&banners),
             banners,
             sections: group_by_bucket(&report.checks)
                 .iter()
@@ -348,6 +352,19 @@ fn product_link(product: &str) -> String {
         }
     }
     link
+}
+
+/// The words that print in the top margin of every page when the page has a banner (07 D.3). They are the
+/// titles of the banners, which are fixed text of ours, so a printed page 2 still says that the spec was
+/// not verified. Text from the report never goes here.
+fn print_mark(banners: &[Banner]) -> Option<String> {
+    (!banners.is_empty()).then(|| {
+        banners
+            .iter()
+            .map(|banner| banner.title)
+            .collect::<Vec<_>>()
+            .join(" / ")
+    })
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).
@@ -494,6 +511,11 @@ fn on_page_check<'a>(
 fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckView {
     let index = index_of(report, check);
     let shown = on_page_check(on_page, index, check);
+    // The writer keeps every check in order, so a miss is a bug. In release the lists are left out.
+    debug_assert!(
+        shown.is_some(),
+        "check {index} is not in the report the JSON holds"
+    );
     let (status_word, status_class) = match check.status {
         Status::Pass => ("PASS", "status-pass"),
         Status::Warn => ("WARN", "status-warn"),

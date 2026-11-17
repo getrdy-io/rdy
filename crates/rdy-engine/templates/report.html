@@ -8,6 +8,9 @@
 <title>rdy report: {{ verdict_word }}, {{ title_product }}</title>
 <style>
 {%- include "report.css" %}
+{%- if let Some(mark) = print_mark %}
+@page { margin-top: 2cm; @top-center { content: "{{ mark }}"; font: bold 10pt system-ui, sans-serif; color: #000000; } }
+{%- endif %}
 </style>
 </head>
 <body>

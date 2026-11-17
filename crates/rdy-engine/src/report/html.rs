@@ -47,7 +47,9 @@
 //! list is one line per item, sorted by key so the order does not depend on a JSON feature. Past the
 //! page cap, and after the action rows, lines are cut and each check says how many. The footer holds the
 //! one link out, with `ref=report` and the percent-encoded product and `rel="noopener noreferrer"`, and
-//! the link to the source. In print the banners stay in the flow, so they print once and cover nothing.
+//! the link to the source. In print the banners stay in the flow, so they print once and cover nothing, and
+//! their titles print in the top margin of every page (`@page`), so page 2 still says the spec was not
+//! verified.
 
 use crate::redact::RedactedReport;
 use crate::report::JsonError;
@@ -126,6 +128,9 @@ fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
             .flat_map(|(found, needed)| found.iter().chain(needed))
             .map(|fact| fact.lines.len())
             .sum();
+        // The search assumes a page grows with the lines it keeps. Cuts move other text a little (the
+        // "N more lines" notes), so it can settle on fewer lines than would fit. That is safe: the page
+        // it settles on is the one rendered and measured below.
         let (mut fits, mut over) = (0, total);
         while fits < over {
             let middle = fits + (over - fits).div_ceil(2);

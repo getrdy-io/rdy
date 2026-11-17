@@ -163,9 +163,24 @@ fn the_banners_stay_in_the_flow_in_print() -> TestResult {
     let css = &html[style..html.find("</style>").ok_or("no end of style")?];
     let print = &css[css.find("@media print {").ok_or("no print block")?..];
     assert!(!css.contains("position: fixed"), "{css}");
-    assert!(!css.contains("@page"), "{css}");
     assert!(!print.contains("padding-top"), "{print}");
     assert!(!html.contains("--banner-height"));
+    // Every printed page carries the banner titles in its top margin, so page 2 still says the spec was
+    // not verified. The words are ours: a hostile spec file name is not in the rule.
+    assert!(css.contains(
+        "@page { margin-top: 2cm; @top-center { content: \"WARNING: UNSIGNED SPEC / INCOMPLETE\";"
+    ));
+    let mut doc = sample()?;
+    doc["signature"] = json!({"state": "unsigned"});
+    doc["spec"]["file_name"] = json!("evil\"; } } x{y:z");
+    let hostile = html_of(doc)?;
+    let rule = between(&hostile, "@page {", "#000000; } }")?;
+    assert!(
+        rule.contains("WARNING: UNSIGNED SPEC") && !rule.contains("evil"),
+        "{rule}"
+    );
+    // No banner, no rule.
+    assert!(!html_of(sample()?)?.contains("@page"));
     Ok(())
 }
 
@@ -189,23 +204,10 @@ const CANARIES: [&str; 8] = [
 #[test]
 fn canaries_planted_in_observed_and_expected_render_as_redacted_text() -> TestResult {
     let mut doc = sample()?;
-    doc["checks"][0]["observed"] = json!({
-        "api_password": "canary-found-key-1",
-        "env": [
-            {"name": "DB_PASSWORD", "value": "canary-found-env-2"},
-            {"name": "HOME", "value": "/home/synthetic"},
-        ],
-        "cmdline": ["psql", "--password", "canary-found-argv-3"],
-        "log": "Authorization: Bearer canary-found-hdr-4\nok",
-        "note": "token=canary-found-text-5",
-        "kubeconfig": {"token": "canary-found-kube-6"},
-        "arch": "x86_64",
-    });
-    doc["checks"][0]["expected"] = json!({
-        "client_secret": "canary-found-exp-7",
-        "args": ["--token", "canary-found-exp-8"],
-        "min": 8,
-    });
+    // The input is shared with the raw-map control in `view/facts.rs`.
+    let planted: Value = serde_json::from_str(include_str!("data/found-canaries.json"))?;
+    doc["checks"][0]["observed"] = planted["observed"].clone();
+    doc["checks"][0]["expected"] = planted["expected"].clone();
 
     // The canaries are in the input, as text and as fields of the report the engine reads.
     let input = serde_json::to_string(&doc)?;

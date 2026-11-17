@@ -136,7 +136,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   body { background: #ffffff; color: #000000; }
   /* The banners stay in the flow in print, so they print once, at the top of page one, and cover nothing.
      A fixed banner that repeats on every page was tried: headless Chrome puts a fixed box with a negative
-     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. */
+     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
+     template adds a top page-margin box with the banner titles, so every page carries the mark. */
   .check, tr { break-inside: avoid; }
   #passed, #capabilities { break-before: page; }
 }
