@@ -403,6 +403,11 @@ jobs:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
           RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
+      # The docs-test runner (M1-136, ADR 0046) already ran in nextest above. This step runs it again by
+      # name, so each leg's log shows how many tested blocks ran, or why Windows skipped them.
+      - name: docs-test (tested blocks of the README and the pages)
+        if: ${{ !matrix.compile_only }}
+        run: cargo test --locked --target "$TARGET" --package rdy --test docs_test -- --nocapture
       # A golden file that no test compared is an orphan: its test was renamed or deleted (M1-052).
       - name: No orphaned golden files
         if: matrix.name == 'linux-x64'

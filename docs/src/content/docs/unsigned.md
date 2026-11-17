@@ -18,7 +18,7 @@ This page describes `--key` and `rdy verify` as they ship in 0.1.0. Older builds
 - rdy prints `WARNING: UNSIGNED SPEC` before any check runs.
 - rdy marks every report from the run `UNSIGNED SPEC`.
 
-```sh
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run acme-quickstart.yaml --allow-unsigned
 ```
 

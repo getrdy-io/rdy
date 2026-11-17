@@ -343,7 +343,7 @@ cargo xtask docs --check
 cd docs && pnpm install --frozen-lockfile && pnpm dev
 ```
 
-From M2, tested blocks run in `docs-test`. A block marked `tested` runs in an empty temporary directory with `rdy` on `PATH` and the repo's `examples/` copied in. A block may declare its exit set, for example ```` ```sh tested exit=0|1|2 ````. A block marked `install-only` runs only in the post-release verify job, through a block extraction script that `06` owns.
+From M2, tested blocks run in `docs-test`. A block marked `tested` runs in an empty temporary directory with `rdy` on `PATH` and the repo's `examples/` copied in. A block declares its exit set and a shape regex, for example ```` ```sh tested exit=0|1|2 shape=^NOT\sREADY ````. The marker words, the run folder, the `--no-network` rule and the README transcript goldens are in ADR 0046. M1 runs them in an integration test of the `rdy` package (`crates/rdy-cli/tests/docs_test.rs`), not in `xtask`. A block marked `install-only` runs only in the post-release verify job, through a block extraction script that `06` owns.
 
 ## Plan corrections found
 
