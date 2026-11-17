@@ -264,6 +264,14 @@ pub enum InternalKind {
         /// The variable that holds the proxy URL.
         var: String,
     },
+    /// A check family's probe ended the run (the Kubernetes family could not promise to hide a credential
+    /// of the kubeconfig or of the proxy). The text and the hint are the family's own and hold no secret.
+    FamilyFatal {
+        /// What went wrong.
+        message: String,
+        /// How to fix it.
+        hint: String,
+    },
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -371,6 +379,7 @@ fn internal_message(kind: &InternalKind) -> String {
         InternalKind::ProxySecretRefused { var } => format!(
             "rdy cannot promise to keep the password in the proxy URL of {var} out of its output"
         ),
+        InternalKind::FamilyFatal { message, .. } => message.clone(),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
         }
@@ -592,6 +601,7 @@ impl CliError {
             Self::Internal(InternalKind::ProxySecretRefused { var }) => format!(
                 "use a proxy password of 6 bytes or more in {var}, or take the user name and password out of it, then run rdy again"
             ),
+            Self::Internal(InternalKind::FamilyFatal { hint, .. }) => hint.clone(),
             Self::Internal(InternalKind::NotImplemented { .. }) => {
                 "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
                     .to_owned()

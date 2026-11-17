@@ -1852,6 +1852,7 @@ dependencies = [
  "minisign",
  "proptest",
  "rdy-checks-host",
+ "rdy-checks-k8s",
  "rdy-checks-net",
  "rdy-engine",
  "rdy-spec",

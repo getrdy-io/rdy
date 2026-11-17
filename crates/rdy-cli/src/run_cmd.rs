@@ -48,7 +48,8 @@ use rdy_engine::report::{JsonError, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
-    CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
+    CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions, Signature,
+    SpecRef,
 };
 use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
@@ -206,8 +207,12 @@ async fn execute(
     );
     run_options.allow_unsigned = args.allow_unsigned;
     run_options.network = options.network;
-    // Recorded only. The flag does nothing until M1-107 builds the Kubernetes family.
     run_options.kube_context.clone_from(&args.kube_context);
+    // The Kubernetes family's probe reads these two flags, and says which cluster it is about to touch on
+    // stderr before its first request (ADR 0031 decision 4). The line is redacted like every other.
+    options.kubeconfig.clone_from(&args.kubeconfig);
+    options.kube_context.clone_from(&args.kube_context);
+    options.announce = Some(rdy_engine::engine::Announce::new(announce_cluster));
 
     let engine = Engine::new(registry, hub);
     let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
@@ -227,7 +232,7 @@ async fn execute(
         let base = assemble(
             &loaded,
             args,
-            &privilege,
+            privilege.identity(),
             stand_in_host(),
             make_run(
                 run_id.clone(),
@@ -253,6 +258,15 @@ async fn execute(
     }
     options.board = board;
     let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+    // A family's probe ended the run: no check ran. No report is written for a run that did not start.
+    if let Some(fatal) = executed.fatal {
+        discard_if_empty(dir);
+        state.finish(crate::EXIT_INTERNAL);
+        return Err(CliError::Internal(InternalKind::FamilyFatal {
+            message: fatal.message,
+            hint: fatal.hint,
+        }));
+    }
 
     let finished_at = clock();
     let run = make_run(
@@ -262,7 +276,9 @@ async fn execute(
         origin.elapsed(),
         run_options,
     );
-    let mut report = assemble(&loaded, args, &privilege, host, run, executed.results);
+    let mut identity_privilege = privilege.identity();
+    identity_privilege.kube = executed.kube;
+    let mut report = assemble(&loaded, args, identity_privilege, host, run, executed.results);
     report.capabilities = executed.capabilities;
     executed.log.apply(&mut report);
     let counts = executed.counts;
@@ -412,7 +428,7 @@ fn make_run(
 fn assemble(
     loaded: &LoadedSpec,
     args: &RunArgs,
-    privilege: &Privilege,
+    identity: Identity,
     host: Host,
     run: Run,
     results: Vec<CheckResult>,
@@ -423,9 +439,19 @@ fn assemble(
         spec_ref(loaded, &args.spec),
         Signature::from(loaded.signature()),
         host,
-        privilege.identity(),
+        identity,
         results,
     )
+}
+
+/// Prints the cluster line to stderr. The Kubernetes family calls it once, before the first request, with
+/// the context, server and user (ADR 0031 decision 4). The text passes the redactor and the terminal
+/// escaper, and a failed write is not an error: the line is a courtesy, and the report says the same.
+fn announce_cluster(line: &str) {
+    let text = redaction::redact_text_then(&format!("Cluster: {line}"), |text| {
+        rdy_engine::text::escape_untrusted(text)
+    });
+    let _ = writeln!(std::io::stderr(), "{text}");
 }
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so

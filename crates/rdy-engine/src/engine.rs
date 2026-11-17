@@ -45,9 +45,11 @@ use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Observer, Planned, Ran, 
 use crate::watchdog::Board;
 
 #[cfg(test)]
+mod hook_tests;
+#[cfg(test)]
 mod hosts_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// What shapes one run.
 #[derive(Debug, Clone)]

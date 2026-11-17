@@ -8,8 +8,9 @@
 //! - `net`: registered with `net.egress` (M1-095) and `net.mtu` (M1-157). The other `net.*` ids are not built, so the planner skips
 //!   them as `not_in_build`. The check declares the `network` need, so `--no-network` skips it as
 //!   `missing_need`.
-//! - `k8s`: not registered yet. The checks exist in `rdy-checks-k8s`, but the family arrives with the
-//!   lazy kube context probe (M1-107).
+//! - `k8s`: registered (M1-107) with `k8s.version` and `k8s.access`. The family probes `kube_context` once
+//!   per run, and only when the plan holds a runnable k8s check. Its other ids are not built into the
+//!   family yet, so the planner skips them as `not_in_build`.
 //!
 //! Each family ticket adds its line here, and nowhere else.
 
@@ -25,6 +26,7 @@ pub fn registry() -> Result<Registry, RegistryError> {
     let mut registry = Registry::new();
     registry.register(rdy_checks_host::HostFamily)?;
     registry.register(rdy_checks_net::NetFamily)?;
+    registry.register(rdy_checks_k8s::K8sFamily::new())?;
     Ok(registry)
 }
 
@@ -53,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_builds_and_holds_the_host_and_net_families() {
+    fn the_registry_builds_and_holds_the_host_net_and_k8s_families() {
         let registry = registry().expect("the registry builds");
         assert!(registry.family("host").is_some());
         assert!(registry.check("host.cpu").is_some());
@@ -61,6 +63,8 @@ mod tests {
         assert!(registry.check("net.egress").is_some());
         assert!(registry.check("net.proxy").is_some());
         assert!(registry.check("net.dns").is_none());
-        assert!(registry.family("k8s").is_none());
+        assert!(registry.family("k8s").is_some());
+        assert!(registry.check("k8s.version").is_some());
+        assert!(registry.check("k8s.access").is_some());
     }
 }

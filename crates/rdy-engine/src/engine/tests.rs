@@ -125,7 +125,7 @@ checks:
     endpoints: [\"registry.acme.example:443\"]
 ";
 
-fn loaded(text: &str) -> LoadedSpec {
+pub(super) fn loaded(text: &str) -> LoadedSpec {
     rdy_spec::load(
         text.as_bytes(),
         None,
@@ -135,7 +135,7 @@ fn loaded(text: &str) -> LoadedSpec {
     .expect("the spec loads")
 }
 
-fn privilege(elevated: bool) -> Privilege {
+pub(super) fn privilege(elevated: bool) -> Privilege {
     let (euid, elevation) = if elevated {
         (0, Elevation::Root)
     } else {
@@ -167,7 +167,7 @@ async fn run_with(replay: Replay, elevated: bool, options: &RunOptions) -> Execu
         .await
 }
 
-fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
+pub(super) fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
     done.results
         .iter()
         .find(|r| r.key == key)
@@ -313,17 +313,17 @@ static NET_CHECK: CheckInfo = CheckInfo {
     family: "net",
     ..info("net.egress", &[Need::Network])
 };
-static KUBE_CHECK: CheckInfo = CheckInfo {
+pub(super) static KUBE_CHECK: CheckInfo = CheckInfo {
     family: "k8s",
     ..info("k8s.version", &[Need::KubeContext])
 };
-static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
-static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
+pub(super) static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
+pub(super) static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
 
 /// Counts the checks that ran in both test families, net and k8s.
 static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-struct Counting(&'static CheckInfo);
+pub(super) struct Counting(pub(super) &'static CheckInfo);
 
 impl Check for Counting {
     fn info(&self) -> &'static CheckInfo {
@@ -338,7 +338,7 @@ impl Check for Counting {
     }
 }
 
-struct CountingFamily(&'static str, &'static [&'static CheckInfo]);
+pub(super) struct CountingFamily(pub(super) &'static str, pub(super) &'static [&'static CheckInfo]);
 
 impl Family for CountingFamily {
     fn name(&self) -> &'static str {

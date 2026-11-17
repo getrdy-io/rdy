@@ -207,6 +207,10 @@ pub struct Env {
     pub rdy_vars: Vec<String>,
     /// The time at load, in Unix seconds. The time left on a token or certificate is counted from it.
     pub now_unix: i64,
+    /// `PATH`, to name the file of a bare credential plugin command in the `exec` action-log entry.
+    pub path: Option<OsString>,
+    /// `PATHEXT` (Windows), the extensions that complete a bare plugin command.
+    pub pathext: Option<OsString>,
 }
 
 impl fmt::Debug for Env {
@@ -221,6 +225,7 @@ impl fmt::Debug for Env {
             .field("no_proxy", &self.no_proxy)
             .field("rdy_vars", &self.rdy_vars)
             .field("now_unix", &self.now_unix)
+            .field("path", &self.path)
             .finish()
     }
 }
@@ -252,6 +257,8 @@ impl Env {
                 .filter(|name| is_rdy_var(name, cfg!(windows)))
                 .collect(),
             now_unix: unix_now(),
+            path: std::env::var_os("PATH"),
+            pathext: std::env::var_os("PATHEXT"),
         }
     }
 
@@ -1083,7 +1090,7 @@ fn from_kubeconfig(
         tls_verification_off: config.accept_invalid_certs,
         impersonates,
     };
-    let plugin_exec = plugin_exec_of(&config);
+    let plugin_exec = plugin_exec_of(&config, env);
     let ca_set = config.root_cert.is_some();
     // No namespace is used (ADR 0031 decision 12), so the one from the context is not kept.
     config.default_namespace = String::new();
@@ -1364,11 +1371,58 @@ fn plugin_file(command: &str) -> Option<String> {
     Some(escape(&file))
 }
 
+/// The command of an exec plugin as the `exec` action-log entry shows it. A command with a path is shown
+/// as it is. A bare name is looked for in the directories of `path` (the `PATH` value), as the OS will
+/// when kube starts it: the first regular file wins. On Windows each extension of `pathext` is tried too
+/// (`.cmd`, `.exe`). A name that is found nowhere stays bare, so the entry never claims a path rdy did
+/// not see.
+#[must_use]
+pub fn resolve_plugin(
+    command: &str,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> String {
+    if command.is_empty() || command.contains(['/', '\\']) || Path::new(command).is_absolute() {
+        return command.to_owned();
+    }
+    let extensions: Vec<String> = if cfg!(windows) {
+        let mut all = vec![String::new()];
+        all.extend(
+            pathext
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default()
+                .split(';')
+                .filter(|ext| !ext.is_empty())
+                .map(str::to_owned),
+        );
+        all
+    } else {
+        vec![String::new()]
+    };
+    for dir in path.into_iter().flat_map(std::env::split_paths) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for extension in &extensions {
+            let candidate = dir.join(format!("{command}{extension}"));
+            if fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+                return escape(&candidate.display().to_string());
+            }
+        }
+    }
+    command.to_owned()
+}
+
 /// The exec plugin's command and arguments for the action log.
-fn plugin_exec_of(config: &Config) -> Option<PluginExec> {
+fn plugin_exec_of(config: &Config, env: &Env) -> Option<PluginExec> {
     let exec = config.auth_info.exec.as_ref()?;
     Some(PluginExec {
-        command: escape(exec.command.as_deref()?),
+        // A bare name is the file the OS will find on `PATH`, so the entry names that file.
+        command: resolve_plugin(
+            exec.command.as_deref()?,
+            env.path.as_deref(),
+            env.pathext.as_deref(),
+        ),
         args: exec
             .args
             .as_deref()
