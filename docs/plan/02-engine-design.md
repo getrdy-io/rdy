@@ -788,6 +788,11 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
     it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,
     printed through the one askama safe marker, which is on a private wrapper of the page (`EmbeddedJson`), not on the public `HtmlSafeJson` (`scripts/check-html-escapes.sh`).
   - The CSP is ADR 0003's.
+  - `rdy run` writes the page as `rdy-report-<product>-<ts>.html` next to the `.json` (M1-181):
+    `render_page(&RedactedReport)` makes an `HtmlPage` before any file is written, `OutputDir::write_html`
+    writes it by the rules of the JSON, and the order is the spec copy, the page, then the `.json`
+    last. The watchdog's sink writes the same three through the same calls. An `HtmlError` maps to the
+    `report_write` code and exit 70.
 - `rdy report` (M2) redacts input it did not produce before rendering.
 
 ## Catalog hooks (03, "Decisions needing an ADR")
@@ -1163,6 +1168,7 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
                  pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
                  pub fn write_json(&self, r: &RedactedReport) -> Result<PathBuf, ReportError>;  // M1-055 (was write_report)
+                 pub fn write_html(&self, p: &HtmlPage) -> Result<PathBuf, ReportError>;  // M1-181, feature `html`; `render_page` makes the HtmlPage
                  pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
 pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), JsonError>;  // M1-055: report::json, no `runtime` feature needed
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed

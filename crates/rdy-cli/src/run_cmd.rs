@@ -17,7 +17,8 @@
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
 //! 5. Print, then write the files: with `--json` the document goes to stdout first, then the state
-//!    moves to `Writing`, the files are written and `finish` stores the exit code. The human result
+//!    moves to `Writing`, the files are written (the page is rendered first, then the spec copy, the
+//!    `.html`, and the `.json` last, M1-181) and `finish` stores the exit code. The human result
 //!    goes to stderr last ([`crate::terminal`], M1-086): the header, the checks sorted by bucket with
 //!    their fixes, the summary, the report folder and the verdict. Stdout comes first because it is the
 //!    one write that can block for good: while it does, the watchdog still owns the report.
@@ -48,7 +49,7 @@ use rdy_engine::output::{OutputDir, ReportError, report_time};
 use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
-use rdy_engine::report::{JsonError, write_json};
+use rdy_engine::report::{JsonError, render_page, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
@@ -381,7 +382,11 @@ impl ReportSink for FolderSink {
         let Some(dir) = self.dir.upgrade() else {
             return Ok(());
         };
+        // The page is rendered before any file is written, and the `.json` goes last, so a `.json` in
+        // the folder means every file of the run is there (M1-181, 07 section 4.1).
+        let page = render_page(report)?;
         dir.write_spec(&self.spec)?;
+        dir.write_html(&page)?;
         dir.write_json(report)?;
         Ok(())
     }
@@ -570,7 +575,7 @@ fn read_sidecar(args: &RunArgs) -> Result<Option<Vec<u8>>, CliError> {
     }
 }
 
-/// Writes the spec copy and the JSON report into the folder and returns the names of the files, in the
+/// Writes the spec copy, the HTML page and the JSON report into the folder and returns the names of the files, in the
 /// order the terminal lists them.
 fn write_files(
     dir: &OutputDir,
@@ -578,7 +583,11 @@ fn write_files(
     report: &RedactedReport,
 ) -> Result<Vec<String>, CliError> {
     let failed = |error| report_error(ReportStep::WriteFiles, dir.path(), error);
+    // Render first: a page that cannot be made leaves no file behind. Then the spec copy, the page, and
+    // the `.json` last, so a `.json` in the folder means every file of the run is there (M1-181).
+    let page = render_page(report).map_err(|error| CliError::report_html(&error))?;
     let mut written = dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
+    written.push(dir.write_html(&page).map_err(failed)?);
     written.push(dir.write_json(report).map_err(failed)?);
     let mut names: Vec<String> = written
         .iter()

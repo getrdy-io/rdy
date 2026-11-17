@@ -13,6 +13,9 @@
 //! M1-141 adds its bdi and bidi checks on top of `tokens`, `Token`, `opens`, `text_of` and `inside`, with
 //! one `*_problems` function per rule. `problems_in` runs a rule over any rendered page and `each_golden`
 //! runs it over the three goldens.
+//!
+//! M1-181 includes this file in the CLI's environment harness (`#[path]`) and runs the same rules over the
+//! page that `rdy run` wrote. The names that harness uses are `pub(crate)`.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -47,7 +50,7 @@ const VOID: [&str; 6] = ["meta", "link", "br", "hr", "img", "input"];
 
 /// One piece of a page.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Token {
+pub(crate) enum Token {
     /// `<name attr="value">`. Names are lower case. Values are kept as written.
     Open {
         name: String,
@@ -308,7 +311,7 @@ fn opens(tokens: &[Token]) -> impl Iterator<Item = (usize, &str, &[(String, Stri
 }
 
 /// The problems with heading levels: one `h1`, and no level more than one below the one before.
-fn heading_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn heading_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut last = 0u8;
     let mut h1s = 0;
@@ -333,7 +336,7 @@ fn heading_problems(tokens: &[Token]) -> Vec<String> {
 
 /// The problems with `h3` status words: each `h3` starts with a `status` span whose whole text is a status
 /// word.
-fn status_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn status_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     for (i, name, _) in opens(tokens) {
         if name != "h3" {
@@ -361,7 +364,7 @@ fn status_problems(tokens: &[Token]) -> Vec<String> {
 }
 
 /// The problems with tables: each `table` holds at least one `th`, and each `th` has `scope` `col` or `row`.
-fn table_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn table_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut tables = 0;
     let mut open: Vec<(usize, usize)> = Vec::new();
@@ -391,7 +394,7 @@ fn table_problems(tokens: &[Token]) -> Vec<String> {
 }
 
 /// The problems with ids and in-page links: no id twice, and each `href="#id"` has a target.
-fn id_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn id_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut ids = BTreeSet::new();
     for (_, _, attrs) in opens(tokens) {
@@ -423,7 +426,7 @@ fn valid_product(product: &str) -> bool {
 
 /// The problems with `href` and `src`: only `#id`, the footer link and the repo link for `href`, and only
 /// `data:` for `src`. The footer link ends with a valid product name, which is `product` when it is given.
-fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
+pub(crate) fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
     let mut problems = Vec::new();
     for (_, name, attrs) in opens(tokens) {
         if let Some(href) = attr(attrs, "href") {
@@ -449,7 +452,7 @@ fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
 }
 
 /// The problems with the page itself: `lang` on `html` and the four landmarks of D.4.
-fn page_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn page_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let lang = opens(tokens)
         .find(|(_, name, _)| *name == "html")
@@ -475,7 +478,7 @@ fn page_problems(tokens: &[Token]) -> Vec<String> {
 }
 
 /// Runs `check` over the page `html`. A page the tokenizer refuses is one problem.
-fn problems_in(html: &str, check: impl Fn(&[Token]) -> Vec<String>) -> Vec<String> {
+pub(crate) fn problems_in(html: &str, check: impl Fn(&[Token]) -> Vec<String>) -> Vec<String> {
     match tokens(html) {
         Ok(tokens) => check(&tokens),
         Err(e) => vec![format!("the page does not tokenize: {e}")],

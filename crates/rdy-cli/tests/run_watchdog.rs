@@ -255,6 +255,14 @@ fn run_watchdog_child() {
     std::process::exit(i32::from(code));
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn find_report(parent: &Path) -> Result<PathBuf, Box<dyn Error>> {
     for entry in std::fs::read_dir(parent)? {
         let folder = entry?.path();
@@ -371,6 +379,27 @@ fn read_partial(outcome: &Outcome) -> Result<serde_json::Value, Box<dyn Error>> 
     let report = find_report(&out)?;
     let folder = report.parent().ok_or("no folder")?;
     assert!(folder.join("spec.yaml").is_file(), "no spec copy");
+    // The page is written before the `.json`, so a `.json` here means the page is too (M1-181). It says
+    // the run is incomplete, and it carries the hash of this `.json`.
+    let name = folder
+        .file_name()
+        .ok_or("no folder name")?
+        .to_string_lossy();
+    let html = std::fs::read_to_string(folder.join(format!("{name}.html")))?;
+    assert!(
+        html.contains("INCOMPLETE"),
+        "the page has no INCOMPLETE banner"
+    );
+    let hash: String = sha256_hex(&std::fs::read(&report)?);
+    assert!(
+        html.contains(&format!("data-sha256=\"{hash}\"")),
+        "hash of the .json"
+    );
+    // No temp file is left under any name.
+    for entry in std::fs::read_dir(folder)? {
+        let file = entry?.file_name().to_string_lossy().into_owned();
+        assert!(!file.ends_with(".tmp"), "left {file}");
+    }
     let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&report)?)?;
     assert_eq!(doc["kind"], "Report");
     assert_eq!(

@@ -50,6 +50,8 @@ use rdy_spec::VerifiedSpecBytes;
 use rdy_spec::spec::ProductSlug;
 
 use crate::redact::{Redacted, RedactedReport};
+#[cfg(feature = "html")]
+use crate::report::{HtmlError, HtmlPage};
 use crate::report::{JsonError, json_bytes};
 
 #[cfg(test)]
@@ -160,6 +162,10 @@ pub enum ReportError {
     /// The report could not be turned into JSON, or is too big even with its action log cut.
     #[error(transparent)]
     Json(#[from] JsonError),
+    /// The report could not be rendered as an HTML page (M1-181).
+    #[cfg(feature = "html")]
+    #[error(transparent)]
+    Html(#[from] HtmlError),
 }
 
 impl ReportError {
@@ -405,6 +411,23 @@ impl OutputDir {
         let json = json_bytes(report)?;
         self.write_with(&self.report_file_name("json"), |file| {
             file.write_all(json.as_bytes())
+        })
+    }
+
+    /// Writes a rendered page as `rdy-report-<product>-<time>.html`, by the same rules as
+    /// [`OutputDir::write_json`]: `create_new` at 0600, a `.tmp` file, flushed to disk, then given its
+    /// final name without replacing anything (M1-181). Render with [`crate::report::render_page`] before
+    /// any file of the run is written, and write the `.json` last.
+    ///
+    /// Returns the path of the new file for the "Report written to" block.
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`OutputDir::write_atomic`].
+    #[cfg(feature = "html")]
+    pub fn write_html(&self, page: &HtmlPage) -> Result<PathBuf, ReportError> {
+        self.write_with(&self.report_file_name("html"), |file| {
+            file.write_all(page.as_bytes())
         })
     }
 

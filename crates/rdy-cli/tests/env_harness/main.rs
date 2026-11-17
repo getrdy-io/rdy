@@ -10,8 +10,9 @@
 //! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
-//! Not here yet: `report.html` (M1-077 built the renderer; the run does not write it yet). `driver` says
-//! what else the run does not do.
+//! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
+//! so one test runs the all-pass environment into a folder and checks the written page against the structure
+//! rules of M1-082. `driver` says what else the run does not do.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
@@ -19,6 +20,10 @@
 mod completeness;
 mod driver;
 mod families;
+// The structure rules of the HTML report (M1-082), run here over the page a run wrote (M1-181). Its own
+// tests run a second time in this binary, which costs milliseconds.
+#[path = "../../../rdy-engine/tests/html_structure.rs"]
+mod html_structure;
 
 use std::error::Error;
 use std::path::Path;
@@ -57,6 +62,86 @@ fn host_min_is_found() -> TestResult {
         names.iter().any(|name| name == "host-min"),
         "env_names found {names:?}"
     );
+    Ok(())
+}
+
+/// The one file of `folder` that ends in `.extension`.
+fn only_file(folder: &Path, extension: &str) -> TestResult<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(folder)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|e| e == extension) {
+            found.push(path);
+        }
+    }
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        _ => Err(format!(
+            "want one .{extension} in {}, found {found:?}",
+            folder.display()
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn the_all_pass_env_writes_a_page_that_passes_the_structure_rules() -> TestResult {
+    use html_structure::{
+        heading_problems, id_problems, link_problems, page_problems, problems_in, status_problems,
+        table_problems,
+    };
+    use sha2::{Digest as _, Sha256};
+
+    let fixture = Fixture::load(&fixtures_dir(), "envs/host-min")?;
+    if fixture.os() != current_os() {
+        eprintln!("env_harness: skipping the written page: host-min is another OS");
+        return Ok(());
+    }
+    let out = tempfile::tempdir()?;
+    let ran = driver::run_env_into("host-min", 1, Some(out.path()))?;
+    assert_eq!(ran.report.exit_code, 0, "{}", ran.terminal);
+
+    let folders: Vec<_> = std::fs::read_dir(out.path())?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    let [folder] = folders.as_slice() else {
+        return Err(format!("want one report folder, found {folders:?}").into());
+    };
+    let json = std::fs::read(only_file(folder, "json")?)?;
+    let html_path = only_file(folder, "html")?;
+    assert!(html_path.is_file());
+    let page = std::fs::read_to_string(&html_path)?;
+    assert!(only_file(folder, "yaml").is_ok());
+
+    // The page carries the bytes of the `.json` and their hash.
+    let hash: String = Sha256::digest(&json)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "hash");
+    assert!(page.contains(String::from_utf8(json)?.trim_end()), "json");
+
+    // The terminal lists the page.
+    assert!(ran.terminal.contains(".html\n"), "{}", ran.terminal);
+
+    type Rule = fn(&[html_structure::Token]) -> Vec<String>;
+    let rules: [(&str, Rule); 6] = [
+        ("headings", heading_problems),
+        ("status", status_problems),
+        ("tables", table_problems),
+        ("ids", id_problems),
+        ("page", page_problems),
+        ("links", |tokens| link_problems(tokens, Some("acme-min"))),
+    ];
+    let mut all = Vec::new();
+    for (name, rule) in rules {
+        all.extend(
+            problems_in(&page, rule)
+                .into_iter()
+                .map(|p| format!("{name}: {p}")),
+        );
+    }
+    assert_eq!(all, Vec::<String>::new());
     Ok(())
 }
 

@@ -12,6 +12,7 @@ use jsonschema::Validator;
 use rdy_cli::RunHooks;
 use rdy_engine::testing::Replay;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 
 mod common;
 
@@ -196,6 +197,43 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
         std::fs::read(dir.join("spec.yaml")).unwrap_or_default(),
         std::fs::read(&spec).unwrap_or_default()
     );
+    // The page is next to the `.json` and carries its hash (M1-181). Nothing else is in the folder.
+    let page = std::fs::read_to_string(dir.join("rdy-report-acme-platform-20270309T101502Z.html"))
+        .unwrap_or_else(|e| panic!("no HTML file: {e}"));
+    let hash: String = Sha256::digest(file.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "{hash}");
+    let mut listed: Vec<String> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .map(|e| {
+            e.unwrap_or_else(|e| panic!("{e}"))
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    listed.sort();
+    assert_eq!(
+        listed,
+        [
+            "rdy-report-acme-platform-20270309T101502Z.html",
+            "rdy-report-acme-platform-20270309T101502Z.json",
+            "spec.yaml"
+        ]
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        for name in &listed {
+            let mode = std::fs::metadata(dir.join(name))
+                .unwrap_or_else(|e| panic!("no metadata: {e}"))
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{name}: {mode:o}");
+        }
+    }
 
     // The pinned facts, and the unsigned spec says so.
     assert_eq!(doc["run"]["id"], "00000000-0000-4000-8000-000000000001");
@@ -212,6 +250,7 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
         ran.stderr
     );
     assert!(ran.stderr.contains("Report written to "), "{}", ran.stderr);
+    assert!(ran.stderr.contains(".html\n"), "{}", ran.stderr);
 }
 
 #[test]

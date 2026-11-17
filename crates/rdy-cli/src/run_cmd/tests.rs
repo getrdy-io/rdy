@@ -12,7 +12,7 @@ use rdy_engine::check::{
 use rdy_engine::family::{BuildError, Built, Family, Registry, RegistryError};
 use rdy_engine::output::ReportError;
 use rdy_engine::redact::{Redactor, TagKey};
-use rdy_engine::report::{JsonError, json_bytes, write_json};
+use rdy_engine::report::{HtmlError, JsonError, json_bytes, write_json};
 use rdy_engine::testing::Replay;
 use rdy_spec::check::CheckParams;
 use rdy_spec::result::{
@@ -476,6 +476,31 @@ fn a_report_over_the_cap_maps_to_report_write_with_the_writers_message_and_fix()
     );
     // One error object, with the fix in its own field and not repeated in the message.
     assert!(!rendered.message.contains("Fix:"));
+}
+
+#[test]
+fn an_html_error_maps_to_report_write_exit_70_with_the_renderers_message() {
+    let error = CliError::report_html(&HtmlError::Render);
+    assert_eq!(error.code(), ErrorCode::ReportWrite, "{error:?}");
+    assert_eq!(error.exit_code().code(), 70);
+    let rendered = error.render();
+    assert_eq!(rendered.message, "the report could not be rendered as HTML");
+    assert!(
+        rendered.fix.starts_with("this is a bug in rdy"),
+        "{}",
+        rendered.fix
+    );
+    // The same error through the output folder's error, as `write_html` returns it.
+    let through = report_error(
+        ReportStep::WriteFiles,
+        std::path::Path::new("x"),
+        ReportError::from(HtmlError::Render),
+    );
+    assert_eq!(through.code(), ErrorCode::ReportWrite);
+    assert_eq!(through.render().message, rendered.message);
+    // A writer error inside the page that is not a refusal a run can cause is a bug, as for the `.json`.
+    let json = HtmlError::Json(JsonError::Serialize);
+    assert_eq!(CliError::report_html(&json).code(), ErrorCode::Internal);
 }
 
 #[test]
