@@ -5,3 +5,4 @@ Environment="HTTP_PROXY=[REDACTED:url_userinfo:~1]@proxy.acme.test:3128" "NO_PRO
 export HTTPS_PROXY='[REDACTED:url_userinfo:~1]@proxy.acme.test:3128'
 http_proxy="[REDACTED:url_userinfo:~1]@proxy.acme.test:3128"
 HTTPS_PROXY=[REDACTED:url_userinfo:~2]@proxy.acme.test:3128
+{"cmd":"HTTP_PROXY=\"[REDACTED:url_userinfo:~1]@proxy.acme.test:3128\" run"}

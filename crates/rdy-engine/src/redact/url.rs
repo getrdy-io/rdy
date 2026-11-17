@@ -134,13 +134,15 @@ fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
 /// The span of the value that starts at `start`, at most `MAX_AUTHORITY` bytes, and where the scan
 /// stopped.
 ///
-/// A value that opens with `"` or `'` skips it and ends at the same quote, white space or a control
-/// character. Any other value ends at white space, a control character, `"`, a backtick, `<` or `>`,
+/// A value that opens with `"`, `'` or a JSON-escaped `\"` skips it and ends at the same quote (for
+/// `\"`, its `\"`), white space or a control character. Any other value ends at white space, a control character, `"`, a backtick, `<` or `>`,
 /// so a `'` in an unquoted password stays inside it.
 fn proxy_value(text: &str, start: usize) -> (Range<usize>, usize) {
     let window_end = floor_boundary(text, (start + MAX_AUTHORITY).min(text.len()));
     let window = &text[start..window_end];
+    let escaped = window.starts_with("\\\"");
     let (quote, body_offset) = match window.chars().next() {
+        _ if escaped => (Some('"'), 2),
         Some(q @ ('"' | '\'')) => (Some(q), 1),
         _ => (None, 0),
     };
@@ -151,6 +153,12 @@ fn proxy_value(text: &str, start: usize) -> (Range<usize>, usize) {
             None => c.is_whitespace() || c.is_control() || matches!(c, '"' | '`' | '<' | '>'),
         })
         .unwrap_or(body.len());
+    // A JSON-escaped quote closes with its backslash, which is not part of the value.
+    let end = if escaped && body[..end].ends_with('\\') && body[end..].starts_with('"') {
+        end - 1
+    } else {
+        end
+    };
     let from = start + body_offset;
     (from..from + end, from + end)
 }
@@ -361,6 +369,7 @@ mod tests {
             // A quote around the value, and a quote or a space inside it.
             ("http_proxy=\"svc:pw@p:3128\"", "svc:pw"),
             ("export HTTPS_PROXY='svc:pw@p:3128'", "svc:pw"),
+            (r#"{"cmd":"HTTP_PROXY=\"svc:pw@h:1\" run"}"#, "svc:pw"),
             ("Environment=HTTP_PROXY=\"svc:pw@h:1\"", "svc:pw"),
             ("HTTPS_PROXY=svc:it'spw@proxy:3128", "svc:it'spw"),
             (r#"{"http-proxy": "svc:it'spw@proxy:3128"}"#, "svc:it'spw"),
