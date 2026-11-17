@@ -107,6 +107,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "an integration test of the raw runner",
     ),
     (
+        "crates/rdy-cli/tests/run_interrupt.rs",
+        "an integration test of Ctrl-C in `rdy run` that starts a real process with the raw runner (M1-058)",
+    ),
+    (
         "crates/rdy-cli/tests/run_watchdog.rs",
         "an integration test of the watchdog in `rdy run` that starts a real process with the raw runner (M1-176)",
     ),

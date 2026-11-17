@@ -80,7 +80,7 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.admission/` holds 28 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
+`checks/k8s.admission/` holds 55 clusters (the 28 below, and 27 for webhooks, `ValidatingAdmissionPolicy` and the engines' policies: `webhook-*` (fail-empty, default-fail, ready, not-ready, mutating, service-missing, match-conditions, object-selector, url, external-name, ignore, not-matching, slices-forbidden, services-forbidden, many-services), `webhooks-forbidden`, `vap-*` (deny, warn-only, not-matching, other-namespace, bindings-forbidden, not-served, forbidden), `engine-policies`, `engine-policies-forbidden`, `kyverno-exception-only`, `kyverno-cel-alpha`; the generator also writes an empty list of each new kind into every older cluster) (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
 `no-metadata-labels`, `invalid-labels`, `invalid-warn`, `namespace-missing`, `namespace-forbidden`,
 `no-namespace`, `apis-forbidden`, the OpenShift cases `openshift`, `openshift-enforce`,
 `openshift-sync-off`, `openshift-scc-forbidden`, `openshift-scc-cut`, `openshift-hostile-range`, `openshift-and-engine`, and the
@@ -105,6 +105,7 @@ A case holds only the files its check asks for: a request the case does not hold
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
 of `rdy_cli::run`) and a `golden/terminal.txt` (its stderr, M1-086).
 `redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+`results/plan-07/` holds 07 Appendix B.1 to B.3 as result files (M1-083); `reports/golden/results-*` are their JSON and HTML goldens, and `results-secrets-redacted.html` is the page of a run holding a machine id, cut secrets and a known secret.
 The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |

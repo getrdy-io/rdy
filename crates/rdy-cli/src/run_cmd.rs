@@ -28,9 +28,13 @@
 //! nothing is on stdout. With `--json` stdout already holds the whole document, printed before the
 //! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
-//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--key` and the full unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose`
-//! (M1-143) and the live progress line (M1-142) change the output later; this is the plain run.
+//! **Ctrl-C (M1-058).** The signal thread of [`crate::interrupt`] shares the write state and the weak
+//! folder handle with this module. A signal that wins the claim kills the groups, removes the folder if
+//! it is empty and exits 70 with no report. The run never sees it.
+//!
+//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), `--key` and the full
+//! unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose` (M1-143) and the
+//! live progress line (M1-142) change the output later; this is the plain run.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -168,6 +172,8 @@ async fn execute(
     }
     // A bad `--jobs` is a usage error and comes before the spec is read.
     let jobs = jobs_from(args.jobs)?;
+    // From here a signal says "No report was written" (M1-058).
+    rig.interrupt.set_run();
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
@@ -189,6 +195,10 @@ async fn execute(
     let started_at = clock();
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?.map(Arc::new);
+    if let Some(dir) = &dir {
+        // Weak, like the watchdog's: a signal removes the folder when it is still empty.
+        rig.interrupt.set_folder(Arc::downgrade(dir));
+    }
 
     if let Some(note) = jobs.note {
         let _ = writeln!(stderr, "{note}");
@@ -279,6 +289,10 @@ async fn execute(
     // block for good, on a pipe nobody reads, and while it blocks the state is still `Running`, so the
     // watchdog can write the partial report and end the run. Then the claim, then the files, then
     // `finish`. After `finish` the watchdog is only a backstop with the stored exit code.
+    if json {
+        // From the first byte of the document, a signal writes to stderr only (C4).
+        rig.interrupt.set_stdout_used();
+    }
     let printed = if json {
         print_json(&redacted, stdout).map_err(writer_error)
     } else {
@@ -378,13 +392,14 @@ impl ReportSink for FolderSink {
 fn stand_in_host() -> Host {
     Host::new(
         "unknown",
-        HostOs::new(host_os_family()),
+        HostOs::new(os_family(current_os())),
         std::env::consts::ARCH,
     )
 }
 
-fn host_os_family() -> HostOsFamily {
-    match current_os() {
+/// The report family for an OS, taken from the probe that reads the facts and not from the build.
+fn os_family(os: Os) -> HostOsFamily {
+    match os {
         Os::Macos => HostOsFamily::Macos,
         Os::Windows => HostOsFamily::Windows,
         _ => HostOsFamily::Linux,
@@ -430,13 +445,33 @@ fn assemble(
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
 /// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
-/// The handle is dropped first, because Windows cannot remove a folder that is still open.
-fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
+/// The removal goes through the folder's held parent handle ([`OutputDir::remove_if_empty`]), not by
+/// path. When this is the last holder of the folder, the handle is closed first, because Windows cannot
+/// remove a folder that is still open.
+pub(crate) fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     if let Some(dir) = dir {
-        let path = dir.path().to_owned();
-        drop(dir);
-        // `remove_dir` only removes an empty folder, and does not follow a link.
-        let _ = std::fs::remove_dir(path);
+        let _ = match Arc::try_unwrap(dir) {
+            Ok(owned) => owned.into_removed_if_empty(),
+            Err(shared) => shared.remove_if_empty(),
+        };
+    }
+}
+
+/// [`discard_if_empty`] on a helper thread, waited for at most `limit`, for the signal path: a removal
+/// on a hung mount must not hold up the exit.
+pub(crate) fn discard_bounded(dir: Option<Arc<OutputDir>>, limit: Duration) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let (done, wait) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("rdy-interrupt-remove".into())
+        .spawn(move || {
+            discard_if_empty(Some(dir));
+            let _ = done.send(());
+        });
+    if spawned.is_ok() {
+        let _ = wait.recv_timeout(limit);
     }
 }
 
@@ -669,7 +704,8 @@ fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
 }
 
 /// The machine, coarsely: the host name, the kernel release and the architecture. `host_id` stays
-/// `null` until M2-002, and the OS release fields stay unset until the host report reads them.
+/// `null` until M2-002. The OS id, version and pretty name come from os-release through the run-level
+/// probe, with the parser `host.os` uses (M1-180); a missing or unreadable file leaves them `null`.
 async fn host_facts(probe: &Probe) -> Host {
     let hostname = match probe.native(NativeCall::Hostname).await {
         Ok(NativeValue::Hostname(name)) if !name.trim().is_empty() => name,
@@ -679,11 +715,17 @@ async fn host_facts(probe: &Probe) -> Host {
         Ok(NativeValue::Uname(info)) => Some(info),
         _ => None,
     };
-    let family = host_os_family();
+    let family = os_family(probe.os());
     let arch = uname
         .as_ref()
         .map_or_else(|| std::env::consts::ARCH.to_owned(), |u| u.machine.clone());
-    let mut host = Host::new(hostname, HostOs::new(family), arch);
+    let mut os = HostOs::new(family);
+    if let Some(facts) = rdy_checks_host::read_os_facts(probe).await {
+        os.id = Some(facts.id);
+        os.version = facts.version;
+        os.pretty_name = facts.pretty_name;
+    }
+    let mut host = Host::new(hostname, os, arch);
     host.kernel = uname.map(|u| u.release);
     host
 }

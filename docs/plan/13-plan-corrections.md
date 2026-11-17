@@ -439,3 +439,44 @@ the corrections log of `11-backlog.md`.
   leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
   verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
   namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.
+- **Correction-44, the order of the run header, `--verbose` and the live line, and one M2 ticket.** From the
+  reviews of PR #68 (M1-143). PR #68 edits 07 C.1, C.2, 2.8, 3 and A.3, 02's `RunOptions` lines and M2-017's
+  dependencies; this entry records those decisions. The header prints at the end of the run, because it
+  holds facts known only then (the `needs` row). With `--verbose` the event lines print live after the
+  banner and before the header, one blank line follows them, and then come the header and the list (C.2).
+  07's rule for the M1-142 code now says so, and that "the header prints once before progress starts" is not
+  met until new M2-128 moves the header before progress (which also prints the `cluster` row before the first
+  Kubernetes request, as 07 section 2.1 says). `--verbose` turns the live line off: M1-142's exit test says
+  `quiet or verbose`, and the code lands with whichever of PR #60 and PR #68 merges second. 07 section 5.2
+  says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
+  exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
+  adds the started and phase events on it, and M2-017 depends on M2-124.
+- **Correction-45, `rdy run` writes the HTML report, and M1-100 takes PR #71's deferrals.** 01 section 5.5,
+  02 "Output and reports" and 07 sections 2.1 and 5.2 put a `.html` next to the `.json` in every report folder,
+  and the `rdy` and `rdy run` help says the run writes one. No ticket wired it: M1-057 writes the JSON only,
+  and the HTML tickets build and test the renderer. New M1-181 (core, week 19) writes the page through
+  `OutputDir::write_html`, with the `.json` written last, and the watchdog writes the INCOMPLETE page by the
+  same rules. M1-138 depends on it. PR #71 (M1-099) left `expected_issuer` and `pin_sha256`, the
+  generated-chain fixture rig and the Timeout case to M1-100, whose exit test did not hold them. M1-100 now
+  does all three (3.5 h), and M1-101 moves to week 21. No test-pinned document changed.
+- **Correction-47, the 03 section of k8s.cni, and one M2 ticket.** PR #78 (M1-165) changes its own 03
+  section after the code-reviewer, security-reviewer and k8s-expert reviews. The 03 text lands with the PR;
+  this entry approves it. k8s.cni never lists DaemonSets, because a DaemonSet holds env values. It reads 16
+  namespace and name pairs by name through optional Roles (`examples/rbac/rdy-readonly-cni.yaml`, ADR 0046):
+  14 in `kube-system`, `calico-system/calico-node` and `kube-flannel/kube-flannel-ds`. A namespace other than
+  `kube-system` is read by `GET` first, and its pair is skipped on a 404. DaemonSets are read only when the
+  node condition, the API groups and the OpenShift `Network` object did not name the plugin, or for the AWS
+  VPC CNI. OpenShift is named by `Network` `status.networkType`. Crash-loop restart evidence is not read in
+  M1, and ready below desired is not reported. Unknown, unreadable or two plugins is partial with the grants
+  named, never a block. Flannel with Calico is Canal, which enforces. A policy plugin on top of a base plugin
+  is the policy plugin (each `cni.toml` entry is base, policy or full); Azure CNI alone does not enforce.
+  Flannel on k3s is partial, because rdy cannot read `--disable-network-policy`. The AWS VPC CNI follows
+  `ENABLE_NETWORK_POLICY`, and is partial when it is absent. Pod ranges come from `Node.spec.podCIDRs` only
+  for a node-IPAM plugin or the OpenShift `Network` object; otherwise the pod side of `avoid_cidrs` is
+  partial. Default-deny egress is 03's definition: a policy that selects all pods and governs egress with no
+  rules. It warns only with `needs_egress`; otherwise, and on a plugin that does not enforce, it is a note.
+  Every result notes that only namespace `NetworkPolicy` objects are read. M1-165 must leave 03 saying so.
+  M1-175 also builds k8s.cni, eleven k8s ids in all, still 1.5 h. New M2-129 reads the plugin pods' restart
+  evidence with k8s.dns's pod read, reports ready below desired, and has k8s-expert confirm the 13 `cni.toml`
+  entries marked `verified = false` against a live cluster. M1-115's reviewer reads their source pages first.
+  No test-pinned document changed.
