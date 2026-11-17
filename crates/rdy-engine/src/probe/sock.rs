@@ -59,7 +59,7 @@ use rdy_spec::scalar::Host;
 use serde_json::Map;
 
 use super::addr::is_unusable_peer;
-use super::{Probe, ProbeError, refuse, settle};
+use super::{Probe, ProbeError, RULE_NO_NETWORK, refuse, settle};
 use crate::check::{Os, PeerClass};
 use crate::family::HostSet;
 
@@ -294,6 +294,9 @@ impl Probe {
         max_reply: usize,
     ) -> Result<usize, ProbeError> {
         let what = host_port(server);
+        if self.offline() {
+            return Err(ProbeError::denied(RULE_NO_NETWORK, what));
+        }
         let declared = self
             .scope
             .info

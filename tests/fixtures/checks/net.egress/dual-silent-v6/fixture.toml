@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-dual-silent-v6"
+summary = "A dual-stack host whose IPv6 address never answers and whose IPv4 address answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

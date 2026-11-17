@@ -169,6 +169,18 @@ install.sh path still works. Taken: deferred to an M3 decision (05, 06).
 - The free spec draft offer in the launch post is left out until you decide on the paid spec-authoring
   offer (10).
 
+### 8. Two Kubernetes verdicts (correction-43)
+
+No change now. The checks ship as built, and either answer is a small change to one check.
+
+- **k8s.dns, CoreDNS below its desired replicas.** M1-162 (PR #62) blocks when fewer replicas are ready
+  than desired. k8s-expert suggests a block only when none is ready, and a warn when some but not all are
+  ready, since DNS still answers. k8s-expert also suggests a block for a headless DNS Service, which pods
+  cannot use as a nameserver. Taken until you decide: the block, as built.
+- **k8s.ingress, two default classes.** M1-163 (PR #65) gives a note. A warn may fit better: the
+  `DefaultIngressClass` admission plugin, on by default, makes the API server reject an Ingress with no
+  class while two classes are marked default. Taken until you decide: the note, as built.
+
 ## Process notes from the planning pass
 
 1. The project subagents in `.claude/agents/` were not registered as agent types when the session started.
@@ -409,3 +421,21 @@ the corrections log of `11-backlog.md`.
   labels and lines. New M2-121 to M2-123 take the 2026-11-06 follow-ups, and new M2-124 adds the engine
   progress observer and the full 07 section 3 line. 07 D.5 allows a test-only indicatif draw target. M1-175
   also builds k8s.dns, and new M2-125 reads the RKE2 and OpenShift Corefiles that M1-162 leaves out.
+- **Correction-43, the 03 sections of k8s.crds and k8s.ingress, and two M2 tickets.** PR #64 (M1-164) and
+  PR #65 (M1-163) change their own 03 sections, and k8s-expert and security-reviewer signed off on both.
+  The 03 text lands with each PR; this entry approves it. k8s.crds reads discovery (`GET /apis` and
+  `GET /apis/<group>/<version>`), not CRD objects, so "installed" means "served": aggregated and built-in
+  groups count, a terminating CRD stays listed, and storage versions and deprecation are not visible. The
+  operator Deployment is a GET by name through an optional Role of one namespace and one name
+  (`examples/rbac/rdy-readonly-operator.yaml`). A missing Deployment warns and says the operator may be a
+  StatefulSet or OLM-managed. A 404 on a version that `/apis` listed blocks. Versions follow a fixed
+  grammar with pre-releases below their release, and a run reads at most 32 discovery documents (ADR 0045).
+  k8s.ingress lists Services only in the target namespace, through an optional Role
+  (`examples/rbac/rdy-readonly-target-namespace.yaml`, ADR 0044). Controllers match exactly. A pending load
+  balancer warns when strictly older than 10 minutes, counted from creation. The retirement warning names
+  the managed and bundled copies. "No default class" warns only when `controller` is set, and is not judged
+  on GKE and OpenShift. A required Gateway API served at `v1` with no accepted class warns. `route` is outside
+  the GKE and OpenShift "not verified" exception. Two default classes are a note. M1-163 and M1-164 must
+  leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
+  verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
+  namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.
