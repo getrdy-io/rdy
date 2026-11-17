@@ -31,7 +31,9 @@ mod tests {
 
     /// Checks that reach a network peer and handle the facade's `--no-network` refusal themselves
     /// instead of naming the `network` need. Add the id here with the reason in the check.
-    const HANDLES_REFUSAL: &[&str] = &[];
+    /// `host.time_sync` keeps its `timedatectl` verdict and says the offset was not measured
+    /// (correction-39), so it must run offline.
+    const HANDLES_REFUSAL: &[&str] = &["host.time_sync"];
 
     #[test]
     fn every_check_that_reaches_the_network_gates_on_it() {

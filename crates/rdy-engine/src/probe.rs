@@ -80,9 +80,9 @@ pub use native::{
     MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
     Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
+pub use policy::{RULE_FD_TARGET, ReadGuard, Refused};
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
-pub use policy::{ReadGuard, Refused};
 pub use proxy::{
     DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
     ProxyUrlError,
@@ -173,6 +173,11 @@ pub enum ProbeError {
         "permission denied. Fix: run rdy as a user who may read it, or accept the limited result"
     )]
     PermissionDenied,
+    /// Nothing listens at the address: the socket file is there and the service behind it is not.
+    #[error(
+        "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run"
+    )]
+    ConnectionRefused,
     /// The call ran out of time.
     #[error(
         "timed out. Fix: run again, and if it repeats check that the machine is not overloaded"
@@ -223,6 +228,7 @@ impl ProbeError {
         match error.kind() {
             io::ErrorKind::NotFound => Self::NotFound,
             io::ErrorKind::PermissionDenied => Self::PermissionDenied,
+            io::ErrorKind::ConnectionRefused => Self::ConnectionRefused,
             io::ErrorKind::TimedOut => Self::Timeout,
             _ => Self::Io(error.to_string()),
         }
@@ -272,6 +278,7 @@ impl ProbeError {
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
             Self::NotFound
             | Self::PermissionDenied
+            | Self::ConnectionRefused
             | Self::StoreOverridden
             | Self::Unsupported(_)
             | Self::NotRecorded(_)
@@ -684,7 +691,7 @@ pub struct ProbeHub {
     /// The run's proxy, set once before the checks start. Clones of the hub share it.
     proxy: Arc<OnceLock<ProxyUrl>>,
     /// Whether sockets are allowed. `false` is `--no-network`: the facade refuses every lookup, TCP,
-    /// UDP and network command. Clones of the hub share it.
+    /// UDP and network command. A new hub starts with `false`. Clones of the hub share it.
     network: Arc<AtomicBool>,
     /// Set when a check's probe is opened. After that the proxy can no longer be set.
     checks_started: Arc<AtomicBool>,
@@ -704,14 +711,15 @@ impl fmt::Debug for ProbeHub {
 }
 
 impl ProbeHub {
-    /// A hub over `backend`. Every string in the log passes `redactor`.
+    /// A hub over `backend`. Every string in the log passes `redactor`. The network starts forbidden:
+    /// call [`ProbeHub::set_network`] to allow it.
     #[must_use]
     pub fn new(backend: Arc<dyn Backend>, redactor: Redactor) -> Self {
         Self {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
-            network: Arc::new(AtomicBool::new(true)),
+            network: Arc::new(AtomicBool::new(false)),
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
             tls: Arc::default(),
@@ -720,11 +728,12 @@ impl ProbeHub {
         }
     }
 
-    /// Allows or forbids the network for the whole run (`--no-network` is `false`). The default is
-    /// allowed. With `false`, every lookup, TCP, TLS, HTTP and UDP call and every command that opens an
-    /// internet or packet socket is refused with [`RULE_NO_NETWORK`] before anything is opened. A
-    /// unix socket call is local and is not affected. The engine sets it from `RunOptions::network`
-    /// before the first check.
+    /// Allows or forbids the network for the whole run (`--no-network` is `false`). A new hub starts
+    /// with the network forbidden (fail closed), so every caller allows it on purpose: the engine from
+    /// `RunOptions::network`, the binary from the command, a test with `set_network(true)`. With `false`, every lookup,
+    /// TCP, TLS, HTTP and UDP call and every command that opens an internet or packet socket is refused
+    /// with [`RULE_NO_NETWORK`] before anything is opened. A unix socket call is local and is not
+    /// affected. The engine sets it from `RunOptions::network` before the first check.
     pub fn set_network(&self, allowed: bool) {
         self.network.store(allowed, Ordering::SeqCst);
     }

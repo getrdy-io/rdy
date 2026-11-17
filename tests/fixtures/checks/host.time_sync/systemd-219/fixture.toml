@@ -1,0 +1,12 @@
+schema = 1
+name = "systemd-219"
+summary = "RHEL 7 with systemd 219: timedatectl has no show command, status is read instead"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

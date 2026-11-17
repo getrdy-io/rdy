@@ -286,14 +286,12 @@ impl CheckInfo {
     /// the Kubernetes API or the system resolver. A unix socket and a proxy alone do not count.
     #[must_use]
     pub fn reaches_network(&self) -> bool {
-        self.peers.iter().any(|peer| {
-            matches!(
-                peer,
-                PeerClass::SpecHosts
-                    | PeerClass::NtpServers
-                    | PeerClass::KubeApi
-                    | PeerClass::SystemResolver
-            )
+        self.peers.iter().any(|peer| match peer {
+            PeerClass::SpecHosts
+            | PeerClass::NtpServers
+            | PeerClass::KubeApi
+            | PeerClass::SystemResolver => true,
+            PeerClass::Proxy | PeerClass::UnixSocket(_) => false,
         })
     }
 

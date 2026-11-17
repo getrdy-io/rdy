@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-missing-openshift"
+summary = "OpenShift: a missing namespace, and the identity may create project requests"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

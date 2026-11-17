@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-limit-pod-low"
+summary = "A pod max of 8Gi and no container item"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,8 @@
+{
+  "entry": {
+    "id": "net.mtu"
+  },
+  "result": {
+    "error": "/sys/class/net does not exist on this machine"
+  }
+}

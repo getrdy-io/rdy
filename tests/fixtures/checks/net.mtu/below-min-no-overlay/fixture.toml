@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-below-min-no-overlay"
+summary = "eth0 at 1450, the spec asks for 1500 and names no overlay"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

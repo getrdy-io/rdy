@@ -1,0 +1,12 @@
+schema = 1
+name = "usr-lib-modules-zst"
+summary = "Modules only under /usr/lib/modules, compressed with zstd: br_netfilter is installed, not loaded"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

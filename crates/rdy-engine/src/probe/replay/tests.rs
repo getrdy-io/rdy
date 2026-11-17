@@ -1442,6 +1442,7 @@ async fn a_fixture_name_at_a_link_local_address_is_refused_by_the_probe() {
         Arc::new(fixture.into_replay()),
         Redactor::new(TagKey::fixed([3; 32])),
     );
+    hub.set_network(true);
     let probe = hub.check_probe(TIME.id, Os::Linux, Some(&TIME));
     let server = rdy_spec::Target::parse("meta.acme.example:123").expect("target");
     probe.permit_hosts(HostSet::new([server.clone()]));
@@ -1740,6 +1741,31 @@ async fn an_unreadable_directory_hides_what_is_under_it() {
         .await
         .expect_err("unreadable");
     assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[tokio::test]
+async fn an_unreadable_directory_hides_a_socket_below_it_and_an_unreadable_socket_stays_visible() {
+    // M1-150: a socket is a special file. A user who may not search `/run/containerd` cannot stat it,
+    // and a user outside the group of `docker.sock` can stat it but not open it.
+    let fixture = load(&[
+        (
+            "root.manifest.json",
+            r#"{"symlinks":{"run/containerd/containerd.sock":"socket:[1]","var/run/docker.sock":"socket:[2]"},"unreadable":["run/containerd","var/run/docker.sock"]}"#,
+        ),
+    ])
+    .expect("loads");
+    let replay = fixture.replay();
+    let error = replay
+        .stat(Path::new("/run/containerd/containerd.sock"), &guard())
+        .await
+        .expect_err("hidden");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    let seen = replay
+        .stat(Path::new("/var/run/docker.sock"), &guard())
+        .await
+        .expect("stat")
+        .expect("there");
+    assert!(!seen.is_file && !seen.is_dir);
 }
 
 #[tokio::test]

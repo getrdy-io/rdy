@@ -1,0 +1,12 @@
+schema = 1
+name = "containerd-bad-config"
+summary = "A config.toml that is not valid TOML"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

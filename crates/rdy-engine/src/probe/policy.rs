@@ -104,8 +104,10 @@ pub(crate) const RULE_PRIVATE_KEY: &str = "private key files are never read";
 pub(crate) const RULE_KUBECONFIG: &str = "kubeconfig and cluster credential files are never read";
 /// `/proc/<pid>/` entries that are not on the short allowlist.
 pub(crate) const RULE_PROC: &str = "process memory, environment and command lines are never read";
-/// A link in `/proc/<pid>/fd` that does not lead to a socket. The target is never logged or returned.
-pub(crate) const RULE_FD_TARGET: &str = "only socket links are read from a process's fd directory";
+/// The rule text of the refusal of a link in `/proc/<pid>/fd` that does not lead to a socket. The target
+/// is never logged or returned. A fd walk (`host.ports`) compares the `rule` of a
+/// [`ProbeError::Denied`](super::ProbeError::Denied) with it to tell this expected refusal from a bug.
+pub const RULE_FD_TARGET: &str = "only socket links are read from a process's fd directory";
 /// `/dev`.
 pub(crate) const RULE_DEVICE: &str = "device files are never read";
 
@@ -396,7 +398,7 @@ impl ReadGuard {
                     split(Path::new(prefix), mac)
                         .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid, true)))
                 });
-        if covered {
+        if covered || (self_pid.is_some() && sys_class_device(reads, &names, mac)) {
             Ok(())
         } else if self.statfs {
             Err(RULE_OUTSIDE_STATFS)
@@ -404,6 +406,27 @@ impl ReadGuard {
             Err(RULE_OUTSIDE_READS)
         }
     }
+}
+
+/// Whether a real path is the attribute file of a class device that the check declared.
+///
+/// `/sys/class/<c>/<if>` is a link into `/sys/devices/...`, so a read of `/sys/class/net/eth0/mtu`
+/// resolves to `/sys/devices/pci0000:00/0000:00:03.0/net/eth0/mtu`. A declared `/sys/class/<c>` entry
+/// admits a real path only when it starts with `/sys/devices/` and ends with `<c>/<if>/<file>`: the
+/// class name, one device name and one file. A file of the parent device (a disk serial, a `vpd` page,
+/// `wwid`) and the DMI files are not of that shape, so declaring `/sys/class/net` does not open
+/// `/sys/devices` (SEC-28-1). The real path has no text path to compare with, so the shape is the rule.
+fn sys_class_device(reads: &[&str], real: &[String], mac: bool) -> bool {
+    let [first, second, .., class, _device, _file] = real else {
+        return false;
+    };
+    if first != "sys" || second != "devices" || real.len() < 6 {
+        return false;
+    }
+    reads.iter().any(|prefix| {
+        split(Path::new(prefix), mac)
+            .is_ok_and(|names| matches!(names.as_slice(), [a, b, c] if a == "sys" && b == "class" && c == class))
+    })
 }
 
 impl ReadGuard {

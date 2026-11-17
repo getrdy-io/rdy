@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-missing-openshift-denied"
+summary = "OpenShift: a missing namespace, and project requests are denied"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true
