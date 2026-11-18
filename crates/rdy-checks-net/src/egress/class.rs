@@ -117,6 +117,19 @@ impl Class {
         }
     }
 
+    /// Whether the proxy is the one that failed (a class the proxy itself says), so a direct path may
+    /// still work.
+    pub(crate) fn is_proxy(self) -> bool {
+        matches!(
+            self,
+            Self::ProxyForbidden
+                | Self::ProxyAuthRequired
+                | Self::ProxyRefused
+                | Self::ProxyBadReply
+                | Self::ProxyUnreachable
+        )
+    }
+
     /// The class of a connection that did not open, from what the attempts came to.
     pub(crate) fn of_connect(outcome: AttemptOutcome) -> Self {
         match outcome {

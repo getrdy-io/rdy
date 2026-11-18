@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-env-conflict"
+summary = "HTTPS_PROXY and https_proxy name different proxies"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -35,9 +35,15 @@
 //! **Redirects.** A redirect is never followed. The host of an absolute `Location` is in the evidence
 //! (`http_stage.location_host`), and when it is not an endpoint of this check a note says to add it.
 //!
-//! What this version does not do yet: `Date` evidence, issuer names (M1-099), and the sentence that says
-//! the other path works when `auto` fails (the direct retry after a proxy failure), which waits for the
-//! `NO_PROXY` rules of M1-098.
+//! **`NO_PROXY` (M1-098).** `auto` honours the `NO_PROXY` list the run read (`Probe::route_for`, the
+//! matcher of `rdy_engine::probe`): a host the list or the loopback rule exempts connects direct, and the
+//! result says which entry did it. `proxy_only` takes the proxy whatever the list says. When an `auto`
+//! endpoint fails through the proxy with a proxy class, the check makes one direct `tcp` call (when the
+//! time left covers it). If that connects, the result says "direct works, proxy fails", names the proxy
+//! variable and says to fix the proxy or add the host to `NO_PROXY`. When `HTTPS_PROXY` and `https_proxy`
+//! (or the `HTTP` pair, or `NO_PROXY` and `no_proxy`) are set and differ, a note says which one rdy used.
+//!
+//! What this version does not do yet: `Date` evidence and issuer names (M1-099).
 //!
 //! **Levels.** An endpoint that cannot be reached fails the check, or warns when it is `optional`. A
 //! connect slower than `max_latency` (2 s by default) warns. A dead address of one family in front of a
@@ -57,12 +63,14 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
     Os, OsSupport, PeerClass, Support,
 };
+use rdy_engine::probe::Exemption;
 use rdy_engine::probe::net::REVOCATION_NOTE;
+use rdy_engine::probe::net::Route;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
 use self::class::Class;
-use self::stage::{Ending, Probed, ms, probe};
+use self::stage::{Ending, Probed, Way, ms, probe};
 
 mod class;
 mod stage;
@@ -100,8 +108,9 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     },
     reads: &[],
     statfs: &[],
-    // `NO_PROXY` is read to say that it is not applied yet (M1-098 applies it). Neither name is secret.
-    env: &["NO_PROXY", "no_proxy"],
+    // The proxy and `NO_PROXY` are read once for the run by `ProbeHub::set_proxy_from_env`, so the
+    // check reads no variable itself.
+    env: &[],
     commands: &[],
     peers: &[PeerClass::SpecHosts, PeerClass::Proxy],
 };
@@ -150,53 +159,46 @@ impl Check for EgressCheck {
             let total = self.params.endpoints.len();
             let proxy = ctx.probe().proxy_origin();
             let proxy_var = ctx.probe().proxy_source();
-            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> = self
-                .params
-                .endpoints
-                .iter()
-                .enumerate()
-                .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
-                    // Rounds of endpoints that wait behind this one, for the budget of its extra call.
-                    let queued = (total - at - 1) / PARALLEL;
-                    match route_of(spec, entry_route, proxy.as_deref()) {
-                        Routing::Direct => Box::pin(probe(ctx, spec, trust, queued, None, None)),
-                        Routing::Proxy(origin) => Box::pin(probe(
-                            ctx,
-                            spec,
-                            trust,
-                            queued,
-                            Some(origin.to_owned()),
-                            proxy_var,
-                        )),
-                        Routing::NoProxy => Box::pin(std::future::ready(Ok(Probed::not_tried(
-                            spec,
-                            NO_PROXY_SET,
-                        )))),
-                    }
-                })
-                .collect();
+            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> =
+                self.params
+                    .endpoints
+                    .iter()
+                    .enumerate()
+                    .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
+                        // Rounds of endpoints that wait behind this one, for the budget of its extra call.
+                        let queued = (total - at - 1) / PARALLEL;
+                        match route_of(ctx, spec, entry_route, proxy.as_deref()) {
+                            Routing::Direct(exempt) => {
+                                Box::pin(probe(ctx, spec, trust, queued, Way::direct(exempt)))
+                            }
+                            Routing::Proxy { origin, auto } => Box::pin(probe(
+                                ctx,
+                                spec,
+                                trust,
+                                queued,
+                                Way::proxy(origin.to_owned(), proxy_var, auto),
+                            )),
+                            Routing::NoProxy => Box::pin(std::future::ready(Ok(
+                                Probed::not_tried(spec, NO_PROXY_SET),
+                            ))),
+                        }
+                    })
+                    .collect();
             let probed: Vec<Result<Probed, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let probed: Vec<Probed> = probed.into_iter().collect::<Result<_, _>>()?;
             let mut finding = self.judge(ctx.os(), &probed);
-            // `auto` takes the proxy for every endpoint until M1-098 applies `NO_PROXY`. Say so, once and
-            // without the value (a `NO_PROXY` list can name internal hosts).
-            if proxy.is_some() && no_proxy_is_set(ctx) {
-                finding = finding.with_note(NO_PROXY_NOTE);
+            // Two spellings of one proxy variable that differ: the product may read the other one. Names
+            // only, never a value.
+            for conflict in ctx.probe().proxy_env_conflicts() {
+                finding = finding.with_note(format!(
+                    "{} and {} are both set and differ. rdy used {} for this run. Tools do not agree on which one wins (curl and Python read {} first), so the product may use the other value. Set one of them, or make them equal.",
+                    conflict.upper, conflict.lower, conflict.upper, conflict.lower
+                ));
             }
             Ok(finding)
         })
     }
-}
-
-/// The note when `NO_PROXY` is set and a proxy is in use.
-const NO_PROXY_NOTE: &str = "NO_PROXY is set, and this build of rdy does not apply it: every endpoint of this run went through the proxy, including hosts NO_PROXY lists. The product may reach those hosts directly.";
-
-/// Whether `NO_PROXY` or `no_proxy` has a non-blank value. The value is never kept.
-fn no_proxy_is_set(ctx: &CheckContext) -> bool {
-    ["NO_PROXY", "no_proxy"]
-        .iter()
-        .any(|name| matches!(ctx.probe().env(name), Ok(Some(value)) if !value.trim().is_empty()))
 }
 
 /// Why a proxy-only endpoint is not tried when the run has no proxy.
@@ -204,22 +206,40 @@ const NO_PROXY_SET: &str = "the endpoint is proxy_only and no proxy is set for t
 
 /// How an endpoint is reached.
 enum Routing<'p> {
-    /// Straight to the host.
-    Direct,
-    /// Through the run's proxy, named by its origin.
-    Proxy(&'p str),
+    /// Straight to the host. The reason is set when the run has a proxy and `NO_PROXY` or the loopback
+    /// rule sent the host direct.
+    Direct(Option<Exemption>),
+    /// Through the run's proxy, named by its origin. `auto` is set when the route is `auto` and not
+    /// `proxy_only`.
+    Proxy { origin: &'p str, auto: bool },
     /// The spec says proxy only and the run has no proxy.
     NoProxy,
 }
 
-/// The route of an endpoint: its own `via_proxy`, else the entry's. `auto` takes the proxy when the run
-/// has one, because that is the path the product takes when it is started from the same shell.
-fn route_of<'p>(spec: &Endpoint, entry: ViaProxy, proxy: Option<&'p str>) -> Routing<'p> {
+/// The route of an endpoint: its own `via_proxy`, else the entry's. `auto` is the path the product takes
+/// when it is started from the same shell: through the run's proxy, unless `NO_PROXY` exempts the host
+/// (M1-098). `proxy_only` takes the proxy whatever `NO_PROXY` says, because the spec asked for it.
+fn route_of<'p>(
+    ctx: &CheckContext,
+    spec: &Endpoint,
+    entry: ViaProxy,
+    proxy: Option<&'p str>,
+) -> Routing<'p> {
     match (spec.via_proxy.unwrap_or(entry), proxy) {
-        (ViaProxy::Direct, _) => Routing::Direct,
+        (ViaProxy::Direct, _) => Routing::Direct(None),
         (ViaProxy::ProxyOnly, None) => Routing::NoProxy,
-        (_, Some(origin)) => Routing::Proxy(origin),
-        (_, None) => Routing::Direct,
+        (ViaProxy::ProxyOnly, Some(origin)) => Routing::Proxy {
+            origin,
+            auto: false,
+        },
+        (_, Some(origin)) => {
+            let choice = ctx.probe().route_for(&spec.target);
+            match choice.route {
+                Route::ViaProxy => Routing::Proxy { origin, auto: true },
+                _ => Routing::Direct(choice.exempt),
+            }
+        }
+        (_, None) => Routing::Direct(None),
     }
 }
 
@@ -312,6 +332,29 @@ impl EgressCheck {
             notes.push(format!(
                 "{} endpoint(s) went through the proxy {origin}. A name resolves at the proxy, not on this machine.",
                 probed.iter().filter(proxied).count()
+            ));
+        }
+        // Hosts that `NO_PROXY` (or the loopback rule) sent direct although the run has a proxy.
+        let bypassed: Vec<&Probed> = probed.iter().filter(|p| p.exempt.is_some()).collect();
+        for p in bypassed.iter().take(NAMED) {
+            if let Some(why) = &p.exempt {
+                notes.push(format!(
+                    "{} went direct, not through the proxy: {why}.",
+                    p.label()
+                ));
+            }
+        }
+        if bypassed.len() > NAMED {
+            notes.push(format!(
+                "and {} more endpoints went direct for the same reason",
+                bypassed.len() - NAMED
+            ));
+        }
+        for p in probed.iter().filter(|p| p.direct_works) {
+            notes.push(format!(
+                "{}: direct works, proxy fails. A connection straight to the endpoint from this machine succeeded, so only the path through the proxy {} is broken.",
+                p.label(),
+                p.via_proxy.as_deref().unwrap_or("")
             ));
         }
         // One proxy serves the whole run. When it came from `HTTP_PROXY`, a tunnelled endpoint used it
@@ -478,6 +521,12 @@ fn fixes(os: Os, list: &[&Probed]) -> Option<String> {
         }
         seen.push(*class);
         parts.push(class.fix(os, &p.host, p.port, ip.as_deref()));
+        if p.direct_works {
+            parts.push(format!(
+                "A direct connection to {}:{} works, so a product started from this shell fails through the proxy. Fix the proxy as above, or add {} to NO_PROXY so the product connects direct.",
+                p.host, p.port, p.host
+            ));
+        }
         if let Some(advice) = p.override_advice() {
             parts.push(advice.to_owned());
         }

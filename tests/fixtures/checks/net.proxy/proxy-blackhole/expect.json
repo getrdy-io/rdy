@@ -1,0 +1,72 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": "This machine cannot reach the proxy http://proxy.acme.test:3128. Check the address in HTTPS_PROXY. If it is right, ask the network team to allow tcp/3128 from this machine to the proxy.",
+    "level": "fail",
+    "message": "The proxy `http://proxy.acme.test:3128` is not reachable (no reply within 3 s)",
+    "notes": [
+      "no reply within 3 s from the proxy address",
+      "NO_PROXY is not set, so every destination, cluster-internal ones included, goes through the proxy."
+    ],
+    "observed": {
+      "conflicts": [],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "sources": "/etc/systemd/system/docker.service.d/http-proxy.conf",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "set": false
+      },
+      "no_proxy_coverage": [],
+      "os": "linux",
+      "reach": {
+        "class": "blackhole",
+        "proxy": "http://proxy.acme.test:3128",
+        "state": "failed",
+        "why": "no reply within 3 s"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

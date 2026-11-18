@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-macos-env-only"
+summary = "A Mac with a proxy in the environment: only the environment is read"
+origin = "hand"
+os = "macos"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false
