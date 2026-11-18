@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-57: M1 184 tickets, 408.5 h, 342 h core; M2 145 tickets, 492.75 h; all milestones 429 tickets,
-1414.75 h, 1348.25 h core.
+correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153 tickets, 509.75 h; all milestones 436 tickets,
+1427.75 h, 1367.75 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -281,6 +281,14 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   reads from `ALLOWED`. M1-162 to M1-165 fold their duplicate `ALLOWED` entries and `Access::GetIn` so
   M1-115's one-entry guard test passes, and copy its pair test (+0.5 h each). New M2-144 (k8s.version
   `v1beta1` rows by kind) and M2-145 (AKS and vSphere or Longhorn storage class fixtures).
+- 58: new core M1-185 (the env harness serves a scripted cluster; the k8s parts of `all-pass`,
+  `warnings-only` and `all-block`, and the `timeouts` slow `/version` case) and M1-186 (the terminal prints
+  `partial.missing_grants`); M1-138 depends on both. M1-118 keeps the host and network parts (1.5 h) and
+  M1-107 goes to 3 h. The non-core M1-156, M1-158 and M1-166
+  move to M2-149, M2-151 and M2-153, after new facade tickets M2-148 and M2-150 and the env TLS rig M2-152;
+  their M1 rows are stubs. M2-142 takes the pending-claim age and `run.clock`. M1-154 depends on M1-155.
+  New M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
+  progress line gets #104. Merged M1-101, M1-112, M1-124, M1-169, M1-170, M1-174 and M1-182 move weeks.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -291,11 +299,12 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0051 (0050 is the macOS CI gate, `ci/macos-arm64-gate`). ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
-  security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
+- The next free ADR is 0052. ADR 0051 is M1-155's nameserver facade ADR (`m1/155-net-dns-direct`, not
+  merged), and 0050 is the macOS CI gate (merged in #110). ADR 0042 (the Gatekeeper constraints list
+  wildcard) is in #48, accepted by security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165). ADR 0047 is in #85 (M1-133, merged). ADR 0048 is M1-136's docs-test ADR. ADR 0049 is
   correction-56's (Proposed).
-- The next ticket ids are M1-185 and M2-146, and the next correction is 58 (49 is in #85).
+- The next ticket ids are M1-187 and M2-154, and the next correction is 59 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -523,6 +532,28 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     its progress line.
   - M1-116's PR (correction-57): add "backlog corrected 2026-11-17 (correction-57)" to its progress line
     for the Kubernetes page API reads line.
+  - Follow-ups that correction-58 gave ids:
+    - M1-185: export the rdy-checks-k8s kube mock behind `testing` and hand it to the k8s family from the
+      env driver; add k8s.version and `api/` to `all-pass`, no default StorageClass to `warnings-only`, the
+      cluster-too-old, RBAC-denied and one missing-grant partial to `all-block`, and the slow `/version`
+      case to `timeouts` (M1-118 build, cold review). A 0.1.0 gate.
+    - M1-186: one terminal line for `partial.missing_grants`, its form in 07 section 2.2, the `all-block`
+      terminal golden (M1-118 build). A 0.1.0 gate.
+    - M2-146: `aarch64-apple-darwin` release builds on `macos-15`; `x86_64` only if proven (security review
+      of `ci/macos-arm64-gate`, finding 3).
+    - M2-147: docs-test fixture-copy and key-password markers (ADR 0048 amendment), `real-kdf` group, and
+      the #112 nits (comment passes the literal check, `skip=page-test` not required on `signing.md`,
+      `trust add` with `acme-platform.pub` untested, `run --key` may look up a name in CI).
+    - M2-148 and M2-150: the `Probe::http` facade work for net.registry and net.bandwidth, one ADR for both,
+      security-reviewed. M2-149 and M2-151 are the checks (from M1-156 and M1-158).
+    - M2-152: the generated-chain rig in the env driver, with the `all-block` TLS interception part. M2-153
+      is the net-airgapped env (from M1-166), with a loopback-literal variant spec for SEC-22.
+  - M1-107's, M1-117's and M1-119's PRs (correction-58): drop the `all-pass` k8s.version and `api/` item
+    and the `timeouts` slow `/version` case (now M1-185's) and keep the correction-58 clause in their
+    progress lines.
+  - M1-118's PR (correction-58): its progress line's "not done, no owner yet" items now have owners
+    (M1-185, M1-186, M2-142, M2-152); say so and keep the correction-58 clause.
+  - M1-155's PR (correction-58): ADR 0051 is its nameserver facade ADR. M1-154 builds after it.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds

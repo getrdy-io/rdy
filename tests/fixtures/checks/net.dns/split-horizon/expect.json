@@ -12,9 +12,9 @@
     },
     "fix": "`web.acme.test` gets different answers from different resolvers. The system resolver, which software on this machine uses, is the one that counts: check the order of the `nameserver` lines in `/etc/resolv.conf` (or the DNS servers of the network connection) and ask the DNS team which view should answer for `acme.test`.",
     "level": "warn",
-    "message": "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives other addresses than the system resolver",
+    "message": "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives no address the system resolver gives",
     "notes": [
-      "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives other addresses than the system resolver"
+      "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives no address the system resolver gives"
     ],
     "observed": {
       "direct": {

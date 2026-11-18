@@ -1,0 +1,86 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": "Set only one of HTTPS_PROXY and https_proxy, or make them equal. Set only one of NO_PROXY and no_proxy, or make them equal. curl and Python read the lower-case name first and Go reads the upper-case name, so tools use different values today.",
+    "level": "warn",
+    "message": "HTTPS_PROXY and https_proxy are both set and differ; NO_PROXY and no_proxy are both set and differ",
+    "notes": [],
+    "observed": {
+      "conflicts": [
+        {
+          "lower": "https_proxy",
+          "upper": "HTTPS_PROXY"
+        },
+        {
+          "lower": "no_proxy",
+          "upper": "NO_PROXY"
+        }
+      ],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "sources": "/etc/systemd/system/docker.service.d/http-proxy.conf",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "entries": 1,
+        "set": true,
+        "truncated": false,
+        "var": "NO_PROXY"
+      },
+      "no_proxy_coverage": [],
+      "os": "linux",
+      "reach": {
+        "ms": 0,
+        "proxy": "http://proxy.acme.test:3128",
+        "state": "connected"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        },
+        {
+          "has_user_info": false,
+          "proxy": "http://other.acme.test:8080",
+          "state": "proxy",
+          "var": "https_proxy"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

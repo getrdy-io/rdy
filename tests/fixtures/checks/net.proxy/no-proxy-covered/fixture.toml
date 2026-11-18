@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-no-proxy-covered"
+summary = "NO_PROXY covers every required entry"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

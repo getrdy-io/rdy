@@ -11,9 +11,9 @@
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
 //! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
-//! so one test runs the host-min environment into a folder (exit 0; switch it to the all-pass
-//! environment when M1-117, PR #80, lands) and checks the written page against the structure rules of
-//! M1-082. `driver` says what else the run does not do.
+//! so the page golden of each env in `HTML_ENVS` is rendered here from the normalised report. One test
+//! runs the host-min environment into a folder (exit 0) and checks the written page against the structure
+//! rules of M1-082. `driver` says what else the run does not do.
 //!
 //! Generated chains. `chains` runs every case of `net.tls_intercept` through `NetFamily` and the real
 //! scheduler, building the certificate chain a case's `chain.json` names with rcgen at test time (M1-100).
@@ -39,7 +39,9 @@ use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want, cu
 use rdy_engine::family::{BuildError, Built, Family};
 use rdy_engine::summary::last_line;
 use rdy_engine::testing::golden::assert_golden;
-use rdy_engine::testing::{Fixture, fixtures_dir, normalize, normalize_across_jobs};
+use rdy_engine::testing::{
+    Fixture, assert_static_html, fixtures_dir, normalize, normalize_across_jobs,
+};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 use serde_json::Value;
@@ -47,6 +49,9 @@ use serde_json::Value;
 use families::Row;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
+
+/// The envs that have a `golden/report.html` (08 section 3). Add the name when the env lands.
+const HTML_ENVS: &[&str] = &["all-pass", "warnings-only", "all-block"];
 
 // ---- environments -------------------------------------------------------------------------------
 
@@ -66,6 +71,47 @@ fn host_min_is_found() -> TestResult {
     assert!(
         names.iter().any(|name| name == "host-min"),
         "env_names found {names:?}"
+    );
+    Ok(())
+}
+
+/// 31.3 GiB against `min: 32Gi` passes with the tolerance note (M1-117 exit test), and every check of the
+/// all-pass env passes: no skip, no partial result, so the golden cannot hide a check that did not run.
+#[test]
+fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
+    // The run plans for the OS it runs on, so a Linux env cannot run on a macOS or Windows leg.
+    if Fixture::load(&fixtures_dir(), "envs/all-pass")?.os() != current_os() {
+        eprintln!("env_harness: skipping all-pass: it is a Linux machine");
+        return Ok(());
+    }
+    let run = driver::run_env("all-pass", 1)?;
+    assert_eq!(run.report.exit_code, 0);
+    let ids: Vec<&str> = run.report.checks.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids.len(), 15, "checks that ran: {ids:?}");
+    for check in &run.report.checks {
+        assert_eq!(
+            check.status,
+            rdy_spec::result::Status::Pass,
+            "{}: {}",
+            check.key,
+            check.message
+        );
+        assert!(check.partial.is_none(), "{} is partial", check.key);
+    }
+    let memory = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "host.memory")
+        .ok_or("host.memory did not run")?;
+    assert_eq!(
+        memory.message,
+        "31.3 GiB found, 32 GiB needed, inside the 5% tolerance"
+    );
+    assert!(
+        memory.notes.iter().any(|n| n.contains("tolerance_percent")),
+        "{:?}",
+        memory.notes
     );
     Ok(())
 }
@@ -210,14 +256,32 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
             fixtures_dir().join(format!("envs/{env}/golden/terminal.txt")),
             &one.terminal,
         );
+        // 08 section 3: HTML goldens exist for these envs only. The page is rendered from the normalised
+        // report, as `render_html` gets it in a run, through a redactor with a fixed tag key.
+        if HTML_ENVS.contains(&env.as_str()) {
+            let html = driver::report_html(&golden)?;
+            // The ADR 0003 static checks (CSP, no off-file src or href, one script, the data hash).
+            assert_static_html(&format!("env {env}"), &html)?;
+            assert_golden(
+                fixtures_dir().join(format!("envs/{env}/golden/report.html")),
+                html,
+            );
+        } else {
+            assert!(
+                !fixtures_dir()
+                    .join(format!("envs/{env}/golden/report.html"))
+                    .exists(),
+                "env {env} has a report.html golden, and 08 section 3 gives one to {HTML_ENVS:?} only"
+            );
+        }
         assert_eq!(
             one.terminal.lines().last(),
             Some(last_line(&one.report.checks).as_str()),
             "env {env}: the verdict is the last line"
         );
 
-        // The same environment at one job and at eight gives the same report. With one check this proves
-        // little; M1-117's all-pass env is what gives it something to order.
+        // The same environment at one job and at eight gives the same report. Host-min has one check;
+        // all-pass has fourteen, so the order of completion has something to change.
         let mut serial = driver::run_env(&env, 1)?.report;
         let mut parallel = driver::run_env(&env, 8)?.report;
         normalize_across_jobs(&mut serial);
@@ -244,6 +308,12 @@ const PENDING: &[Pending] = &[
         classes: &[Class::Timeout],
         owner: "M1-179",
         why: "M1-096 added the reviewed expect.json for Pass and NonPass (11 cases). By design no hang ends net.egress in a Timeout: every endpoint is cut to its own budget (10 s, then 15 s for HTTP) and leaves 2 s of the check's time for the result, so a blackhole or a stalled server gives a bounded finding with class `blackhole` or `timeout`, never `timed_out_ms`. M1-179 (PR #70) counts a hang the check survived, when a note names it (`no reply within`), as the Timeout class. The blackhole case has that note. The row is closed by the second of PRs #70 and #74 to merge",
+    },
+    Pending {
+        check: "net.proxy",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-098 added the reviewed expect.json for the passing, warning and blocking cases (16). By design no hang ends net.proxy in a Timeout: the one connection to the proxy gets what is left of the check's time minus 0.5 s, and a black hole gives a bounded finding with class `blackhole` and the note `no reply within 3 s`, never `timed_out_ms`. M1-179 counts that hang the check survived as the Timeout class. The proxy-blackhole case has the note. The row is closed by the second of PR #70 and this PR to merge",
     },
     Pending {
         check: "net.tls_intercept",
