@@ -104,7 +104,7 @@ impl K8sFamily {
     }
 
     /// The family's answer as a [`Dial`], for tests that read what `k8s.access` would.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "testing"))]
     pub(crate) fn dial(&self) -> Arc<dyn Dial> {
         Arc::clone(&self.holder) as Arc<dyn Dial>
     }
@@ -296,7 +296,8 @@ impl Holder {
         let facts = crate::client::scripted_facts();
         self.remember(facts.clone());
         let announce = ctx.announce;
-        let attempt = Connected::over_mock(mock, &ctx.probe, |line| announce(&line.to_string())).await;
+        let attempt =
+            Connected::over_mock(mock, &ctx.probe, |line| announce(&line.to_string())).await;
         self.conclude(ctx, started, facts, attempt).await
     }
 

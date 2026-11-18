@@ -75,9 +75,9 @@ use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
+use super::ImpersonateAs;
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
-use super::ImpersonateAs;
 #[cfg(test)]
 use super::{
     ConnectionFacts, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion, from_kube_error,
@@ -430,7 +430,7 @@ impl Mock {
             return self.not_recorded(&line);
         };
         if !record.delay.is_zero() {
-            tokio::time::sleep(record.delay).await;
+            rdy_engine::testing::sleep(record.delay).await;
         }
         respond_bytes(record.status, record.body.clone())
     }

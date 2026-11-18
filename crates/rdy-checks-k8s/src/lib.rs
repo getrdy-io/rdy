@@ -12,6 +12,9 @@
 //! Security, policy engine and SCC half) and `k8s.namespace` ([`NamespaceCheck`], M1-161, existence,
 //! terminating, quota and limit range) are built, and the others follow. [`K8sFamily`] (M1-107) lists them,
 //! builds `k8s.version` and `k8s.access` from a spec entry, and probes the `kube_context` need once per run.
+//!
+//! The `testing` feature (M1-185) adds the `testing` module: a scripted cluster that serves a fixture's `api/`
+//! tree in process, with the guard in front, for the env harness of `rdy`. The shipped binary never builds it.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -94,11 +97,14 @@ mod storageclass;
 )]
 mod version;
 
-// The scripted cluster of the env harness (M1-185). A release build with the feature does not compile, the
-// same rule as the `testing` feature of rdy-engine, and CI keeps the feature out of the binary's graph.
-#[cfg(all(feature = "testing", not(test), not(debug_assertions)))]
-compile_error!("the `testing` feature of rdy-checks-k8s must not be enabled in a release build");
+// The scripted cluster of the env harness (M1-185). Only with the `testing` feature, which the shipped
+// binary never enables (the module holds the release-build guard).
 #[cfg(feature = "testing")]
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 pub mod testing;
 
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};

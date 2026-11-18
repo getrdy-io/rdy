@@ -10,6 +10,12 @@
 //! `client::mock`): every request the mock saw passes the guard's rules and pairs with one sent entry of
 //! the run's action log, cited by the check that sent it, and the fixture answered every request.
 
+// A release build with the feature does not compile, the same rule as the `testing` feature of rdy-engine. A
+// debug build is allowed so `cargo test` and `cargo clippy --features testing` work. CI also keeps the
+// feature out of the binary's feature graph.
+#[cfg(all(not(test), not(debug_assertions)))]
+compile_error!("the `testing` feature of rdy-checks-k8s must not be enabled in a release build");
+
 use rdy_engine::testing::Replay;
 use rdy_spec::result::Action;
 
@@ -18,7 +24,9 @@ use crate::family::K8sFamily;
 
 /// The `api/` files of an environment did not make a cluster.
 #[derive(Debug, thiserror::Error)]
-#[error("the `api/` files of the environment do not make a cluster: {0}. Fix: correct the file the message names")]
+#[error(
+    "the `api/` files of the environment do not make a cluster: {0}. Fix: correct the file the message names"
+)]
 pub struct ScriptError(String);
 
 /// A cluster served from the `api/` files of a fixture, in process. Clones share state.
