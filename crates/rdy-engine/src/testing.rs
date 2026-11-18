@@ -37,6 +37,8 @@ mod expect;
 mod fake;
 mod fixture_run;
 pub mod golden;
+#[cfg(feature = "html")]
+mod html_static;
 mod normalize;
 #[cfg(test)]
 mod tests;
@@ -52,6 +54,8 @@ pub use fixture_run::{
     FixtureRun, assert_within_manifest, manifest_violations, run_fixture, run_fixture_in,
     run_loaded,
 };
+#[cfg(feature = "html")]
+pub use html_static::assert_static_html;
 pub use normalize::{normalize, normalize_across_jobs};
 #[cfg(feature = "loopback")]
 pub mod loopback;
