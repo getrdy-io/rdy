@@ -221,11 +221,13 @@ main). No document may name a person as owner, and no document may mention the f
 **Progress.** 157 of 183 M1 tickets are merged on main: 142 of 155 core and 15 of 28 non-core. The 183
 leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their rows are stubs. This PR fills
 the `12-progress.md` lines of seven merged tickets that had no PR link or date: M1-058 (#47), M1-097
-(#109), M1-098 (#116), M1-128 (#113), M1-134 (#114, not #112), M1-136 (#111) and M1-184 (#107). Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153
-tickets, 509.75 h; all milestones 436 tickets, 1427.75 h, 1367.75 h core. Correction-59 (#120) adds M1-187
-and M2-154: M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets,
-1429.25 h, 1369.25 h core.
-Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
+(#109), M1-098 (#116), M1-128 (#113), M1-134 (#114, not #112), M1-136 (#111) and M1-184 (#107).
+
+Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153 tickets, 509.75 h; all
+milestones 436 tickets, 1427.75 h, 1367.75 h core. Correction-59 (#120) adds M1-187 and M2-154: M1 184
+tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets, 1429.25 h, 1369.25 h core.
+Recompute with
+`python3 -I docs/plan/reviews/open-findings-2026-11-06/totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session.** Corrections 35 to 47 are in `11-backlog.md`'s correction log and in
 the earlier pause notes in this file's history. 46 is #75, still open.
@@ -381,6 +383,7 @@ does not exist yet, and each piece needs its own security review, so it is not b
   - 07: B.1 to B.3, C.11, the trust goldens, and the console blocks C.12 to C.18 and 2.7.
   - 01: the json and yaml blocks under `###` headings.
   - The README and the docs pages with tested shell blocks (M1-136's docs-test runner, ADR 0048).
+  - 12-progress: the `todo` rows (docs-test `pending=` check).
   Grep `crates/`, `tests/` and `xtask/` for the file name before calling a PR docs-only.
 - Shared files conflict in every PR of a family: `tests/fixtures/README.md` "What exists today", the
   runbook's next-ADR line and `docs/adr/README.md`. Keep main's text and add the branch's own lines.
