@@ -18,7 +18,9 @@
     "fix": "The leaf certificate of web.acme.test does not match `pin_sha256`, so the chain is not the one the vendor pinned. A TLS-inspecting proxy that re-signs the connection, or a server certificate that was renewed, is the usual cause. Ask the network team to bypass inspection for web.acme.test. If the server's certificate was renewed, ask the vendor for the new pin. A pin names the leaf the server sends; the root is not sent and never matches, and a pin on a CA certificate is only a partial result.",
     "level": "warn",
     "message": "web.acme.test:443 (pin_sha256 matches a CA certificate only, not the leaf)",
-    "notes": [],
+    "notes": [
+      "no revocation check"
+    ],
     "observed": {
       "hosts": [
         {
