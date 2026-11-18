@@ -219,10 +219,9 @@ main). No document may name a person as owner, and no document may mention the f
 - #56 the http 302 flake fix, #115 correction-58, #116 M1-098.
 
 **Progress.** 157 of 183 M1 tickets are merged on main: 142 of 155 core and 15 of 28 non-core. The 183
-leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their rows are stubs. Seven merged
-tickets still have no PR link or date in `12-progress.md`: M1-058 (#47), M1-097 (#109), M1-098 (#116),
-M1-128 (#113), M1-134 (#114; the line says #112), M1-136 (#111) and M1-184 (#107). Fill them in the next
-bookkeeping PR. Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153
+leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their rows are stubs. This PR fills
+the `12-progress.md` lines of seven merged tickets that had no PR link or date: M1-058 (#47), M1-097
+(#109), M1-098 (#116), M1-128 (#113), M1-134 (#114, not #112), M1-136 (#111) and M1-184 (#107). Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153
 tickets, 509.75 h; all milestones 436 tickets, 1427.75 h, 1367.75 h core. Correction-59 (#120) adds M1-187
 and M2-154: M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets,
 1429.25 h, 1369.25 h core.
