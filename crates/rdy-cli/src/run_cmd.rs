@@ -17,7 +17,8 @@
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
 //! 5. Print, then write the files: with `--json` the document goes to stdout first, then the state
-//!    moves to `Writing`, the files are written and `finish` stores the exit code. The human result
+//!    moves to `Writing`, the files are written (the page is rendered first, then the spec copy, the
+//!    `.html`, and the `.json` last, M1-181) and `finish` stores the exit code. The human result
 //!    goes to stderr last ([`crate::terminal`], M1-086): the header, the checks sorted by bucket with
 //!    their fixes, the summary, the report folder and the verdict. Stdout comes first because it is the
 //!    one write that can block for good: while it does, the watchdog still owns the report.
@@ -28,12 +29,15 @@
 //! nothing is on stdout. With `--json` stdout already holds the whole document, printed before the
 //! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
-//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--key` and the full unsigned banner (M1-126) and the kube flags (M1-107). `--quiet` and `--verbose`
-//! (M1-143) and the live progress line (M1-142) change the output later; this is the plain run.
+//! **Ctrl-C (M1-058).** The signal thread of [`crate::interrupt`] shares the write state and the weak
+//! folder handle with this module. A signal that wins the claim kills the groups, removes the folder if
+//! it is empty and exits 70 with no report. The run never sees it.
+//!
+//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095) and the kube flags
+//! (M1-107). `--quiet` and `--verbose` (M1-143) and the
+//! live progress line (M1-142) change the output later; this is the plain run.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime};
 
@@ -44,26 +48,25 @@ use rdy_engine::output::{OutputDir, ReportError, report_time};
 use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
-use rdy_engine::report::{JsonError, write_json};
+use rdy_engine::report::{HtmlPage, JsonError, render_page, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
     CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions,
     Signature, SpecRef,
 };
-use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
-use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
+use rdy_spec::{LoadedSpec, VerifiedSpecBytes};
 
 use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
-use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
+use crate::error::{CliError, InternalKind, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::redaction;
 use crate::rig::Rig;
-use crate::signing::files::{FileError, read_public};
+use crate::spec_load::{self, Given};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
 use crate::terminal::{View, banner, render};
-use crate::trust::{self, Layout, Vars};
-use crate::{lint, redaction};
+use crate::trust::{Layout, Vars};
 
 /// How the human output looks: decided once, from `--color`, the environment and the stream.
 #[derive(Debug, Clone, Copy)]
@@ -160,15 +163,10 @@ async fn execute(
     let state = Arc::clone(&rig.state);
     let clock = || hooks.clock.unwrap_or_else(SystemTime::now);
 
-    if args.key.is_some() {
-        // The one-run key and its banner are M1-126. Ignoring the flag would run a spec the user did
-        // not mean to trust, so it stops.
-        return Err(CliError::Internal(InternalKind::NotImplemented {
-            command: "run with a one-run key",
-        }));
-    }
     // A bad `--jobs` is a usage error and comes before the spec is read.
     let jobs = jobs_from(args.jobs)?;
+    // From here a signal says "No report was written" (M1-058).
+    rig.interrupt.set_run();
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
@@ -190,6 +188,10 @@ async fn execute(
     let started_at = clock();
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?.map(Arc::new);
+    if let Some(dir) = &dir {
+        // Weak, like the watchdog's: a signal removes the folder when it is still empty.
+        rig.interrupt.set_folder(Arc::downgrade(dir));
+    }
 
     if let Some(note) = jobs.note {
         let _ = writeln!(stderr, "{note}");
@@ -317,15 +319,35 @@ async fn execute(
     // block for good, on a pipe nobody reads, and while it blocks the state is still `Running`, so the
     // watchdog can write the partial report and end the run. Then the claim, then the files, then
     // `finish`. After `finish` the watchdog is only a backstop with the stored exit code.
+    if json {
+        // From the first byte of the document, a signal writes to stderr only (C4).
+        rig.interrupt.set_stdout_used();
+    }
     let printed = if json {
         print_json(&redacted, stdout).map_err(writer_error)
     } else {
         Ok(())
     };
+    // Rendered before the claim, so the render does not count against the watchdog's wait for the
+    // loser (M1-181). A page that cannot be made leaves no file behind.
+    let page = dir
+        .as_ref()
+        .map(|_| render_page(&redacted).map_err(|error| CliError::report_html(&error)));
     state.claim_or_park();
-    let files = match &dir {
-        Some(dir) => write_files(dir, &loaded, &redacted),
-        None => Ok(Vec::new()),
+    let files = match (&dir, page) {
+        // The hook turns the write into a full-disk error (M1-130), before anything is written.
+        (Some(dir), Some(_)) if hooks.fail_files => Err(report_error(
+            ReportStep::WriteFiles,
+            dir.path(),
+            ReportError::Io {
+                action: "write the report files",
+                path: dir.path().to_path_buf(),
+                source: std::io::ErrorKind::StorageFull.into(),
+            },
+        )),
+        (Some(dir), Some(Ok(page))) => write_files(dir, &loaded, &redacted, &page),
+        (_, Some(Err(error))) => Err(error),
+        _ => Ok(Vec::new()),
     };
     if let Err(error) = printed {
         // The report exists and stdout cannot take it. The files were still written; the error is what
@@ -405,8 +427,16 @@ impl ReportSink for FolderSink {
         let Some(dir) = self.dir.upgrade() else {
             return Ok(());
         };
+        // The page is rendered before any file is written, and the `.json` goes last, so a `.json` in
+        // the folder means every file of the run is there (M1-181, 07 section 4.1).
+        let page = render_page(report)?;
         dir.write_spec(&self.spec)?;
-        dir.write_json(report)?;
+        let html = dir.write_html(&page)?;
+        if let Err(error) = dir.write_json(report) {
+            // A page without its `.json` is not a result (M1-181).
+            dir.remove_html(&html);
+            return Err(error);
+        }
         Ok(())
     }
 }
@@ -416,13 +446,14 @@ impl ReportSink for FolderSink {
 fn stand_in_host() -> Host {
     Host::new(
         "unknown",
-        HostOs::new(host_os_family()),
+        HostOs::new(os_family(current_os())),
         std::env::consts::ARCH,
     )
 }
 
-fn host_os_family() -> HostOsFamily {
-    match current_os() {
+/// The report family for an OS, taken from the probe that reads the facts and not from the build.
+fn os_family(os: Os) -> HostOsFamily {
+    match os {
         Os::Macos => HostOsFamily::Macos,
         Os::Windows => HostOsFamily::Windows,
         _ => HostOsFamily::Linux,
@@ -486,28 +517,51 @@ fn print_announced(announced: &std::sync::Mutex<Vec<String>>, stderr: &mut dyn W
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
 /// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
-/// The handle is dropped first, because Windows cannot remove a folder that is still open.
-fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
+/// The removal goes through the folder's held parent handle ([`OutputDir::remove_if_empty`]), not by
+/// path. When this is the last holder of the folder, the handle is closed first, because Windows cannot
+/// remove a folder that is still open.
+pub(crate) fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     if let Some(dir) = dir {
-        let path = dir.path().to_owned();
-        drop(dir);
-        // `remove_dir` only removes an empty folder, and does not follow a link.
-        let _ = std::fs::remove_dir(path);
+        let _ = match Arc::try_unwrap(dir) {
+            Ok(owned) => owned.into_removed_if_empty(),
+            Err(shared) => shared.remove_if_empty(),
+        };
+    }
+}
+
+/// [`discard_if_empty`] on a helper thread, waited for at most `limit`, for the signal path: a removal
+/// on a hung mount must not hold up the exit.
+pub(crate) fn discard_bounded(dir: Option<Arc<OutputDir>>, limit: Duration) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let (done, wait) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("rdy-interrupt-remove".into())
+        .spawn(move || {
+            discard_if_empty(Some(dir));
+            let _ = done.send(());
+        });
+    if spawned.is_ok() {
+        let _ = wait.recv_timeout(limit);
     }
 }
 
 /// Printed on stderr when the JSON report is already on stdout and the files could not be written.
 /// stdout may say `complete: true`; this line says what the exit code means (PC-50, 07 section 4.1).
+/// It is a `note:` line: the one `error:` and `fix:` pair that follows is the real error.
 pub(crate) const FILES_NOT_WRITTEN_NOTE: &str =
-    "error: report files not written. The JSON on stdout is complete but the exit code is 70.";
+    "note: report files not written. The JSON on stdout is complete but the exit code is 70.";
 
-/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1): the
-/// Report with `complete: false` on stdout with `--json`, the summary on stderr, then the error. The
-/// exit code is 70. If the report cannot be printed either (it is over the cap, or stdout is closed),
-/// stdout gets the error object instead.
+/// The files could not be written, but the verdict exists. The result still prints (07 section 4.1):
+/// the summary on stderr, then the error. The exit code is 70.
 ///
-/// `on_stdout` is true when the document is already on stdout (printed before the files, PC-50): a
-/// plain note then goes to stderr between the summary and the error.
+/// Where the Report goes depends on `json` and `on_stdout`. `execute` calls this with `json` false and
+/// `on_stdout` equal to `--json`, because a `--json` run printed its document (with `complete: true`)
+/// before it wrote the files (PC-50), so nothing more goes to stdout. A call with `json` true prints the
+/// Report with `complete: false` to `stdout` instead, and if that cannot be printed (it is over the cap,
+/// or `stdout` is closed) `stdout` gets the error object. `on_stdout` is true when the document is
+/// already on stdout: a plain `note:` line then goes to stderr between the summary and the error.
 #[allow(clippy::too_many_arguments)]
 fn fail_after_verdict(
     error: &CliError,
@@ -536,71 +590,44 @@ fn fail_after_verdict(
     emit(error, json && !printed, stdout, stderr)
 }
 
-/// Reads the spec and its signature sidecar, then verifies and parses them ([`rdy_spec::load`]).
+/// Reads the spec and its signature sidecar, then verifies and parses them ([`crate::spec_load`]).
 ///
 /// Without a sidecar the policy decides: `--allow-unsigned` loads the spec as unsigned, and no flag is
-/// `spec_unsigned` (exit 64). With a sidecar the trust stores are read and the signature has to verify,
-/// whatever the flag says. A sidecar that cannot be read is an error and never "no signature".
+/// `spec_unsigned` (exit 64). With a sidecar the signature has to verify, whatever the flag says. With
+/// `--key` no trust store is read.
 fn load_spec(args: &RunArgs, name: &str, privilege: &Privilege) -> Result<LoadedSpec, CliError> {
-    let bytes = lint::read_spec(&args.spec, name)?;
-    let sidecar = read_sidecar(args)?;
-    let trust = match &sidecar {
-        Some(_) => {
-            let layout =
-                Layout::from_env(&Vars::from_process(), privilege.euid().unwrap_or(u32::MAX));
-            trust::load(&layout)?
-        }
-        None => TrustStore::new(),
+    let layout = Layout::from_env(&Vars::from_process(), privilege.euid().unwrap_or(u32::MAX));
+    let given = Given {
+        spec: &args.spec,
+        sig: args.sig.as_deref(),
+        key: args.key.as_deref(),
+        allow_unsigned: args.allow_unsigned,
     };
-    let policy = if args.allow_unsigned {
-        Policy::AllowUnsigned
-    } else {
-        Policy::RequireSigned
-    };
-    load(&bytes, sidecar.as_deref(), &trust, policy).map_err(|error| CliError::spec(name, error))
+    spec_load::load_spec(&given, name, &layout)
 }
 
-/// The signature sidecar: `--sig`, else `<SPEC>.minisig`. A missing default file means no signature. A
-/// missing `--sig` file, and any other failure to read either, is an error.
-fn read_sidecar(args: &RunArgs) -> Result<Option<Vec<u8>>, CliError> {
-    let (path, explicit) = match &args.sig {
-        Some(path) => (path.clone(), true),
-        None => {
-            let mut name = args.spec.as_os_str().to_owned();
-            name.push(".minisig");
-            (PathBuf::from(name), false)
-        }
-    };
-    // One byte past the limit is enough for the loader to say "too large".
-    match read_public(&path, MAX_SIGNATURE_BYTES + 1) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(FileError::Unreadable {
-            reason: IoReason::NoSuchFile,
-        }) if !explicit => Ok(None),
-        Err(error) => {
-            let reason = match error {
-                FileError::Unreadable { reason } => reason,
-                FileError::NotRegular => IoReason::NotAFile,
-                _ => IoReason::Other,
-            };
-            Err(CliError::SpecUnreadable {
-                path: path.to_string_lossy().into_owned(),
-                reason,
-            })
-        }
-    }
-}
-
-/// Writes the spec copy and the JSON report into the folder and returns the names of the files, in the
-/// order the terminal lists them.
+/// Writes the spec copy, the HTML page (rendered by the caller, before the claim) and the JSON report
+/// into the folder and returns the names of the files, in the order the terminal lists them.
+///
+/// The spec copy, the page, then the `.json` last, so a `.json` in the folder means every file of the run
+/// is there. If the `.json` fails after the page was written, the page is removed (M1-181).
 fn write_files(
     dir: &OutputDir,
     loaded: &LoadedSpec,
     report: &RedactedReport,
+    page: &HtmlPage,
 ) -> Result<Vec<String>, CliError> {
     let failed = |error| report_error(ReportStep::WriteFiles, dir.path(), error);
     let mut written = dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
-    written.push(dir.write_json(report).map_err(failed)?);
+    let html = dir.write_html(page).map_err(failed)?;
+    written.push(html.path().to_path_buf());
+    match dir.write_json(report) {
+        Ok(path) => written.push(path),
+        Err(error) => {
+            dir.remove_html(&html);
+            return Err(failed(error));
+        }
+    }
     let mut names: Vec<String> = written
         .iter()
         .filter_map(|path| path.file_name())
@@ -696,7 +723,7 @@ fn residual_note(os: Os, out_dir_given: bool) -> Option<&'static str> {
 }
 
 /// The rdy build that writes the report.
-fn producer() -> Producer {
+pub(crate) fn producer() -> Producer {
     let known = |text: &str| (!text.is_empty()).then(|| text.to_owned());
     let mut producer = Producer::new(env!("CARGO_PKG_VERSION"), rdy_spec::VERSION, TARGET);
     producer.commit = known(COMMIT);
@@ -704,7 +731,7 @@ fn producer() -> Producer {
 }
 
 /// Which spec ran: the signed metadata and the hash of the exact bytes (threat model R1).
-fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
+pub(crate) fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
     let meta = &loaded.spec().metadata;
     let file_name = path.file_name().map_or_else(
         || "spec.yaml".to_owned(),
@@ -725,7 +752,8 @@ fn spec_ref(loaded: &LoadedSpec, path: &std::path::Path) -> SpecRef {
 }
 
 /// The machine, coarsely: the host name, the kernel release and the architecture. `host_id` stays
-/// `null` until M2-002, and the OS release fields stay unset until the host report reads them.
+/// `null` until M2-002. The OS id, version and pretty name come from os-release through the run-level
+/// probe, with the parser `host.os` uses (M1-180); a missing or unreadable file leaves them `null`.
 async fn host_facts(probe: &Probe) -> Host {
     let hostname = match probe.native(NativeCall::Hostname).await {
         Ok(NativeValue::Hostname(name)) if !name.trim().is_empty() => name,
@@ -735,11 +763,17 @@ async fn host_facts(probe: &Probe) -> Host {
         Ok(NativeValue::Uname(info)) => Some(info),
         _ => None,
     };
-    let family = host_os_family();
+    let family = os_family(probe.os());
     let arch = uname
         .as_ref()
         .map_or_else(|| std::env::consts::ARCH.to_owned(), |u| u.machine.clone());
-    let mut host = Host::new(hostname, HostOs::new(family), arch);
+    let mut os = HostOs::new(family);
+    if let Some(facts) = rdy_checks_host::read_os_facts(probe).await {
+        os.id = Some(facts.id);
+        os.version = facts.version;
+        os.pretty_name = facts.pretty_name;
+    }
+    let mut host = Host::new(hostname, os, arch);
     host.kernel = uname.map(|u| u.release);
     host
 }

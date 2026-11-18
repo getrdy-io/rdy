@@ -88,7 +88,14 @@ const CLAIMS: &[(&str, &[&str])] = &[
     ("api_key_header", &["header", "x_auth_token"]),
     (
         "url_userinfo",
-        &["proxy", "dsn", "percent_encoded", "token_userinfo"],
+        &[
+            "proxy",
+            "dsn",
+            "percent_encoded",
+            "token_userinfo",
+            "proxy_env",
+            "proxy_json",
+        ],
     ),
     ("aws_secret_access_key", &["env", "ini", "json"]),
     ("aws_session_token", &["json", "ini", "env", "header"]),
@@ -153,6 +160,16 @@ const MATCHES: &[(&str, &str, Claim)] = &[
         "url_userinfo",
         "scheme://token@host",
         Claim::Forms(&["token_userinfo"]),
+    ),
+    (
+        "url_userinfo",
+        "*_proxy=user:pass@host",
+        Claim::Forms(&["proxy_env"]),
+    ),
+    (
+        "url_userinfo",
+        "\"http-proxy\": \"user:pass@host\"",
+        Claim::Forms(&["proxy_json"]),
     ),
     (
         "auth_header",
