@@ -18,7 +18,7 @@ behind the facade's back. The M1-155 exit test asks for `hickory` with default f
    banned everywhere.
 2. It is built with no features at all (`default-features = false`, no `std`): a `[[bans.features]]` entry with
    `exact = true` and an empty `allow` fails the build on any feature a later change turns on. So there is no
-   thread random number generator, no URL parsing, no DNSSEC, no mDNS and no serde.
+   thread random number generator, no DNSSEC, no mDNS and no serde.
 3. The check uses `Message`, `Query` and `Name` to build and read bytes. The bytes travel through
    `Probe::nameserver_exchange` (ADR 0051). The check opens no socket and reads no file through the crate.
 4. The reply is accepted only if it is a response with the query's ID and opcode and exactly the query's
@@ -26,6 +26,12 @@ behind the facade's back. The M1-155 exit test asks for `hickory` with default f
 5. `tests/lint-wall` holds the exception: `deny_wrappers.rs` names `("hickory-proto", "rdy-checks-net")`, and
    `deps_allowlist.rs` checks that only `rdy-checks-net` lists it and that the workspace entry has default
    features off.
+
+## Cost
+
+The crate has non-optional dependencies (`idna`, `url`, and through them the `icu_*` and `zerovec` family, about
+27 crates in `Cargo.lock`). They are all `Unicode-3.0`, MIT or Apache-2.0. The binary grows by their code. This is
+the price of not writing the codec by hand, and the first thing to revisit if binary size becomes a problem.
 
 ## Residual
 
