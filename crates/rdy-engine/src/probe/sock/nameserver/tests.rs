@@ -190,7 +190,34 @@ fn the_query_parser_takes_a_bare_opt_record_and_nothing_else_after_the_question(
     rdata.extend_from_slice(b"data");
     let mut rdlen_no_data = OPT;
     rdlen_no_data[10] = 4;
+    let mut do_bit = OPT;
+    do_bit[7] = 0x80;
+    assert!(parse_query(&with_tail(1, &do_bit)).is_some(), "the DO bit");
+    for size in [512_u16, 4096] {
+        let mut ok = OPT;
+        ok[3..5].copy_from_slice(&size.to_be_bytes());
+        assert!(parse_query(&with_tail(1, &ok)).is_some(), "size {size}");
+    }
+    let opt_with = |at: usize, value: u8| {
+        let mut r = OPT;
+        r[at] = value;
+        with_tail(1, &r)
+    };
+    let size_of = |size: u16| {
+        let mut r = OPT;
+        r[3..5].copy_from_slice(&size.to_be_bytes());
+        with_tail(1, &r)
+    };
     for (name, payload) in [
+        ("an extended RCODE", opt_with(5, 1)),
+        ("an EDNS version", opt_with(6, 1)),
+        ("a Z bit", opt_with(7, 0x01)),
+        ("a Z bit in the high flag byte", opt_with(7, 0x40)),
+        ("flag byte two", opt_with(8, 1)),
+        ("a size of 511", size_of(511)),
+        ("a size of 4097", size_of(4097)),
+        ("a size of 0", size_of(0)),
+        ("a size of 65535", size_of(65535)),
         ("one byte after the question", with_tail(0, &[0])),
         ("text after the question", with_tail(0, b"exfil")),
         ("an OPT record with ARCOUNT 0", with_tail(0, &OPT)),

@@ -384,8 +384,18 @@ pub(crate) fn parse_query(payload: &[u8]) -> Option<Question> {
     let ends_here = if extra == 0 {
         rest.is_empty()
     } else {
-        // Root name, type 41 (OPT), then class, TTL, and RDLEN 0.
-        rest.len() == BARE_OPT && rest[0] == 0 && rest[1..3] == [0, 41] && rest[9..11] == [0, 0]
+        // Root name, type 41 (OPT), class (the UDP payload size, 512 to 4096), TTL (extended RCODE 0,
+        // version 0, flags with only the DO bit), and RDLEN 0. No free byte is left to carry data.
+        let size = u16::from_be_bytes([rest.get(3).copied()?, rest.get(4).copied()?]);
+        rest.len() == BARE_OPT
+            && rest[0] == 0
+            && rest[1..3] == [0, 41]
+            && (512..=4096).contains(&size)
+            && rest[5] == 0
+            && rest[6] == 0
+            && rest[7] & 0x7f == 0
+            && rest[8] == 0
+            && rest[9..11] == [0, 0]
     };
     ends_here.then_some(Question { name, rtype })
 }
