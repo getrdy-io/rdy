@@ -394,7 +394,7 @@ endpoints:
 | --- | --- | --- | --- | --- | --- |
 | `target` | string | yes |  | Where to connect. |  |
 | `optional` | boolean | no | `false` | Unreachable gives a warning and not a block. The default is false. |  |
-| `expect_status` | array of integer | no |  | The statuses that count as reachable, for a URL target. At most 16. |  |
+| `expect_status` | array of integer | no |  | The statuses that count as reachable, for a URL target. At most 16. With none listed, 2xx, 3xx and 4xx count as reachable except 407; a 407 and any 5xx fail. A 3xx, 401, 404 and other 4xx get a note and a 403 warns, because a proxy's deny page looks the same. |  |
 | `method` | one of `HEAD`, `GET` | no | `HEAD` | The request method, for a URL target. The default is `HEAD`. |  |
 | `via_proxy` | one of `auto`, `direct`, `proxy_only` | no |  | Overrides the `via_proxy` of the entry for this endpoint. |  |
 | `tls` | boolean | no |  | `false` probes plain TCP only. Without it TLS is tried for port 443 and `https` URLs. |  |

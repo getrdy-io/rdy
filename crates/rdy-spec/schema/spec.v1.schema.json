@@ -2275,7 +2275,7 @@
                     "default": false
                   },
                   "expect_status": {
-                    "description": "The statuses that count as reachable, for a URL target. At most 16.",
+                    "description": "The statuses that count as reachable, for a URL target. At most 16. With none listed, 2xx, 3xx and 4xx count as reachable except 407; a 407 and any 5xx fail. A 3xx, 401, 404 and other 4xx get a note and a 403 warns, because a proxy's deny page looks the same.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 16,
