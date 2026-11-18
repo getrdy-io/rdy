@@ -34,7 +34,7 @@ fn next_step(
     use rdy_spec::result::VerdictReason;
     match (verdict, reason) {
         (Verdict::Ready, _) => "Everything the spec asks for passed.".to_owned(),
-        (Verdict::ReadyWithWarnings, Some(VerdictReason::NothingVerified)) => "rdy checked nothing on this machine. Every check in the spec is for another OS. Ask the vendor if that is expected.".to_owned(),
+        (Verdict::ReadyWithWarnings, Some(VerdictReason::NothingVerified)) => "rdy checked nothing on this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that is expected, or follow the fix for each skipped check.".to_owned(),
         (Verdict::ReadyWithWarnings, _) => "Nothing blocks the install. Read the warnings.".to_owned(),
         _ if summary.block > 0 => format!(
             "Fix the {} {} below, then run rdy again.",
@@ -203,9 +203,11 @@ pub(super) struct View {
     pub no_blocks: bool,
     /// "What to do next" for this verdict (07 D.7).
     pub next_step: String,
+    /// The sentence on how to share the result, the same for every verdict (07 D.7).
     pub share: &'static str,
-    /// The spec's `metadata.contact`, shown as plain text, never a link.
-    pub contact: Option<String>,
+    /// The spec's `metadata.contact`, shown as plain text, never a link. It comes from the
+    /// spec, so the template wraps it in `<bdi>`.
+    pub contact: Option<Shown>,
     pub legend: &'static str,
     pub rule: &'static str,
     pub run_when: Shown,
@@ -290,6 +292,7 @@ impl View {
             _ => "verdict-not-ready",
         };
         let banners = banners(report);
+        let summary = Summary::from_checks(&report.checks);
         Ok(Self {
             product: shown(&report.spec.product),
             title_product: format!("\u{2068}{}\u{2069}", shown(&report.spec.product)),
@@ -300,14 +303,10 @@ impl View {
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
             summary_line: summary_line(&report.checks),
-            no_blocks: Summary::from_checks(&report.checks).block == 0,
-            next_step: next_step(
-                judgement.verdict,
-                judgement.reason.as_ref(),
-                &Summary::from_checks(&report.checks),
-            ),
+            no_blocks: summary.block == 0,
+            next_step: next_step(judgement.verdict, judgement.reason.as_ref(), &summary),
             share: SHARE,
-            contact: report.spec.contact.clone(),
+            contact: report.spec.contact.as_deref().map(shown),
             legend: LEGEND,
             rule: RULE,
             run_when: shown(&utc_text(&report.run.started_at)),

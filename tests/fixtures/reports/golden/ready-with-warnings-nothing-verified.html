@@ -158,7 +158,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="summary">0 blocks, 0 warnings, 0 passed, 8 not applicable</p>
 <p class="no-blocks">No blocks.</p>
 <p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy <bdi>0.1.0</bdi> by <bdi>jdoe</bdi> (not root)</p>
-<p class="next">What to do next: rdy checked nothing on this machine. Every check in the spec is for another OS. Ask the vendor if that is expected. To share this result, send the .json file from the same folder.</p>
+<p class="next">What to do next: rdy checked nothing on this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that is expected, or follow the fix for each skipped check. To share this result, send the .json file from the same folder.</p>
 <p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
 <p class="rule">NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
@@ -177,54 +177,46 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <h2 id="not-applicable">Does not apply here</h2>
 <article class="check status-skip" id="check-0">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>host.cpu</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
 </article>
 <article class="check status-skip" id="check-1">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>host.memory</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
-<p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Add RAM or choose a larger node class.</bdi></p>
-<p class="text"><span class="label">More from rdy:</span> <bdi>15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.</bdi></p>
 </article>
 <article class="check status-skip" id="check-2">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>host.disk</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
-<p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Mount a larger volume at /var/lib before install.</bdi></p>
-<p class="text"><span class="label">More from rdy:</span> <bdi>/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.</bdi></p>
 </article>
 <article class="check status-skip" id="check-3">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>net.egress</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
-<p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Ask your network team to allow these endpoints through the proxy.</bdi></p>
-<p class="text"><span class="label">More from rdy:</span> <bdi>The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.</bdi></p>
 <p>Requires: network access (available)</p>
 </article>
 <article class="check status-skip" id="check-4">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>k8s.version</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
 <p>Requires: a Kubernetes context (available)</p>
 </article>
 <article class="check status-skip" id="check-5">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>k8s.storageclass</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
 <p>Requires: a Kubernetes context (available)</p>
 </article>
 <article class="check status-skip" id="check-6">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>gpu.cuda</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
-<p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 <article class="check status-skip" id="check-7">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
-<p class="text"><bdi>Does not apply on Linux.</bdi></p>
+<p class="text"><bdi>Does not apply here. This check is for windows only.</bdi></p>
 <p>Does not apply here</p>
-<p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 </section>
 <section aria-labelledby="capabilities">
@@ -309,29 +301,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </section>
 <section aria-labelledby="actions">
 <h2 id="actions">What rdy read and contacted</h2>
-<table>
-<caption>What rdy recorded, in order</caption>
-<thead>
-<tr><th scope="col">No.</th><th scope="col">Check</th><th scope="col">What</th><th scope="col">Detail</th><th scope="col">Result</th></tr>
-</thead>
-<tbody>
-<tr><th scope="row">1</th><td>the run itself</td><td>Read a file</td><td><bdi>~/.kube/config</bdi></td><td>Done, 5412 bytes</td></tr>
-<tr><th scope="row">2</th><td>the run itself</td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, reply code 200</td></tr>
-<tr><th scope="row">3</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td><td>Done, 8320 bytes</td></tr>
-<tr><th scope="row">4</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Done, 13 bytes</td></tr>
-<tr><th scope="row">5</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 1482 bytes</td></tr>
-<tr><th scope="row">6</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.max</bdi></td><td>Done, 4 bytes</td></tr>
-<tr><th scope="row">7</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 2870 bytes</td></tr>
-<tr><th scope="row">8</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>proxy.corp.example</bdi></td><td>Done</td></tr>
-<tr><th scope="row">9</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib</bdi></td><td>Done</td></tr>
-<tr><th scope="row">10</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, reply code 200</td></tr>
-<tr><th scope="row">11</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/storageclasses</bdi></td><td>Done, reply code 200</td></tr>
-<tr><th scope="row">12</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>registry.acme.example</bdi>:<bdi>443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Done</td></tr>
-<tr><th scope="row">13</th><td><bdi>net.egress</bdi></td><td>Started a TLS handshake</td><td><bdi>registry.acme.example</bdi></td><td>Done</td></tr>
-<tr><th scope="row">14</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/csidrivers</bdi></td><td>Done, reply code 200</td></tr>
-<tr><th scope="row">15</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>license.acme.example</bdi>:<bdi>443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td></tr>
-</tbody>
-</table>
+<p>rdy recorded nothing in this run.</p>
 </section>
 </main>
 <footer>
@@ -339,7 +309,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p>This link carries the product name and nothing else.</p>
 <p>rdy <bdi>0.1.0</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="849856e6040495a1791ac7f5fcf01935a7607f7c6881b974f8e5dc8248ef42a0">{
+<script type="application/json" id="rdy-result" data-sha256="6d91c9f0b72549aec016f4c424aaef3088653bdb32bf40332fe7a93220a65086">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -459,7 +429,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
+      "message": "Does not apply here. This check is for windows only.",
       "fix": null,
       "fix_source": null,
       "observed": null,
@@ -480,10 +450,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
-      "fix": "Add RAM or choose a larger node class.",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
       "fix_source": "spec",
-      "builtin_fix": "15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.",
       "observed": null,
       "expected": null,
       "needs": [],
@@ -502,10 +471,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
-      "fix": "Mount a larger volume at /var/lib before install.",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
       "fix_source": "spec",
-      "builtin_fix": "/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.",
       "observed": null,
       "expected": null,
       "needs": [],
@@ -524,10 +492,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
-      "fix": "Ask your network team to allow these endpoints through the proxy.",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
       "fix_source": "spec",
-      "builtin_fix": "The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.",
       "observed": null,
       "expected": null,
       "needs": [
@@ -553,7 +520,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
+      "message": "Does not apply here. This check is for windows only.",
       "fix": null,
       "fix_source": null,
       "observed": null,
@@ -581,7 +548,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
+      "message": "Does not apply here. This check is for windows only.",
       "fix": null,
       "fix_source": null,
       "observed": null,
@@ -609,8 +576,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
-      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
       "fix_source": "rdy",
       "observed": null,
       "expected": null,
@@ -630,8 +597,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "status": "skipped",
       "bucket": "not_applicable",
       "skip_kind": "not_applicable",
-      "message": "Does not apply on Linux.",
-      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
       "fix_source": "rdy",
       "observed": null,
       "expected": null,
@@ -643,173 +610,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0
     }
   ],
-  "actions": [
-    {
-      "seq": 1,
-      "check": null,
-      "at_ms": 2,
-      "duration_ms": 1,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 5412,
-      "path": "~/.kube/config",
-      "truncated": false
-    },
-    {
-      "seq": 2,
-      "check": null,
-      "at_ms": 3,
-      "duration_ms": 31,
-      "kind": "kube",
-      "outcome": "ok",
-      "method": "GET",
-      "path": "/version",
-      "status": 200
-    },
-    {
-      "seq": 3,
-      "check": "host.cpu",
-      "at_ms": 41,
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 8320,
-      "path": "/proc/cpuinfo",
-      "truncated": false
-    },
-    {
-      "seq": 4,
-      "check": "host.cpu",
-      "at_ms": 41,
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 13,
-      "path": "/sys/fs/cgroup/cpu.max",
-      "truncated": false
-    },
-    {
-      "seq": 5,
-      "check": "host.memory",
-      "at_ms": 41,
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 1482,
-      "path": "/proc/meminfo",
-      "truncated": false
-    },
-    {
-      "seq": 6,
-      "check": "host.memory",
-      "at_ms": 42,
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 4,
-      "path": "/sys/fs/cgroup/memory.max",
-      "truncated": false
-    },
-    {
-      "seq": 7,
-      "check": "host.disk",
-      "at_ms": 42,
-      "duration_ms": 1,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 2870,
-      "path": "/proc/self/mountinfo",
-      "truncated": false
-    },
-    {
-      "seq": 8,
-      "check": "net.egress",
-      "at_ms": 42,
-      "duration_ms": 2,
-      "kind": "lookup",
-      "outcome": "ok",
-      "answers": 1,
-      "host": "proxy.corp.example"
-    },
-    {
-      "seq": 9,
-      "check": "host.disk",
-      "at_ms": 43,
-      "duration_ms": 0,
-      "kind": "native",
-      "outcome": "ok",
-      "api": "statvfs",
-      "path": "/var/lib"
-    },
-    {
-      "seq": 10,
-      "check": "k8s.version",
-      "at_ms": 43,
-      "duration_ms": 48,
-      "kind": "kube",
-      "outcome": "ok",
-      "method": "GET",
-      "path": "/version",
-      "status": 200
-    },
-    {
-      "seq": 11,
-      "check": "k8s.storageclass",
-      "at_ms": 44,
-      "duration_ms": 52,
-      "kind": "kube",
-      "outcome": "ok",
-      "method": "GET",
-      "path": "/apis/storage.k8s.io/v1/storageclasses",
-      "status": 200
-    },
-    {
-      "seq": 12,
-      "check": "net.egress",
-      "at_ms": 45,
-      "duration_ms": 36,
-      "kind": "connect",
-      "outcome": "ok",
-      "addr": null,
-      "host": "registry.acme.example",
-      "port": 443,
-      "via_proxy": "http://proxy.corp.example:3128"
-    },
-    {
-      "seq": 13,
-      "check": "net.egress",
-      "at_ms": 82,
-      "duration_ms": 61,
-      "kind": "tls",
-      "outcome": "ok",
-      "host": "registry.acme.example",
-      "sni": "registry.acme.example"
-    },
-    {
-      "seq": 14,
-      "check": "k8s.storageclass",
-      "at_ms": 96,
-      "duration_ms": 43,
-      "kind": "kube",
-      "outcome": "ok",
-      "method": "GET",
-      "path": "/apis/storage.k8s.io/v1/csidrivers",
-      "status": 200
-    },
-    {
-      "seq": 15,
-      "check": "net.egress",
-      "at_ms": 144,
-      "duration_ms": 37,
-      "kind": "connect",
-      "outcome": "failed",
-      "addr": null,
-      "error": "proxy answered 403 to CONNECT",
-      "host": "license.acme.example",
-      "port": 443,
-      "via_proxy": "http://proxy.corp.example:3128"
-    }
-  ],
+  "actions": [],
   "actions_truncated": false,
   "actions_dropped": {},
   "redaction": {

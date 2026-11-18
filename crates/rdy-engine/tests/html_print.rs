@@ -309,10 +309,24 @@ fn nothing_verified_doc() -> TestResult<Value> {
         check["status"] = Value::from("skipped");
         check["bucket"] = Value::from("not_applicable");
         check["skip_kind"] = Value::from("not_applicable");
-        check["message"] = Value::from("Does not apply on Linux.");
+        check["message"] = Value::from("Does not apply here. This check is for windows only.");
+        check["fix"] = Value::Null;
+        check["builtin_fix"] = Value::Null;
+        check["notes"] = Value::Array(Vec::new());
         check["observed"] = Value::Null;
         check["expected"] = Value::Null;
     }
+    doc["actions"] = Value::Array(Vec::new());
+    Ok(doc)
+}
+
+/// The sample with no block and exactly one required check that did not run (07 D.7, singular form).
+fn one_required_not_run_doc() -> TestResult<Value> {
+    let mut doc = no_blocks_doc()?;
+    doc["checks"]
+        .as_array_mut()
+        .ok_or("checks is not a list")?
+        .retain(|check| check["key"] != "aws.iam");
     Ok(doc)
 }
 
@@ -324,7 +338,11 @@ fn the_next_step_follows_the_verdict() -> TestResult {
         (sample()?, "Fix the 2 blocks below, then run rdy again."),
         (
             nothing_verified_doc()?,
-            "rdy checked nothing on this machine. Every check in the spec is for another OS. Ask the vendor if that is expected.",
+            "rdy checked nothing on this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that is expected, or follow the fix for each skipped check.",
+        ),
+        (
+            one_required_not_run_doc()?,
+            "rdy could not check 1 required item. Follow the fix for each, then run rdy again.",
         ),
     ];
     for (doc, sentence) in cases {
@@ -344,5 +362,20 @@ fn a_report_where_nothing_was_checked_matches_its_golden() -> TestResult {
         fixtures_dir().join("reports/golden/ready-with-warnings-nothing-verified.html"),
         html_of(nothing_verified_doc()?)?.as_bytes(),
     );
+    Ok(())
+}
+
+/// 07 D.7: `metadata.contact` follows "Questions:" as plain text in `<bdi>`, escaped, never a link.
+#[test]
+fn the_contact_shows_as_escaped_text_in_bdi() -> TestResult {
+    let mut doc = sample()?;
+    doc["spec"]["contact"] = Value::from("a<b@acme.example");
+    let html = html_of(doc)?;
+    assert!(
+        html.contains("Questions: <bdi>a&#60;b@acme.example</bdi></p>"),
+        "{html}"
+    );
+    assert!(!html.contains("a<b@acme.example"));
+    assert!(!html.contains("mailto:"));
     Ok(())
 }
