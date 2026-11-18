@@ -1,0 +1,53 @@
+{
+  "entry": {
+    "endpoints": [
+      "dual.acme.test:8080"
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 endpoints reachable",
+    "notes": [
+      "dual.acme.test:8080: the ipv6 address had no reply within 250 ms, so another family connected first"
+    ],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "2001:db8::1",
+              "elapsed_ms": 250,
+              "family": "ipv6",
+              "outcome": "abandoned",
+              "started_ms": 0
+            },
+            {
+              "addr": "192.0.2.1",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 250
+            }
+          ],
+          "connect_ms": 250,
+          "endpoint": "dual.acme.test:8080",
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 1,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "reached",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}
