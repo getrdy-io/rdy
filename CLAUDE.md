@@ -106,8 +106,8 @@ rdy/
   and a test runs `rdy --bogus`.
 - Logging: `tracing`, `RUST_LOG` respected, never log secrets. Redaction is tested with golden files.
 - Five release targets: Linux x86_64 and aarch64 (musl), macOS aarch64 and x86_64, Windows x86_64. Five CI
-  legs, each running the full test job. If the Intel macOS image is retired, `x86_64-apple-darwin` is built on
-  the arm64 runner and tested nightly (06). Every check compiles and runs on every target from day one; where
+  legs. Four run the full test job. `x86_64-apple-darwin` is built on the arm64 runner on every PR and tested
+  on the Intel runner on main and nightly (06, ADR 0050). Every check compiles and runs on every target from day one; where
   a data source is not built yet, the check reports Skipped, not yet on this OS.
 - Supply chain: `cargo-deny`, `cargo-audit`, `cargo-auditable`, SBOM via `cargo-cyclonedx`, releases via
   `dist` (`dist-workspace.toml`), signed with Sigstore cosign. Reproducible builds are a goal, document deviations.
