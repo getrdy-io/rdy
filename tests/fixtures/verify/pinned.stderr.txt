@@ -1,0 +1,13 @@
+spec         acme-platform.yaml
+product      acme-platform
+sha256       231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f
+signed on    2026-10-28T12:00:00Z
+signing key  F117C76E2F56B162
+fingerprint  5214 b48f 44f0 9f5b 1bc6 1114 4469 c07e
+             6025 9022 9ae8 6240 d118 42c7 2571 7e4a
+trust        trusted on this machine (<home>/.config/rdy/trust.yaml)
+note         Acme security page
+revision     none
+expires      never
+
+VERIFIED

@@ -330,7 +330,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
   (`check: null`).
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
-  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
+  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01, added by
+  M2-138. Until then rdy-spec has no such value, so M1-107 writes the plugin's own outcome and a
+  `form: delegated` field.)
 - Coalescing (past 200 per check, per directory) folds only `read`, `read_dir`, `read_link` and `stat` entries with
   outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
   entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
@@ -497,7 +499,7 @@ tests policy.
   in `rdy-checks-net`). `ProbeHub::set_proxy` stores it once per run and first adds the password, as
   written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
   refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
-  M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
+  M1-097: `ProbeHub::set_proxy_from_env` reads `HTTPS_PROXY` and `HTTP_PROXY`, either case; a bad URL is exit 64). A proxy with a user and no
   password registers the user name and the base64 of `user:` instead when the user name is 6 bytes or
   more (a shorter one registers nothing and refuses nothing). `set_proxy` fails with
   `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
@@ -565,8 +567,9 @@ tests policy.
   `AttemptOutcome::Refused` for a refused port and `AttemptOutcome::TimedOut` for a silent one, which is
   how a check tells `refused` from `blackhole`; `reason` is the matching fixed phrase), `Dns`, `TlsReset`, `TlsAlert`,
   `ProxyForbidden`, `ProxyAuthRequired`, and `Denied` for `blocked_address`, a `host:port` target
-  (`RULE_HTTP_NOT_URL`) and a plain `http://` target through the proxy (`RULE_HTTP_PLAIN_VIA_PROXY`: the
-  absolute form is M1-097). A connection that ends after the reply head (a cut or reset body, a close
+  (`RULE_HTTP_NOT_URL`). A plain `http://` target through the proxy is sent in the absolute form with
+  `Proxy-Authorization` and no `CONNECT` (M1-097); a 407 to it is `NetFailure::ProxyAuthRequired` and a 403 is a status,
+  because the server may have said it. `HttpOutcome::proxy_challenge` holds what `Proxy-Authenticate` offered. A connection that ends after the reply head (a cut or reset body, a close
   with no TLS `close_notify`) keeps the status: the body is `body_cut` and the call is `Ok`. A body of exactly
   64 KiB is complete. The request, the strict configuration and the trust roots are built before the
   connection opens, so a missing store costs no connection. One `http` entry per call: `method`, `url`
@@ -595,7 +598,7 @@ tests policy.
   clock.
 - System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
   facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
-  store. No revocation check, and the report says so.
+  store. No revocation check, and from M1-184 the report says so.
 - PAC is reported, never fetched, in M1.
 - UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
   in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
@@ -788,6 +791,11 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
     it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,
     printed through the one askama safe marker, which is on a private wrapper of the page (`EmbeddedJson`), not on the public `HtmlSafeJson` (`scripts/check-html-escapes.sh`).
   - The CSP is ADR 0003's.
+  - `rdy run` writes the page as `rdy-report-<product>-<ts>.html` next to the `.json` (M1-181):
+    `render_page(&RedactedReport)` makes an `HtmlPage` before any file is written, `OutputDir::write_html`
+    writes it by the rules of the JSON, and the order is the spec copy, the page, then the `.json`
+    last. The watchdog's sink writes the same three through the same calls. An `HtmlError` maps to the
+    `report_write` code and exit 70.
 - `rdy report` (M2) redacts input it did not produce before rendering.
 
 ## Catalog hooks (03, "Decisions needing an ADR")
@@ -1163,6 +1171,7 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
                  pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
                  pub fn write_json(&self, r: &RedactedReport) -> Result<PathBuf, ReportError>;  // M1-055 (was write_report)
+                 pub fn write_html(&self, p: &HtmlPage) -> Result<PathBuf, ReportError>;  // M1-181, feature `html`; `render_page` makes the HtmlPage
                  pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
 pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), JsonError>;  // M1-055: report::json, no `runtime` feature needed
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed

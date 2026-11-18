@@ -1,0 +1,65 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "centos",
+        "versions": [
+          "7"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "7",
+            "8"
+          ]
+        },
+        {
+          "id": "centos",
+          "versions": [
+            "7"
+          ]
+        }
+      ]
+    },
+    "fix": "Use a supported OS image, or ask the vendor whether amzn 2 can be supported.",
+    "level": "fail",
+    "message": "Amazon Linux 2 (amzn 2) is not supported. The spec supports rhel 7 or 8, centos 7.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "5.10.205-195.804.amzn2.x86_64",
+      "os": {
+        "id": "amzn",
+        "id_like": [
+          "centos",
+          "rhel",
+          "fedora"
+        ],
+        "name": "Amazon Linux",
+        "pretty_name": "Amazon Linux 2",
+        "source": "/etc/os-release",
+        "version_id": "2"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

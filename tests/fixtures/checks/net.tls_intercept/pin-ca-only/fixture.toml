@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-pin-ca-only"
+summary = "A public chain in which only the issuing CA is pinned: partial, never a pass"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

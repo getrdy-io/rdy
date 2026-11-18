@@ -42,7 +42,10 @@ mod normalize;
 mod tests;
 
 #[cfg(feature = "runtime")]
-pub use expect::{assert_cases, assert_cases_in, expect_bytes, render, run_case, sorted};
+pub use expect::{
+    assert_cases, assert_cases_in, assert_cases_with, assert_cases_with_in, expect_bytes, render,
+    run_case, run_case_on, sorted,
+};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{
@@ -113,6 +116,34 @@ impl TestRun {
     #[must_use]
     pub fn offline(self) -> Self {
         self.hub.set_network(false);
+        self
+    }
+
+    /// The same run with a proxy set, as `rdy run` sets it from `HTTPS_PROXY`.
+    ///
+    /// # Panics
+    ///
+    /// If `text` is not a usable proxy URL or its password is refused: a test of that is a test of
+    /// [`ProbeHub::set_proxy_text`].
+    #[must_use]
+    pub fn with_proxy(self, text: &str) -> Self {
+        self.hub
+            .set_proxy_text(text)
+            .unwrap_or_else(|e| panic!("the test proxy URL is not usable: {e}"));
+        self
+    }
+
+    /// The same run with the proxy read from the machine's environment, as `rdy run` reads it
+    /// ([`ProbeHub::set_proxy_from_env`]). The variable it came from is then known to the checks.
+    ///
+    /// # Panics
+    ///
+    /// If the variable is not a usable proxy URL or its password is refused.
+    #[must_use]
+    pub fn with_proxy_from_env(self) -> Self {
+        self.hub
+            .set_proxy_from_env()
+            .unwrap_or_else(|e| panic!("the test proxy variable is not usable: {e}"));
         self
     }
 
