@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-expired-inside-window"
+summary = "The same expired leaf with the clock pinned inside its validity window, so only the OS store trusts it"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false
