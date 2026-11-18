@@ -19,6 +19,9 @@
           "labels": {
             "app.kubernetes.io/name": "aws-cluster-autoscaler"
           }
+        },
+        "status": {
+          "readyReplicas": 2
         }
       }
     ]

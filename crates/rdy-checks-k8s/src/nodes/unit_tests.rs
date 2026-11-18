@@ -321,7 +321,8 @@ fn the_platform_follows_labels_and_the_version_and_auto_mode_is_its_own() {
 fn the_pod_limit_fix_names_the_platform_and_only_eks_gets_prefix_delegation() {
     for (platform, must) in [
         (Platform::Eks, "ENABLE_PREFIX_DELEGATION=true"),
-        (Platform::EksAuto, "NodePool"),
+        (Platform::EksAuto, "NodeClass"),
+        (Platform::GkeAutopilot, "cannot be changed"),
         (Platform::Gke, "--max-pods-per-node"),
         (Platform::Aks, "az aks nodepool add"),
         (Platform::OpenShift, "KubeletConfig"),

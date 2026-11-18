@@ -12,7 +12,9 @@
     "fix": null,
     "level": "pass",
     "message": "1 of 1 hosts present a chain the public roots validate",
-    "notes": [],
+    "notes": [
+      "no revocation check"
+    ],
     "observed": {
       "hosts": [
         {

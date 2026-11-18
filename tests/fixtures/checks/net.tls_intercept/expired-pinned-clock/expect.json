@@ -12,7 +12,9 @@
     "fix": "The certificate of web.acme.test is expired or not valid yet. This is not interception. Check this machine's clock with `timedatectl` and see host.time_sync. If the clock is right, the server's owner must renew the certificate.",
     "level": "fail",
     "message": "web.acme.test:443 (certificate is expired or not valid yet)",
-    "notes": [],
+    "notes": [
+      "no revocation check"
+    ],
     "observed": {
       "hosts": [
         {

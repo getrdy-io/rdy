@@ -8,8 +8,8 @@
 //! - only when the one thing wrong is a count of nodes that is too small: whether a node autoscaler
 //!   exists. The node labels and names are looked at first (they cost nothing), then `GET /apis` for the
 //!   groups `karpenter.sh`, `karpenter.k8s.aws` and `autoscaling.openshift.io`, then the `Deployment`
-//!   list of `kube-system`, where a name or an `app.kubernetes.io/name` label that contains
-//!   `cluster-autoscaler` counts (the Helm chart names vary). The list is filtered here and not by a
+//!   list of `kube-system`, where a name or an `app.kubernetes.io/name` label that equals or ends
+//!   with `cluster-autoscaler` counts (the Helm chart names vary), if a replica is ready. The list is filtered here and not by a
 //!   selector, so no selector has to cover every spelling. A group in `/apis` says the autoscaler is
 //!   installed, not that it can add the nodes the product needs: the warning says "not verified".
 //!
@@ -286,19 +286,23 @@ impl<T> Read<T> {
     }
 }
 
-/// True for a Deployment of the Kubernetes cluster autoscaler: its name or its `app.kubernetes.io/name`
-/// label contains `cluster-autoscaler`.
+/// True for a running Deployment of the Kubernetes cluster autoscaler: its name or its
+/// `app.kubernetes.io/name` label equals or ends with `cluster-autoscaler` (the Helm names are
+/// `aws-cluster-autoscaler` and the like), and at least one replica is ready.
 fn is_autoscaler(deployment: &Deployment) -> bool {
-    let named = deployment
-        .metadata
-        .name
-        .as_deref()
-        .is_some_and(|name| name.contains("cluster-autoscaler"));
+    let is_it = |text: &str| text.ends_with("cluster-autoscaler");
+    let named = deployment.metadata.name.as_deref().is_some_and(is_it);
     let labeled = deployment
         .metadata
         .labels
         .as_ref()
         .and_then(|labels| labels.get("app.kubernetes.io/name"))
-        .is_some_and(|value| value.contains("cluster-autoscaler"));
-    named || labeled
+        .is_some_and(|value| is_it(value));
+    let ready = deployment
+        .status
+        .as_ref()
+        .and_then(|status| status.ready_replicas)
+        .unwrap_or(0)
+        > 0;
+    (named || labeled) && ready
 }

@@ -13,6 +13,8 @@
 //!   Run commands through [`crate::exec`], which kills the whole process group when its future is
 //!   dropped, on timeout or on abort.
 //!
+//! [`within`] bounds optional async work by a time limit and drops it when the time runs out.
+//!
 //! A panic in the closure is resumed in the awaiting task, so the scheduler reports the check as
 //! panicked, the same as a panic in the check's own code.
 
