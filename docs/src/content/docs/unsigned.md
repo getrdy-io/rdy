@@ -34,13 +34,13 @@ Anyone who can send you a spec can send you a key as easily. So a `--key` run pr
 
 On Linux and macOS, `rdy trust add` is the normal path. It shows the key's fingerprint and asks you to compare it with the one the vendor published. It saves the key only after you say yes. Then every run of that product checks against the saved key.
 
-```sh skip=needs-release-files
+```sh skip=page-test
 rdy trust add acme-platform --key acme-platform.pub
 ```
 
 Use `--key` on a run when you do not want to save the key. Before you run the spec, check the key with `rdy verify`. Compare the fingerprint it prints with the vendor's fingerprint. Get the vendor's fingerprint by another route than the spec.
 
-```sh skip=needs-release-files
+```sh skip=page-test
 rdy verify --key acme-platform.pub acme-platform.yaml
 rdy run --key acme-platform.pub acme-platform.yaml
 ```

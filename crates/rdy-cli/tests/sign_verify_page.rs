@@ -263,3 +263,58 @@ fn trust_add_pins_the_vendor_key_for_a_normal_user() {
     assert!(shown.contains("VERIFIED"), "{shown}");
     assert!(shown.contains("trusted on this machine"), "{shown}");
 }
+
+/// The unsigned page's vendor-key commands. The page names the vendor's public key `acme-platform.pub`,
+/// so the test gives the key that `keygen` made that name. The lines run as the page writes them.
+#[cfg(unix)]
+#[test]
+fn the_unsigned_page_vendor_key_commands_run_as_shown() {
+    let (dir, home) = workspace();
+    keygen_and_sign(dir.path(), home.path());
+    std::fs::copy(
+        dir.path().join("acme-signing.pub"),
+        dir.path().join("acme-platform.pub"),
+    )
+    .expect("name the vendor key the way the page does");
+
+    // Without --yes, trust add refuses without a terminal and saves nothing, as root or not.
+    let out = run_page(
+        dir.path(),
+        home.path(),
+        "rdy trust add acme-platform --key acme-platform.pub",
+        None,
+    );
+    assert_eq!(code(&out), 64, "trust add without --yes: {}", stderr(&out));
+    assert!(stderr(&out).contains("--yes"), "{}", stderr(&out));
+    assert!(!home.path().join(".config/rdy/trust.yaml").exists());
+
+    // The page's check with the key. It exits 0 and shows the banner, as the signing page says.
+    let out = run_page(
+        dir.path(),
+        home.path(),
+        "rdy verify --key acme-platform.pub acme-platform.yaml",
+        None,
+    );
+    assert_eq!(code(&out), 0, "verify --key: {}", stderr(&out));
+    assert!(stderr(&out).starts_with("WARNING: KEY NOT PINNED\n"));
+
+    // The page's run with the key. It runs the checks, so its exit is a run exit, never a usage or
+    // internal error, and the banner shows.
+    let out = run_page(
+        dir.path(),
+        home.path(),
+        "rdy run --key acme-platform.pub acme-platform.yaml",
+        None,
+    );
+    let run_code = code(&out);
+    assert!(
+        matches!(run_code, 0..=2),
+        "run --key exits with a run code, not {run_code}: {}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("WARNING: KEY NOT PINNED"),
+        "{}",
+        stderr(&out)
+    );
+}

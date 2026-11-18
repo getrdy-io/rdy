@@ -365,6 +365,44 @@ fn sign_and_verify_page_runs_every_command_it_shows() {
             "the page shows `{command}`, but crates/rdy-cli/tests/sign_verify_page.rs does not run it"
         );
     }
+    // The unsigned page has blocks that run only here (`skip=page-test`). Its tested block is run by
+    // the docs runner, so only the page-test lines are checked against the literals.
+    let unsigned = page_test_commands(&read("docs/src/content/docs/unsigned.md"));
+    assert_eq!(
+        unsigned.len(),
+        3,
+        "the unsigned page shows trust add, verify and run with the vendor key: {unsigned:?}"
+    );
+    for command in &unsigned {
+        assert!(
+            tests.contains(&format!("\"{command}\"")),
+            "the unsigned page shows `{command}`, but crates/rdy-cli/tests/sign_verify_page.rs does not run it"
+        );
+    }
+}
+
+/// The `rdy` lines of the fences marked `skip=page-test`, as written. A dedicated page test runs them.
+fn page_test_commands(page: &str) -> Vec<String> {
+    let mut commands = Vec::new();
+    // None outside a fence. Some(true) inside a page-test fence, Some(false) inside any other.
+    let mut fence: Option<bool> = None;
+    for line in page.lines() {
+        match fence {
+            Some(_) if line == "```" => fence = None,
+            Some(true) => {
+                if line.starts_with("rdy ") {
+                    commands.push(line.to_owned());
+                }
+            }
+            Some(false) => {}
+            None => {
+                if let Some(info) = line.strip_prefix("```") {
+                    fence = Some(info.split_whitespace().any(|word| word == "skip=page-test"));
+                }
+            }
+        }
+    }
+    commands
 }
 
 #[test]
