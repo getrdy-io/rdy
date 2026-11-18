@@ -1042,3 +1042,86 @@ fn a_130_character_message_wraps_at_100_with_a_hanging_indent() {
     assert!(joined.ends_with("word!"), "{joined}");
     assert_eq!(joined.matches("word").count(), 26, "{joined}");
 }
+
+// ---- missing grants (M1-186) --------------------------------------------------------------------
+
+fn with_grants(grants: &[&str], width: usize, styler: Styler) -> String {
+    let mut report = sample("ready-with-warnings");
+    let disk = report.checks.get_mut(2).unwrap_or_else(|| panic!("disk"));
+    disk.partial = Some(
+        rdy_spec::result::Partial::new(vec![], "Read in part")
+            .with_missing_grants(grants.iter().map(|g| (*g).to_owned()).collect()),
+    );
+    full(&report, "x.yaml", "./f", false, styler, width)
+}
+
+#[test]
+fn one_grant_is_one_line_between_the_message_and_the_fix() {
+    let out = with_grants(&["list csinodes (storage.k8s.io)"], 100, Styler::new(false));
+    let lines: Vec<&str> = out.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("missing grants: list csinodes (storage.k8s.io)"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(lines[at - 1].contains("host.disk"), "{out}");
+    assert!(lines[at + 1].contains("fix from"), "{out}");
+    assert!(lines[at].starts_with(&" ".repeat(29)), "{out}");
+}
+
+#[test]
+fn several_grants_keep_the_check_order() {
+    let out = with_grants(
+        &["list nodes", "get pods", "list csinodes"],
+        100,
+        Styler::new(false),
+    );
+    assert!(
+        out.contains("missing grants: list nodes, get pods, list csinodes\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_long_grant_list_wraps_with_the_hanging_indent() {
+    let out = with_grants(
+        &[
+            "list nodes",
+            "list csinodes (storage.k8s.io)",
+            "get pods in namespace payments",
+        ],
+        60,
+        Styler::new(false),
+    );
+    let lines: Vec<&str> = out.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("missing grants:"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(lines[at].len() <= 60, "{out}");
+    assert!(lines[at + 1].starts_with(&" ".repeat(29)), "{out}");
+    assert!(!lines[at + 1].contains("fix from"), "{out}");
+    assert!(out.contains("payments"), "{out}");
+}
+
+#[test]
+fn a_list_past_the_cap_ends_and_n_more() {
+    let grants: Vec<String> = (1..=8).map(|n| format!("get thing{n}")).collect();
+    let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+    let out = with_grants(&refs, 100, Styler::new(false));
+    let flat = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("get thing5, and 3 more"), "{out}");
+    assert!(!out.contains("thing6"), "{out}");
+}
+
+#[test]
+fn a_grant_is_escaped_and_never_styled() {
+    let out = with_grants(&["list \u{1b}[31mnodes"], 100, Styler::new(true));
+    assert!(!out.contains("\u{1b}[31mnodes"), "{out}");
+    assert!(out.contains("nodes"), "{out}");
+}
+
+#[test]
+fn no_grants_print_no_line() {
+    let out = with_grants(&[], 100, Styler::new(false));
+    assert!(!out.contains("missing grants"), "{out}");
+}

@@ -152,8 +152,15 @@ a bucket. Read the bucket from the result; never recompute it. One entry per che
 
 ```text
 <2 spaces><STATUS padded to 7><2 spaces><key padded to the longest key><2 spaces><message>
+<spaces up to the message column>missing grants: <grant>, <grant>   (only when partial.missing_grants is not empty)
 <spaces up to the message column>fix from <source>: <fix>          (only when the check has a fix)
 ```
+
+The `missing grants:` line (M1-186) lists `partial.missing_grants` in the check's order, joined by `, `,
+each grant through the untrusted-text escaper and never styled. It sits under the message and before the
+fix. It wraps like the fix line. A list of more than five shows the first five and ends `and N more`
+(`missing grants: list nodes, list csinodes (storage.k8s.io), and 3 more`). A `not_applicable` check gets
+none. No sample in C.12 to C.18 or 2.7 has the field, so they do not change.
 
 - `STATUS` is `PASS`, `WARN`, `BLOCK`, `SKIP`, `TIMEOUT` or `ERROR`. `key` is the `id`, or `id/name`.
 - `message` is the JSON `message`, word for word. A check in the `required_not_run` bucket gets ` (required)`

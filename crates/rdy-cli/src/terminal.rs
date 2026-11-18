@@ -535,6 +535,17 @@ fn entry(
         out.push_str(&wrap(&message, start, message_column, view.width, styler));
         out.push('\n');
     }
+    if let Some(grants) = grant_pieces(check, bucket) {
+        out.push_str(&" ".repeat(message_column));
+        out.push_str(&wrap(
+            &grants,
+            message_column,
+            message_column,
+            view.width,
+            styler,
+        ));
+        out.push('\n');
+    }
     if let Some(fix) = fix_pieces(view, check, bucket) {
         out.push_str(&" ".repeat(message_column));
         out.push_str(&wrap(
@@ -546,6 +557,44 @@ fn entry(
         ));
         out.push('\n');
     }
+}
+
+/// The most grants one entry lists. The rest are counted (`and N more`).
+const MAX_GRANTS_SHOWN: usize = 5;
+
+/// `missing grants: <grant>, <grant>` as pieces, or `None` when the result names no missing grant. The
+/// grants keep the check's order and each goes through the escaper. A list past
+/// [`MAX_GRANTS_SHOWN`] ends `and N more` (07 section 2.2). A check that does not apply gets none.
+fn grant_pieces(check: &CheckResult, bucket: &Bucket) -> Option<Vec<Piece>> {
+    let grants = check
+        .partial
+        .as_ref()
+        .map(|partial| partial.missing_grants.as_slice())
+        .filter(|grants| !grants.is_empty())?;
+    if *bucket == Bucket::NotApplicable || check.skip_kind == Some(SkipKind::NotApplicable) {
+        return None;
+    }
+    let shown = grants.len().min(MAX_GRANTS_SHOWN);
+    let more = grants.len() - shown;
+    let mut pieces = vec![
+        Piece::Fixed(Role::Label, "missing"),
+        Piece::Fixed(Role::Label, "grants:"),
+    ];
+    for (index, grant) in grants.iter().take(shown).enumerate() {
+        let mut parts = words(grant);
+        if (index + 1 < shown || more > 0)
+            && let Some(Piece::Plain(last)) = parts.last_mut()
+        {
+            last.push(',');
+        }
+        pieces.extend(parts);
+    }
+    if more > 0 {
+        pieces.push(Piece::Fixed(Role::Label, "and"));
+        pieces.push(Piece::Plain(more.to_string()));
+        pieces.push(Piece::Fixed(Role::Label, "more"));
+    }
+    Some(pieces)
 }
 
 /// `fix from <source>: <fix>` as pieces, or `None` when the check has no fix to show. A check that does
