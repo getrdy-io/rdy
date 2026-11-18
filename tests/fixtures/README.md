@@ -62,9 +62,9 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `verify/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (17 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (42 cases), `host.cgroups/` (13 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `verify/`, `readme/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (15 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (20 cases), the fifteen machines of
+`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (42 cases), `host.cgroups/` (14 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -115,6 +115,7 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
 | `exit-codes/<row>.stderr.txt` | The stderr of the built `rdy` for an exit-code row that needs no fixture backend: `bad-flag`, `missing-file`, `unsigned`, `too-many-hosts` and `unwritable-out-dir` (M1-087, M1-126). The report folder stamp is `<stamp>`, `\` is `/`. Compared by `tests/exit_code_goldens.rs`, plain and with `--json` | `UPDATE_GOLDENS=1`, then read the diff |
+| `readme/<name>.txt` | A README transcript, the body of a `console` block with `transcript=<path>` (M1-136, ADR 0048). The README block must equal the file, and a file no block uses fails `tests/docs_test.rs`. Hand-trimmed from a real run, so it holds host numbers and is not compared with live output | By hand, with the README |
 | `verify/<name>.stderr.txt` | The stderr of `rdy verify --key` on the signed fixture (07 C.4, the KEY NOT PINNED form) and of `rdy spec lint` for the two C.8 samples (M1-126). Compared by `tests/verify_command.rs` | `UPDATE_GOLDENS=1`, then read the diff |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
@@ -656,9 +657,9 @@ check, the classes and the ticket that owes them. A row for a class that is no l
 too. `PENDING` has been empty since M1-174. A new family adds its row in
 `crates/rdy-cli/tests/env_harness/families.rs`.
 
-**Known gaps.** Two cases bless behaviour that check-author found wrong against 03:
-`host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm`. Each has a `README.md` that says
-so. Both belong to M1-177. Whoever fixes the check regenerates the `expect.json` on purpose.
+**Known gaps.** None. `host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm` blessed behaviour that
+check-author found wrong against 03. M1-177 fixed both checks and regenerated their `expect.json` on purpose. Their
+`README.md` files say what each case now shows.
 
 **Reviewing an `expect.json`.** Read the level and the message of every new case before you accept it.
 The level must be the one the case is named for (a `pass` case that says `warn` is a bug in the check or

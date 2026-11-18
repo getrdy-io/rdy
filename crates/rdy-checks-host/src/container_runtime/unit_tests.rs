@@ -610,3 +610,29 @@ proptest! {
         let _ = files::parse_daemon_json(&text);
     }
 }
+
+#[test]
+fn a_denied_socket_for_root_does_not_say_run_as_root() {
+    let mut seen = running(ContainerRuntime::Docker, Some(CgroupDriver::Systemd));
+    seen.api = Api::Denied;
+    let check = ContainerRuntimeCheck::default();
+    let root = judge::judge(
+        &check,
+        std::slice::from_ref(&seen),
+        &Kubelet::default(),
+        true,
+    );
+    let fix = root.fix.expect("a fix");
+    assert!(
+        fix.contains("A security module (SELinux or AppArmor) or a user namespace may be refusing rdy the socket."),
+        "{fix}"
+    );
+    assert!(!fix.contains("Run rdy as root"), "{fix}");
+    assert!(!fix.contains("daemon is running"), "{fix}");
+    if let Err(error) = rdy_engine::fixtext::check(&fix) {
+        panic!("{error}: {fix}");
+    }
+    // Not root: the root advice stays.
+    let user = judge::judge(&check, &[seen], &Kubelet::default(), false);
+    assert!(user.fix.expect("a fix").contains("Run rdy as root"));
+}

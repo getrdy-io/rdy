@@ -65,6 +65,10 @@ const STATUS: &str = "/proc/self/status";
 const ONLINE: &str = "/sys/devices/system/cpu/online";
 const DMI_PRODUCT: &str = "/sys/class/dmi/id/product_name";
 const DMI_VENDOR: &str = "/sys/class/dmi/id/sys_vendor";
+/// `/sys/class/dmi/id` is a link to this directory. The live backend judges the real path of a read
+/// against the declared prefixes, so the real paths are declared beside the class paths.
+const DMI_PRODUCT_REAL: &str = "/sys/devices/virtual/dmi/id/product_name";
+const DMI_VENDOR_REAL: &str = "/sys/devices/virtual/dmi/id/sys_vendor";
 const HYPERVISOR_TYPE: &str = "/sys/hypervisor/type";
 
 /// The most names listed in one sentence before the rest are counted.
@@ -93,6 +97,8 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         ONLINE,
         DMI_PRODUCT,
         DMI_VENDOR,
+        DMI_PRODUCT_REAL,
+        DMI_VENDOR_REAL,
         HYPERVISOR_TYPE,
     ],
     statfs: &[],
