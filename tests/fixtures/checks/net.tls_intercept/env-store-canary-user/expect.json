@@ -12,7 +12,9 @@
     "fix": "web.acme.test is presented with a chain that public roots do not vouch for but this machine's store trusts. An internal CA or a TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for web.acme.test. Where the product reads another store, install that CA there. Debian and Ubuntu: copy the CA to `/usr/local/share/ca-certificates/acme-inspection.crt` (the name must end in `.crt`), then run `update-ca-certificates`. RHEL: copy it to `/etc/pki/ca-trust/source/anchors/`, then run `update-ca-trust`. SUSE: copy it to `/usr/share/pki/trust/anchors/`, then run `update-ca-certificates`. Alpine: copy it to `/usr/local/share/ca-certificates/`, then run `update-ca-certificates`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store.",
     "level": "warn",
     "message": "web.acme.test:443 (chain is trusted by this machine only, issuer CN=Acme Test Issuing CA)",
-    "notes": [],
+    "notes": [
+      "no revocation check"
+    ],
     "observed": {
       "hosts": [
         {
