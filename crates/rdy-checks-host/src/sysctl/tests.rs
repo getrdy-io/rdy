@@ -340,6 +340,30 @@ fn a_package_file_that_sorts_after_the_override_is_copied_into_etc() {
     assert!(run.contains("Do not edit"), "{run}");
     let own = change_step("vm.max_map_count", &rule, "/etc/sysctl.d/90-mine.conf");
     assert!(own.starts_with("Change the line for"), "{own}");
+    // The "Copy it to" and `/run` fix texts name commands and paths, so they pass the audit too.
+    for (what, text) in [("copy", &late), ("run", &run), ("own", &own)] {
+        if let Err(error) = rdy_engine::fixtext::check(text) {
+            panic!("{what}: fix text is not on the lists: {error}\n{text}");
+        }
+    }
+}
+
+#[test]
+fn every_case_directory_is_in_the_case_list() {
+    let listed: Vec<&str> = cases().iter().map(|(name, _)| *name).collect();
+    let on_disk = rdy_engine::testing::fixture_cases("host.sysctl");
+    for dir in &on_disk {
+        assert!(
+            listed.contains(&dir.as_str()),
+            "{dir} is a case directory that `cases()` does not run. Add it, with its entry"
+        );
+    }
+    for name in &listed {
+        assert!(
+            on_disk.iter().any(|dir| dir == name),
+            "{name} is in `cases()` and has no directory"
+        );
+    }
 }
 
 #[test]

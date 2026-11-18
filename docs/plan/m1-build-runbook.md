@@ -293,8 +293,8 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next PR is #51 (#50 is this pause-state PR).
 - The next free ADR is 0051 (0050 is the macOS CI gate, `ci/macos-arm64-gate`). ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
-  in #78 (M1-165). ADR 0047 is on the M1-133 branch. ADR 0048 is reserved for M1-136's docs-test ADR
-  (its branch numbers it 0046). ADR 0049 is correction-56's (Proposed).
+  in #78 (M1-165). ADR 0047 is in #85 (M1-133, merged). ADR 0048 is M1-136's docs-test ADR. ADR 0049 is
+  correction-56's (Proposed).
 - The next ticket ids are M1-185 and M2-146, and the next correction is 58 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 

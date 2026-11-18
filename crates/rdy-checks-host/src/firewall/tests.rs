@@ -14,6 +14,14 @@ use serde_json::Value;
 
 use super::*;
 
+/// The evidence entry of one port of the first active manager. The `ports` array is sorted by number.
+fn port(observed: &Value, number: u16) -> &Value {
+    observed["active"][0]["ports"]
+        .as_array()
+        .and_then(|all| all.iter().find(|p| p["port"] == number))
+        .unwrap_or_else(|| panic!("no evidence for port {number}: {observed}"))
+}
+
 /// A file of a case (`fx!("ufw-closed", "root/etc/ufw/user.rules")`) or of one of the two base
 /// environments, which the loader looks up under `tests/fixtures/envs/` (`fx!(ufw "root/proc/net/route")`).
 /// The base paths are whole literals, so the lint wall can allow exactly these directories.
@@ -358,7 +366,7 @@ fn ports_open_by_number_in_the_default_route_zone_pass() {
         "firewalld zone public allows 6443/tcp and 10250/tcp inbound."
     );
     assert!(f.partial.is_none() && f.fix.is_none());
-    assert_eq!(f.observed["active"][0]["ports"]["6443"]["verdict"], "open");
+    assert_eq!(port(&f.observed, 6443)["verdict"], "open");
     assert_eq!(f.observed["active"][0]["interface"], "eth0");
     assert_eq!(f.expected["open_inbound"], serde_json::json!([6443, 10250]));
 }
@@ -375,7 +383,7 @@ fn a_closed_port_in_the_default_route_zone_blocks_even_when_another_zone_opens_i
             "Run `firewall-cmd --permanent --zone=public --add-port=6443/tcp && firewall-cmd --reload`."
         )
     );
-    assert_eq!(f.observed["active"][0]["ports"]["10250"]["verdict"], "open");
+    assert_eq!(port(&f.observed, 10250)["verdict"], "open");
     // Only the zone of the default-route interface is listed.
     let commands = ran.commands().join("\n");
     assert!(commands.contains("--zone=public"), "{commands}");
@@ -389,14 +397,8 @@ fn a_port_open_by_service_passes_and_the_admin_file_wins_over_the_packaged_one()
     let ran = run_case(&FIREWALLD_SERVICE_OPEN, PORTS);
     let f = ran.finding();
     assert_eq!(f.level, Level::Pass, "{f:?}");
-    assert_eq!(
-        f.observed["active"][0]["ports"]["6443"]["detail"],
-        "service acme-api"
-    );
-    assert_eq!(
-        f.observed["active"][0]["ports"]["10250"]["detail"],
-        "service acme-kubelet"
-    );
+    assert_eq!(port(&f.observed, 6443)["detail"], "service acme-api");
+    assert_eq!(port(&f.observed, 10250)["detail"], "service acme-kubelet");
     // The packaged kubelet file is not even read when the admin file exists.
     assert!(
         !ran.paths()
@@ -436,10 +438,7 @@ fn a_rich_rule_that_touches_the_port_gives_a_warning_not_a_block() {
     );
     assert!(f.message.contains("rich rule"), "{}", f.message);
     // Any rich rule in the zone is a warning for every port (03: "any rich rule present: warn").
-    assert_eq!(
-        f.observed["active"][0]["ports"]["10250"]["verdict"],
-        "unknown"
-    );
+    assert_eq!(port(&f.observed, 10250)["verdict"], "unknown");
     assert!(
         f.fix
             .as_deref()
@@ -457,10 +456,7 @@ fn a_direct_rule_file_with_a_rule_gives_a_warning_even_for_open_ports() {
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");
     assert!(f.message.contains("direct rules"), "{}", f.message);
-    assert_eq!(
-        f.observed["active"][0]["ports"]["6443"]["verdict"],
-        "unknown"
-    );
+    assert_eq!(port(&f.observed, 6443)["verdict"], "unknown");
     // The same listing with no direct.xml passes.
     let plain = run_case(&FIREWALLD_PORT_OPEN, PORTS);
     assert_eq!(plain.finding().level, Level::Pass);
@@ -505,11 +501,8 @@ fn a_closed_port_is_unknown_when_another_active_zone_is_bound_to_a_source_networ
     let ran = run_case(&FIREWALLD_SOURCE_ZONE, PORTS);
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");
-    assert_eq!(
-        f.observed["active"][0]["ports"]["6443"]["verdict"],
-        "unknown"
-    );
-    assert_eq!(f.observed["active"][0]["ports"]["10250"]["verdict"], "open");
+    assert_eq!(port(&f.observed, 6443)["verdict"], "unknown");
+    assert_eq!(port(&f.observed, 10250)["verdict"], "open");
     assert!(
         f.notes
             .iter()
@@ -533,7 +526,7 @@ fn a_zone_that_opens_all_tcp_by_protocol_passes() {
     let ran = execute(replay, true, Os::Linux, PORTS);
     assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
     assert_eq!(
-        ran.finding().observed["active"][0]["ports"]["6443"]["detail"],
+        port(&ran.finding().observed, 6443)["detail"],
         "protocols: tcp"
     );
 }
@@ -610,7 +603,7 @@ fn ufw_blocks_a_port_that_no_rule_allows_under_a_drop_policy() {
     assert_eq!(f.level, Level::Fail, "{f:?}");
     assert_eq!(f.message, "ufw blocks 6443/tcp.");
     assert_eq!(f.fix.as_deref(), Some("Run `ufw allow 6443/tcp`."));
-    let detail = f.observed["active"][0]["ports"]["6443"]["detail"]
+    let detail = port(&f.observed, 6443)["detail"]
         .as_str()
         .unwrap_or_default();
     assert!(detail.contains("default input policy is DROP"), "{detail}");
@@ -655,7 +648,7 @@ fn ufw_rule_limited_to_one_network_is_unknown() {
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");
     assert!(f.message.contains("6443/tcp"), "{}", f.message);
-    assert_eq!(f.observed["active"][0]["ports"]["10250"]["verdict"], "open");
+    assert_eq!(port(&f.observed, 10250)["verdict"], "open");
 }
 
 #[test]
