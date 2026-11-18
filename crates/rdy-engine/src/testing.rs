@@ -119,6 +119,34 @@ impl TestRun {
         self
     }
 
+    /// The same run with a proxy set, as `rdy run` sets it from `HTTPS_PROXY`.
+    ///
+    /// # Panics
+    ///
+    /// If `text` is not a usable proxy URL or its password is refused: a test of that is a test of
+    /// [`ProbeHub::set_proxy_text`].
+    #[must_use]
+    pub fn with_proxy(self, text: &str) -> Self {
+        self.hub
+            .set_proxy_text(text)
+            .unwrap_or_else(|e| panic!("the test proxy URL is not usable: {e}"));
+        self
+    }
+
+    /// The same run with the proxy read from the machine's environment, as `rdy run` reads it
+    /// ([`ProbeHub::set_proxy_from_env`]). The variable it came from is then known to the checks.
+    ///
+    /// # Panics
+    ///
+    /// If the variable is not a usable proxy URL or its password is refused.
+    #[must_use]
+    pub fn with_proxy_from_env(self) -> Self {
+        self.hub
+            .set_proxy_from_env()
+            .unwrap_or_else(|e| panic!("the test proxy variable is not usable: {e}"));
+        self
+    }
+
     /// Pins the clock that every TLS verdict of this run sees, as time since the Unix epoch. See
     /// `ProbeHub::pin_clock`. Call it before the check runs.
     #[cfg(any(feature = "runtime", feature = "loopback"))]

@@ -499,7 +499,7 @@ tests policy.
   in `rdy-checks-net`). `ProbeHub::set_proxy` stores it once per run and first adds the password, as
   written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
   refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
-  M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
+  M1-097: `ProbeHub::set_proxy_from_env` reads `HTTPS_PROXY` and `HTTP_PROXY`, either case; a bad URL is exit 64). A proxy with a user and no
   password registers the user name and the base64 of `user:` instead when the user name is 6 bytes or
   more (a shorter one registers nothing and refuses nothing). `set_proxy` fails with
   `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
@@ -567,8 +567,9 @@ tests policy.
   `AttemptOutcome::Refused` for a refused port and `AttemptOutcome::TimedOut` for a silent one, which is
   how a check tells `refused` from `blackhole`; `reason` is the matching fixed phrase), `Dns`, `TlsReset`, `TlsAlert`,
   `ProxyForbidden`, `ProxyAuthRequired`, and `Denied` for `blocked_address`, a `host:port` target
-  (`RULE_HTTP_NOT_URL`) and a plain `http://` target through the proxy (`RULE_HTTP_PLAIN_VIA_PROXY`: the
-  absolute form is M1-097). A connection that ends after the reply head (a cut or reset body, a close
+  (`RULE_HTTP_NOT_URL`). A plain `http://` target through the proxy is sent in the absolute form with
+  `Proxy-Authorization` and no `CONNECT` (M1-097); a 407 to it is `NetFailure::ProxyAuthRequired` and a 403 is a status,
+  because the server may have said it. `HttpOutcome::proxy_challenge` holds what `Proxy-Authenticate` offered. A connection that ends after the reply head (a cut or reset body, a close
   with no TLS `close_notify`) keeps the status: the body is `body_cut` and the call is `Ok`. A body of exactly
   64 KiB is complete. The request, the strict configuration and the trust roots are built before the
   connection opens, so a missing store costs no connection. One `http` entry per call: `method`, `url`

@@ -26,6 +26,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use rdy_engine::privilege::PrivilegeError;
+use rdy_engine::probe::{ProxyEnvError, ProxyError};
 use rdy_engine::report::{HtmlError, JsonError};
 use rdy_spec::result::{ExitCode, Verdict};
 use rdy_spec::sig::SignatureError;
@@ -256,6 +257,13 @@ pub enum InternalKind {
         /// The variable names.
         names: Vec<String>,
     },
+    /// The run could not promise to hide the password of the proxy URL in an environment variable,
+    /// because the known-secret set refused it (under 6 bytes, over the limit or no room). The variable
+    /// name is one of the four proxy variables. No part of the value is held here (M1-097).
+    ProxySecretRefused {
+        /// The variable that holds the proxy URL.
+        var: String,
+    },
 }
 
 /// Every failure that ends a command with exit 64 or 70 and no verdict.
@@ -363,6 +371,9 @@ fn internal_message(kind: &InternalKind) -> String {
             "rdy cannot promise to keep the value of {} out of its output",
             names.join(", ")
         ),
+        InternalKind::ProxySecretRefused { var } => format!(
+            "rdy cannot promise to keep the password in the proxy URL of {var} out of its output"
+        ),
     }
 }
 
@@ -373,6 +384,37 @@ impl CliError {
         Self::Usage {
             message: message.into(),
             fix: fix.into(),
+        }
+    }
+
+    /// The proxy in the environment could not be used (M1-097). A URL that does not parse is a usage
+    /// error (exit 64) with the parser's fix; a password the known-secret set refused is exit 70; any
+    /// other failure (a proxy set twice, or after the run started) is a bug in rdy. The text names the
+    /// variable and never any part of its value.
+    #[must_use]
+    pub fn proxy_env(failure: ProxyEnvError) -> Self {
+        let var = failure.var;
+        match failure.error {
+            ProxyError::Url(why) => {
+                let text = why.to_string();
+                let (message, fix) = text.split_once(" Fix: ").unwrap_or((text.as_str(), ""));
+                let fix = fix.trim_end_matches('.');
+                Self::usage(
+                    format!(
+                        "{var} is not a usable proxy URL: {}",
+                        message.trim_end_matches('.')
+                    ),
+                    if fix.is_empty() {
+                        format!("fix the proxy URL in {var}, or unset it")
+                    } else {
+                        format!("{fix}; or unset {var}")
+                    },
+                )
+            }
+            ProxyError::SecretRefused => Self::Internal(InternalKind::ProxySecretRefused {
+                var: var.to_owned(),
+            }),
+            _ => Self::bug(),
         }
     }
 
@@ -635,6 +677,9 @@ impl CliError {
             Self::Internal(InternalKind::SecretRefused { names }) => format!(
                 "unset {}, or give it a value of 6 bytes to 64 KiB, then run rdy again",
                 names.join(" and ")
+            ),
+            Self::Internal(InternalKind::ProxySecretRefused { var }) => format!(
+                "use a proxy password of 6 bytes or more in {var}, or take the user name and password out of it, then run rdy again"
             ),
         }
     }
