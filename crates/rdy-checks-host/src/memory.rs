@@ -9,7 +9,7 @@
 //! function in `judge`. Parsing of `/proc/meminfo` is in `meminfo`. Neither touches the machine.
 //!
 //! **No privilege needed.** `/proc/meminfo` and the cgroup files are world readable. A cgroup file that
-//! cannot be read becomes a note ("a limit may have been missed"), never a failure.
+//! cannot be read becomes a note ("a limit may have been missed") and sets `partial`, never a failure.
 
 use std::path::Path;
 use std::time::Duration;
@@ -160,7 +160,10 @@ async fn cgroup_facts(probe: &Probe, notes: &mut Vec<String>) -> Result<Cgroup, 
                 "The cgroup files could not be read, so a cgroup memory limit may have been missed."
                     .to_owned(),
             );
-            return Ok(Cgroup::default());
+            return Ok(Cgroup {
+                unreadable: 1,
+                ..Cgroup::default()
+            });
         }
     };
     let unreadable = memory.limit.unreadable + memory.swap.unreadable;
@@ -189,5 +192,6 @@ async fn cgroup_facts(probe: &Probe, notes: &mut Vec<String>) -> Result<Cgroup, 
         },
         limit: limit(memory.limit.min),
         swap_limit: limit(memory.swap.min),
+        unreadable,
     })
 }

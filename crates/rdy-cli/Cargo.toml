@@ -69,6 +69,8 @@ rdy-checks-k8s = { path = "../rdy-checks-k8s", version = "0.1.0-alpha.0" }
 # generated CA that the env harness builds its certificate chains from (M1-100, ADR 0035); the CI guard
 # on the normal build graph keeps it out of the binary.
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }
+# The docs-test runner (M1-136) matches each tested block's output against the regex it declares.
+regex = { workspace = true, features = ["std", "perf", "unicode"] }
 sha2 = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 # `test-util` gives the harness a paused clock, so a hung source costs no real time.

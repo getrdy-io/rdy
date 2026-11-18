@@ -62,7 +62,8 @@ mod tests {
         assert!(registry.family("net").is_some());
         assert!(registry.check("net.egress").is_some());
         assert!(registry.check("net.proxy").is_some());
-        assert!(registry.check("net.dns").is_none());
+        assert!(registry.check("net.dns").is_some());
+        assert!(registry.check("net.bandwidth").is_none());
         assert!(registry.family("k8s").is_some());
         assert!(registry.check("k8s.version").is_some());
         assert!(registry.check("k8s.access").is_some());

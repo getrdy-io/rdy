@@ -1,0 +1,12 @@
+schema = 1
+name = "arch-mismatch"
+summary = "x86_64 host against a spec that allows only arm64: blocks"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

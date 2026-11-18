@@ -1,0 +1,12 @@
+schema = 1
+name = "builtin-without-dep"
+summary = "modules.dep is missing but modules.builtin lists the module: it is built in"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

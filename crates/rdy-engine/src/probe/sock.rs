@@ -22,7 +22,7 @@
 //!   on the next address.
 //! - The payload is 1 to [`MAX_UDP_PAYLOAD`] bytes and the reply is cut at the smaller of `max_reply`
 //!   and [`MAX_UDP_REPLY`]. The socket is connected, so a datagram from any other source is never read.
-//! - The whole call has [`UDP_TIMEOUT`]. A silent server is [`ProbeError::Timeout`].
+//! - The whole call takes at most [`UDP_TIMEOUT`]. A silent server is [`ProbeError::Timeout`].
 //! - The entry is a `connect` with `proto` `udp`, the `host` and `port` as the spec wrote them, the
 //!   `addr` used, and the reply `bytes`. The payload and the reply are never logged.
 //!
@@ -41,7 +41,7 @@
 //!   There is no query string. So `/containers/json`, `/events`, `/exec/...` and `/images/...` are
 //!   refused, and a `POST` to `/containers/create` is refused twice over.
 //! - The request has no body and no credential. The reply is read to [`BODY_LIMIT`] bytes and the cut
-//!   is flagged. The whole call has [`UNIX_TIMEOUT`].
+//!   is flagged. The whole call takes at most [`UNIX_TIMEOUT`] (`unix_get_within` can lower it).
 //! - The entry is an `http` with `method`, `path` (the socket) and `url` (the API path), then the
 //!   `status` and body `bytes`. The body is never logged: `/info` can carry proxy settings, so a check
 //!   redacts what it keeps.
@@ -228,7 +228,9 @@ impl Probe {
     ///
     /// [`ProbeError::Denied`] for an undeclared class, a server that is not a spec host, a bad size,
     /// a forbidden address, or a call after the check ended; [`ProbeError::Timeout`] when no reply
-    /// came in time; the other variants when the lookup or the socket fails.
+    /// came in time; [`ProbeError::NotFound`] when the name has no address;
+    /// [`ProbeError::ConnectionRefused`] when the host answers with an ICMP port unreachable;
+    /// [`ProbeError::Io`] for the other socket and lookup failures.
     pub async fn udp_exchange(
         &self,
         server: &Target,
@@ -324,7 +326,8 @@ impl Probe {
     /// [`ProbeError::Denied`] for an OS without unix sockets, a socket the check did not declare, a
     /// path off the allowlist, or a call after the check ended; [`ProbeError::NotFound`] and
     /// [`ProbeError::PermissionDenied`] when the socket is missing or the user may not open it;
-    /// [`ProbeError::Timeout`]; the other variants for a reply that is not HTTP.
+    /// [`ProbeError::ConnectionRefused`] when the socket file is there and nothing listens;
+    /// [`ProbeError::Timeout`]; [`ProbeError::Io`] for a reply that is not HTTP.
     pub async fn unix_get(&self, socket: &Path, path: &str) -> Result<UnixResponse, ProbeError> {
         self.unix_request("GET", socket, path, None).await
     }

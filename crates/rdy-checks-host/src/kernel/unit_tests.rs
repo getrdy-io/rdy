@@ -65,6 +65,18 @@ fn a_release_string_is_read_down_to_its_numbers() {
 }
 
 #[test]
+fn a_release_candidate_meets_a_min_of_its_base_and_has_no_build_to_compare() {
+    let rc = version::parse("6.1.0-rc3").expect("parses");
+    let min = want("6.1.0");
+    assert_eq!(version::compare(&rc, &min), version::Standing::AtLeast);
+    let older = want("6.0");
+    assert_eq!(version::compare(&rc, &older), version::Standing::AtLeast);
+    // A min with a build number cannot be compared: the `-rc3` is not a build number.
+    let built = want("6.1.0-5");
+    assert_eq!(version::compare(&rc, &built), version::Standing::NoBuild);
+}
+
+#[test]
 fn text_that_is_not_a_release_is_refused() {
     let long = "5.".repeat(100);
     for text in [
@@ -292,6 +304,11 @@ fn facts_for(
     Modules {
         dir: "/lib/modules/5.14.0-362.el9.x86_64".to_owned(),
         path_safe: true,
+        release_read: true,
+        searched: vec![
+            "/lib/modules/5.14.0-362.el9.x86_64".to_owned(),
+            "/usr/lib/modules/5.14.0-362.el9.x86_64".to_owned(),
+        ],
         loaded,
         builtin,
         dep,

@@ -37,6 +37,7 @@ below.
 | PC-51 | 11 backlog, M1-176 exit test ("proved with the real binary") and M1-088 (watchdog clause) | The exit test needs the shipped `rdy` to hang on a check that never yields, and to end within the deadline plus grace. The shipped binary cannot do either: ADR 0011 decision 4 gives it no hook, so it has only the real families (none hangs) and the fixed five minute deadline. | M1-176 proves the spin clause with a test binary that calls `rdy_cli::run` with a one second hook deadline and the real watchdog (`crates/rdy-cli/tests/run_watchdog.rs`, a pipe run and a spin run). The blocked-pipe clause is also proved on the real unsteered binary by `crates/rdy-cli/tests/run_watchdog_binary.rs`, which is `#[ignore]`d because it takes about 5 min 10 s, and is run by hand (no nightly test job exists). M1-088's watchdog clause (blocked stdout pipe, exit 70, `complete: false` in the folder) is the same case: it relies on that test and does not repeat it. Check the number at merge. | should-fix | M1-176 (PR #34 review) |
 | PC-52 | M1-043 carry (macOS SIGCHLD-ignored check), M1-176 | The carry asks for a check that the SIGCHLD-ignored test really ignores SIGCHLD on macOS. M1-176 tried a behavioural probe (a child's `wait` fails with ECHILD when the ignore holds). The macos-x64 CI run on ee62985e failed that probe in `sigchld_ignored` (0.195 s), so macOS does not auto-reap the way the probe assumes, or the ignore does not survive `exec` there. The runner itself works there (the rest of the test passes without the probe). | The probe is Linux only (`/proc` SigIgn plus ECHILD). The macOS carry stays open. Owner: qa-engineer, a follow-up to find out how SIGCHLD-ignored behaves on macOS (does the ignore survive `bash -c 'trap "" CHLD; exec ...'`, and what does a child of an ignoring parent report) and to write a probe that holds there. Check the number at merge. | should-fix | M1-176 (macos-x64 CI) |
 | PC-53 | Plan, Milestones table, M1, engineering done column ("Fixture envs exit 0, 1 and 2 on all five targets") | In M1 the in-process env harness runs an environment only on the legs of its own OS. `rdy_cli::run` plans for `current_os()` with no hook to change it (decided in M1-086, PR #42), and every M1 environment is a Linux machine, so the macOS and Windows legs skip them. The real-binary smoke and the unsigned and tampered spec tests still run on all five. | Say "Fixture envs exit 0, 1 and 2 on the Linux targets and write both reports" for M1, and keep "all five targets" for the real-binary smoke and the unsigned and tampered specs. M2-130 adds a `RunHooks` OS override, and then the envs run on all five (correction-48). 00's milestone table and 11's M1-138 already say so. Check the number at merge. | should-fix | PR #80 review (M1-117) |
+| PC-54 | 11 backlog, M1-088 (static line clause) and M1-142 | M1-088 prints a static `Running N checks...` line on a terminal, and M1-142 (PR #60) draws a live line that also says `Running N checks`. Both on one stderr would draw twice. | Whichever of PR #60 and PR #82 merges second deletes `crates/rdy-cli/src/static_line.rs`, `static_line/tests.rs`, `crates/rdy-cli/tests/run_static_line_pty.rs` and the gate call in `run_cmd`. M1-088's static-line clause is then retired, and PR #60's `run_progress_pty.rs` holds the proof for a pipe, `--quiet` and `TERM=dumb`. The `--verbose` part of the gate moves with M1-143 (PR #68). Check the number at merge. | should-fix | M1-088 (PR #82 review) |
 
 ## Decisions made
 
@@ -636,3 +637,32 @@ the corrections log of `11-backlog.md`.
   each. #62 also extends the `pods` entry that M1-115 removes, so the first of M1-159 and M1-162 to merge
   adds the entry, the role rule and the live read citing only its own check, and the second adds its id.
   Weeks 29 and 30 go to 13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-58, three non-core tickets move to M2, the env harness serves a cluster, the terminal
+  prints missing grants, and four M2 follow-ups.** From the M1-118, M1-156, M1-158 and M1-166 builds, the
+  security review of `ci/macos-arm64-gate` (finding 3) and the PR #112 review. Correction-49 is PR #85.
+  `Probe::http` sends a fixed `Accept`, keeps no body, reports no `WWW-Authenticate` and cannot send a
+  Bearer token, and it cuts every body at 64 KiB and 5 s with no `Range` and no per-read samples. So
+  net.registry and net.bandwidth cannot be built on it. M1-156 moves to M2-149 after new M2-148 (3 h: an
+  `Accept` allow-list, a Bearer token registered as a known secret, a captured body of at most 64 KiB that
+  is never logged, and the auth and rate-limit headers), and M1-158 moves to M2-151 after new M2-150 (2 h:
+  `range`, a `sample` of at most 100 MiB and 10 s, per-read samples). security-reviewer reviews both, and
+  one ADR covers them. The env driver has no scripted TLS, so M1-166 (net-airgapped) moves to M2-153 after
+  new M2-152 (2 h), which wires the generated-chain rig into the env driver; its SEC-22 run uses a
+  loopback-literal variant spec. The moved M1 rows stay as stubs that say `moved to M2-xxx`, and 11's "How
+  to work the backlog" states the rule. 03's `### net.registry (M1-late)` and `### net.bandwidth (M1-late)`
+  headings are left as they are (the tests read only the heading id); the network table, a Milestone line
+  in each section and the tickets-implied list say M2. The env harness cannot serve a cluster: the
+  kube mock is `cfg(test)` and the family opens a real kubeconfig and socket. New core M1-185 (3 h) exports
+  the mock behind `testing` and adds the k8s parts of `all-pass` (from M1-107 and M1-117), `all-block`
+  (from M1-118) and `warnings-only` (no default StorageClass, which had no owner), and the `timeouts` slow
+  `/version` case (from M1-107 and M1-119; M1-107 goes to 3 h). `no-privileges` has no kubeconfig, so no check there fills
+  `partial.missing_grants`, but k8s.version and k8s.storageclass fill it without a namespace, so the golden
+  stays in M1: new core M1-186 (1 h) prints the field in the terminal, with the `all-block` golden. 07 had
+  no wording for it, so cli-ux adds the line to 07 section 2.2. M1-138 depends on both. The pending-claim
+  age moves to M2-142 (+0.5 h), which also hands `run.clock` to `StorageClassCheck`. The `all-block` TLS
+  interception moves to M2-152, and 08's table says so. M1-118 goes to 1.5 h. M1-154 depends on M1-155.
+  New M2-146 (1 h) builds the release's macOS arm64 target on `macos-15`, and new M2-147 (2 h) runs the
+  signing and unsigned pages through docs-test with the #112 nits. M1-185 runs in week 23 and M1-186 in week
+  24. The merged M1-124, M1-169, M1-170, M1-174, M1-112, M1-101 and M1-182 move to weeks 13, 11, 10, 14, 8,
+  20 and 21, so no week holds more than 15 h. M1-101's progress line
+  gets PR #104. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.

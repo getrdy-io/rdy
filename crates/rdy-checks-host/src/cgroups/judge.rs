@@ -188,12 +188,19 @@ fn verdict(name: &str, ctl: &Controllers, facts: &Facts) -> Verdict {
             if in_v2 {
                 return Verdict::Ok;
             }
+            let v2_unread = ctl.layout == Layout::Hybrid
+                && ctl.v2.as_ref().is_none_or(|v2| v2.top_available.is_none());
             match row {
                 None => Verdict::Unseen("`/proc/cgroups` could not be read"),
                 Some(None) => Verdict::Missing(Why::NotInKernel),
                 Some(Some(row)) if !row.enabled => {
                     Verdict::Missing(disabled(Some(row)).unwrap_or(Why::Disabled(None)))
                 }
+                // Hierarchy 0 is the v2 tree. On a hybrid host whose v2 lists could not be read, the
+                // controller may well be offered there, so absence is not proven.
+                Some(Some(row)) if row.hierarchy == 0 && v2_unread => Verdict::Unseen(
+                    "it is attached to no v1 hierarchy and the v2 controller lists could not be read",
+                ),
                 // Enabled and attached to nothing: no mount namespace can hide it, so it is not offered.
                 Some(Some(row)) if row.hierarchy == 0 => Verdict::Missing(Why::NotOffered),
                 Some(Some(_)) => Verdict::Unseen(
