@@ -277,11 +277,9 @@ fn a_bidi_control_in_a_key_or_a_value_stays_in_its_own_isolate() -> TestResult {
     doc["checks"][0]["observed"] = json!({"x\u{2069}\u{202e}": "y\u{2069}\u{202e}"});
     let html = html_of(doc)?;
     let cpu = article(&html, "host.cpu")?;
-    assert!(
-        cpu.contains(
-            "<dt><bdi>X\u{2069}\u{202e}</bdi></dt>\n<dd><bdi>y\u{2069}\u{202e}</bdi></dd>"
-        )
-    );
+    assert!(cpu.contains(
+        "<dt><bdi>X\\u{2069}\\u{202e}</bdi></dt>\n<dd><bdi>y\\u{2069}\\u{202e}</bdi></dd>"
+    ));
     Ok(())
 }
 
@@ -301,7 +299,7 @@ fn a_required_check_that_did_not_run_says_who_requires_it() -> TestResult {
     let html = html_of(doc)?;
     let section = required_not_run_section(&html)?;
     assert!(
-        section.contains("<p>required by <bdi>acme\u{202e}-platform</bdi></p>"),
+        section.contains("<p>required by <bdi>acme\\u{202e}-platform</bdi></p>"),
         "{section}"
     );
     assert!(!section.contains("required by the spec file"));

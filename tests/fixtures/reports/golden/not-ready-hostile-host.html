@@ -154,9 +154,10 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <body>
 <header>
 <h1><span class="visually-hidden">Verdict: </span><span class="verdict-not-ready">NOT READY</span></h1>
-<p>For <bdi>acme-platform</bdi> <bdi>&#62;=4.2</bdi>, on <bdi>&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp; end&#60;/SCRIPT x&#62;&#60;!--&#60;ScRiPt&#62; </bdi></p>
+<p>For <bdi>acme-platform</bdi> <bdi>&#62;=4.2</bdi>, on <bdi>&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;\u{2028}end&#60;/SCRIPT x&#62;&#60;!--&#60;ScRiPt&#62;\u{2029}</bdi></p>
 <p class="summary">2 blocks, 1 warning, 3 passed, 2 required checks not run</p>
 <p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy <bdi>0.1.0</bdi> by <bdi>jdoe</bdi> (not root)</p>
+<p class="next">What to do next: Fix the 2 blocks below, then run rdy again. To share this result, send the .json file from the same folder.</p>
 <p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
 <p class="rule">NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
@@ -403,7 +404,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dt>Signed on</dt>
 <dd><bdi>2026-11-30 16:02:11 UTC</bdi></dd>
 <dt>Hostname</dt>
-<dd><bdi>&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp; end&#60;/SCRIPT x&#62;&#60;!--&#60;ScRiPt&#62; </bdi></dd>
+<dd><bdi>&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;\u{2028}end&#60;/SCRIPT x&#62;&#60;!--&#60;ScRiPt&#62;\u{2029}</bdi></dd>
 <dt>Machine ID (hashed, differs per vendor)</dt>
 <dd><bdi>5f1c0a9e3b7d2c41</bdi></dd>
 <dt>Operating system</dt>

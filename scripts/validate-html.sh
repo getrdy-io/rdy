@@ -3,7 +3,8 @@
 # the page passes an HTML validator).
 #
 # Usage: scripts/validate-html.sh [file.html ...]
-#   With no files it checks tests/fixtures/reports/golden/*.html.
+#   With no files it checks tests/fixtures/reports/golden/*.html and
+#   tests/fixtures/envs/*/golden/report.html.
 # It uses the Java that is on PATH (the GitHub runners ship one). It downloads the pinned release of the
 # checker, checks its sha256, and only then runs it. A hash that does not match runs nothing.
 # `--Werror` makes warnings fail the run too. The checker also checks the inline CSS.
@@ -41,7 +42,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)
 
 if [ "$#" -eq 0 ]; then
-    set -- "$root"/tests/fixtures/reports/golden/*.html
+    set -- "$root"/tests/fixtures/reports/golden/*.html "$root"/tests/fixtures/envs/*/golden/report.html
 fi
 for f in "$@"; do
     if [ ! -f "$f" ]; then

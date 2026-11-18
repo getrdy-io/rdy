@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/getent",
+    "ahosts",
+    "--",
+    "b.acme.test"
+  ],
+  "stdout": "::ffff:169.254.169.123 STREAM\n::ffff:169.254.169.123 DGRAM\n::ffff:169.254.169.123 RAW\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}
