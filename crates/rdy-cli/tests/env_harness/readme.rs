@@ -5,8 +5,8 @@
 //! of an env, with the clock and run id pinned, so a change to the renderer, a check or a fix line fails
 //! here and `UPDATE_GOLDENS=1` shows the new text in `git diff`.
 //!
-//! Two things differ from the env goldens, and both are display only. The spec is shown under the name a
-//! reader types (`acme-platform.yaml`, `acme-quickstart.yaml`), and the version line stays `rdy <version>`
+//! Two things differ from the env goldens, and both are display only. The spec is shown under the path a
+//! reader types: the real `examples/specs/...` path when the example file ran, a plain name otherwise. And the version line stays `rdy <version>`
 //! so a release does not change a golden. The report folder is not written (`--no-report`), so no
 //! timestamped path is in the text.
 
@@ -28,7 +28,8 @@ struct Case {
     env: &'static str,
     /// The spec to run: `Env` is the env's own spec file, `Example` a file of `examples/specs/`.
     spec: Spec,
-    /// The name the spec has in the folder the reader is in.
+    /// The path the reader types. It is the real path for an example spec, and a plain name for an env spec,
+    /// which has no file in the repo under that name.
     shown: &'static str,
     /// The flags after the spec path, as shown.
     flags: &'static [&'static str],
@@ -49,15 +50,15 @@ const CASES: &[Case] = &[
         golden: "refusal-unsigned.txt",
         env: "all-pass",
         spec: Spec::Example("acme-quickstart.yaml"),
-        shown: "acme-quickstart.yaml",
+        shown: "examples/specs/acme-quickstart.yaml",
         flags: &[],
         exit: 64,
     },
     Case {
-        golden: "run-quickstart.txt",
+        golden: "run-not-ready.txt",
         env: "all-block",
         spec: Spec::Env,
-        shown: "acme-platform.yaml",
+        shown: "not-ready.yaml",
         flags: RUN_FLAGS,
         exit: 2,
     },
@@ -65,7 +66,7 @@ const CASES: &[Case] = &[
         golden: "run-ready.txt",
         env: "all-pass",
         spec: Spec::Env,
-        shown: "acme-platform.yaml",
+        shown: "ready.yaml",
         flags: RUN_FLAGS,
         exit: 0,
     },
@@ -75,7 +76,7 @@ const CASES: &[Case] = &[
         golden: "run-platform.txt",
         env: "acme-platform",
         spec: Spec::Env,
-        shown: "acme-platform.yaml",
+        shown: "examples/specs/acme-platform.yaml",
         flags: RUN_FLAGS,
         exit: 2,
     },
@@ -98,6 +99,9 @@ fn make(case: &Case) -> TestResult<String> {
     };
     let folder = tempfile::tempdir()?;
     let spec_path = folder.path().join(case.shown);
+    if let Some(parent) = spec_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     std::fs::copy(&spec_file, &spec_path)?;
     let spec_arg = spec_path.to_string_lossy().into_owned();
     let mut args = vec!["run", spec_arg.as_str()];
@@ -167,5 +171,31 @@ fn the_generator_lists_exactly_the_goldens_on_disk() -> TestResult {
         on_disk, shared,
         "tests/fixtures/readme/ holds a file the generator does not make, or lacks one it does"
     );
+    Ok(())
+}
+
+/// `CLICOLOR_FORCE=1` in the developer's shell must not put colour codes into a golden. The process
+/// environment cannot be set here (no unsafe), so this shows that the hooks ignore it: the pinned
+/// variables are empty, while a lookup that has `CLICOLOR_FORCE=1` would differ, and a run that asks
+/// `--color auto` writes no escape.
+#[test]
+fn the_pinned_hooks_keep_a_forced_colour_out_of_a_golden() -> TestResult {
+    use rdy_cli::style::StyleEnv;
+    let forced = StyleEnv::from_lookup(|name| (name == "CLICOLOR_FORCE").then(|| "1".into()));
+    let hooks = super::driver::hooks_for(&Default::default())?;
+    assert_eq!(hooks.style_env, Some(StyleEnv::default()));
+    assert_ne!(hooks.style_env, Some(forced));
+    let cli = super::driver::run_cli(
+        "all-block",
+        &[
+            "run",
+            "--color",
+            "auto",
+            "--allow-unsigned",
+            "--no-report",
+            "/nonexistent.yaml",
+        ],
+    )?;
+    assert!(!cli.stderr.contains('\x1b'), "colour in stderr");
     Ok(())
 }

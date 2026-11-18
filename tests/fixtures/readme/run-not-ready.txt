@@ -1,12 +1,12 @@
-$ rdy run acme-platform.yaml --allow-unsigned --no-report
+$ rdy run not-ready.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
-acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+not-ready.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
 The spec decides which files rdy reads and which hosts it contacts.
 Run it only if you wrote it yourself or got it from the vendor in a way you trust.
 Every report from this run is marked UNSIGNED SPEC.
 
 rdy <version>
-spec    acme-platform >=1.0   (acme-platform.yaml)
+spec    acme-platform >=1.0   (not-ready.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
 host    all-block.example   rhel 9.3   x86_64
 user    uid 0 (root)

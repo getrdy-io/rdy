@@ -7,7 +7,7 @@
 /// The golden files under `tests/fixtures/readme/` that the generator owns.
 pub const GENERATED: &[&str] = &[
     "refusal-unsigned.txt",
-    "run-quickstart.txt",
+    "run-not-ready.txt",
     "run-ready.txt",
     "run-platform.txt",
 ];

@@ -79,5 +79,5 @@ must equal its golden, and the golden's exit code and verdict line must still ag
 A golden that no README block uses is allowed only if the generator lists it, in
 `crates/rdy-cli/tests/common/readme_goldens.rs`. That file is the one list: the generator test and
 `docs_test` both read it, and a test fails if the folder and the list differ. The first command of a block
-still runs live, with the exit set and shape as before. The spec is shown under the name a reader types, and
-the version line is `rdy <version>`.
+still runs live, with the exit set and shape as before. The spec is shown under the path the command ran. A block that runs an example spec shows its real
+`examples/specs/` path, and a golden for an env spec uses a plain name that is no example file. The version line is `rdy <version>`.

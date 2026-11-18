@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rdy_cli::RunHooks;
+use rdy_cli::style::StyleEnv;
 use rdy_engine::check::Os;
 use rdy_engine::probe::{NativeCall, NativeValue, UnameInfo};
 use rdy_engine::redact::{Redactor, TagKey};
@@ -170,7 +171,7 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
 
 /// The hooks a user cannot reach, from a manifest's `[run]` table: the pinned clock, run id and deadline,
 /// the harness families, and a stderr that is no terminal and 100 columns wide.
-fn hooks_for(pins: &RunPins) -> Result<RunHooks, String> {
+pub fn hooks_for(pins: &RunPins) -> Result<RunHooks, String> {
     let mut hooks = RunHooks::default();
     hooks.clock = Some(pinned_time(
         pins.clock.as_deref().unwrap_or("2026-01-01T00:00:00Z"),
@@ -184,9 +185,11 @@ fn hooks_for(pins: &RunPins) -> Result<RunHooks, String> {
         pins.deadline_ms.unwrap_or(DEFAULT_DEADLINE_MS),
     ));
     hooks.families = Some(families::registry);
-    // The terminal text is a golden: no colour and one width, whatever runs the test.
+    // The terminal text is a golden: no colour and one width, whatever runs the test. The variables are
+    // pinned too, so `CLICOLOR_FORCE` or `COLUMNS` in the developer's shell cannot reach a golden.
     hooks.stderr_terminal = Some(false);
     hooks.stderr_columns = Some(100);
+    hooks.style_env = Some(StyleEnv::default());
     Ok(hooks)
 }
 

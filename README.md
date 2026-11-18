@@ -50,62 +50,46 @@ Until then, build from source ([below](#build-from-source)).
 
 ### Try it on an example spec
 
-This run uses a spec like
-[`examples/specs/acme-platform.yaml`](examples/specs/acme-platform.yaml). The example is unsigned,
-so it needs `--allow-unsigned`. A spec from your vendor does not:
+This run uses the example spec
+[`examples/specs/acme-platform.yaml`](examples/specs/acme-platform.yaml), from the repo root. The
+example is unsigned, so it needs `--allow-unsigned`. A spec from your vendor does not:
 
-```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-quickstart.txt
-$ rdy run acme-platform.yaml --allow-unsigned --no-report
+```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-platform.txt
+$ rdy run examples/specs/acme-platform.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
-acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+examples/specs/acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
 The spec decides which files rdy reads and which hosts it contacts.
 Run it only if you wrote it yourself or got it from the vendor in a way you trust.
 Every report from this run is marked UNSIGNED SPEC.
 
 rdy <version>
-spec    acme-platform >=1.0   (acme-platform.yaml)
+spec    acme-platform >=4.2   (examples/specs/acme-platform.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    all-block.example   rhel 9.3   x86_64
+host    acme-platform.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster no kubeconfig found
 
-  BLOCK    host.memory             7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB
-                                   wanted, the box is busy
-                                   fix from the spec file (not verified): Add RAM or choose a larger
-                                   VM size.
-  BLOCK    host.disk               `/var/lib/acme` has 0 bytes free on `/var` (xfs), 20 GiB needed.
-                                   fix from rdy: Run `df -h /var/lib/acme` to see the volume. If
-                                   `/dev/mapper/rhel-var` is an LVM volume, grow it with `lvextend
-                                   -r -L +24G /dev/mapper/rhel-var`. Otherwise grow the volume, or
-                                   point the install at a larger disk.
-  BLOCK    host.ports              Port 6443/tcp is held by `kube-apiserver` (pid 950).
-                                   fix from rdy: Port 6443/tcp is held by `kube-apiserver` (pid
-                                   950). Stop it, or change the product's port setting.
-  BLOCK    net.egress              1 of 1 endpoints unreachable: web.acme.test:8080 (refused)
-                                   fix from rdy: web.acme.test:8080 refused the connection: nothing
-                                   listens there, or a firewall rejects it. Check the port in the
-                                   spec, and ask the network team to allow tcp/8080 to web.acme.test
-                                   from this machine.
-  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
-  PASS     host.cpu                8 vCPUs found, 8 needed
-  PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
-                                   required modules are loaded or built in. BTF type information is
-                                   present.
-  PASS     host.cgroups            cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids`
-                                   available
-  PASS     host.sysctl             4 kernel parameters have the wanted value and are set at boot.
-                                   Services get an open files limit of 1048576
-                                   (`DefaultLimitNOFILE=1048576` in
-                                   `/etc/systemd/system.conf.d/10-acme.conf`).
-  PASS     host.lsm                SELinux is enforcing. AppArmor is off.
-  PASS     host.time_sync          Clock is synchronized, under 1 ms away from chrony's reference
-                                   `192.0.2.30`.
-  PASS     host.security_agents    No known security software process was found among 7 processes.
-  PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
-                                   driver overlayfs).
-  PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
-  PASS     net.mtu                 `eth0` has MTU 1500.
+  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443
+                             (reset_after_hello), license.acme.example:443 (reset_after_hello)
+                             fix from the spec file (not verified): Ask your network team to allow
+                             these endpoints through the proxy.
+  SKIP     k8s.version       Not run. No Kubernetes cluster was reachable. (required)
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  SKIP     gpu.cuda          Not run. This version of rdy has no gpu checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     aws.iam           Not run. This version of rdy has no aws checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     k8s.storageclass  Not run. No Kubernetes cluster was reachable.
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  PASS     host.cpu          8 vCPUs found, 8 needed
+  PASS     host.memory       31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.disk         `/var/lib` has 140 GiB free on `/var` (xfs). 100 GiB is needed.
 
-4 blocks, 0 warnings, 11 passed
+1 block, 0 warnings, 3 passed, 3 required checks not run, 1 optional check not run
 
 WARNING: UNSIGNED SPEC
 NOT READY
