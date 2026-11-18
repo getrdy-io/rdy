@@ -64,8 +64,8 @@ use rdy_engine::check::{
     Os, OsSupport, PeerClass, Support,
 };
 use rdy_engine::probe::Exemption;
-use rdy_engine::probe::net::Route;
 use rdy_engine::probe::net::REVOCATION_NOTE;
+use rdy_engine::probe::net::Route;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
