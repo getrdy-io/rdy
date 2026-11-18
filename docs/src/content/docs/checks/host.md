@@ -113,7 +113,7 @@ Turn on time sync with `timedatectl set-ntp true`, or install chrony with `dnf i
 - **Wants:** none
 - **Timeout:** 2 s
 - **Systems:** Linux: full. macOS: not yet. Windows: not yet.
-- **Reads:** `/proc/self/cgroup`, `/proc/self/mountinfo`, `/sys/fs/cgroup`, `/proc/cpuinfo`, `/proc/self/status`, `/sys/devices/system/cpu/online`, `/sys/class/dmi/id/product_name`, `/sys/class/dmi/id/sys_vendor`, `/sys/hypervisor/type`
+- **Reads:** `/proc/self/cgroup`, `/proc/self/mountinfo`, `/sys/fs/cgroup`, `/proc/cpuinfo`, `/proc/self/status`, `/sys/devices/system/cpu/online`, `/sys/class/dmi/id/product_name`, `/sys/class/dmi/id/sys_vendor`, `/sys/devices/virtual/dmi/id/product_name`, `/sys/devices/virtual/dmi/id/sys_vendor`, `/sys/hypervisor/type`
 
 **Remediation**
 

@@ -67,3 +67,16 @@ Set the MTU of the default interface to match the network, and the CNI MTU to th
 
 Ask the network team to bypass TLS inspection for the host named in the result, or install the inspecting proxy's CA where the product reads its trust store. Where openssl is installed, run `openssl s_client -connect <host>:<port> -servername <host>` to see who issued the chain. If the result is a clock or expiry problem, fix the clock first.
 
+## `net.dns` DNS
+
+- **Measures:** Each required name resolves through the system resolver, within the expected ranges
+- **Needs:** network
+- **Wants:** none
+- **Timeout:** 60 s
+- **Systems:** Linux: full. macOS: full. Windows: full.
+- **Reads:** `/etc/resolv.conf`, `/run/systemd/resolve/resolv.conf`, `/run/systemd/resolve/stub-resolv.conf`
+
+**Remediation**
+
+Ask the DNS team for a record, or a conditional forwarder for the zone, so the name resolves from this machine. Check the nameservers in `/etc/resolv.conf` (a dead first nameserver adds its timeout to every lookup) and that the `hosts:` line of `/etc/nsswitch.conf` lists `dns`. As a stopgap add a line to `/etc/hosts`. Containers and Java may use a different resolver from the host.
+
