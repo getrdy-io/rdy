@@ -56,6 +56,9 @@ const CASES: &[(&str, &str)] = &[
     expect!("usr-lib-modules-zst"),
     expect!("uname-fallback"),
     expect!("hostile-release"),
+    expect!("release-unreadable"),
+    expect!("distro-like-below-min"),
+    expect!("builtin-without-dep"),
 ];
 
 fn load(case: &str) -> Fixture {
@@ -338,7 +341,8 @@ fn what_cannot_be_read_says_so_and_never_blocks() {
     let missing = run_case("modules-dir-missing");
     let message = &missing.finding().message;
     assert!(
-        message.contains("/lib/modules/5.14.0-362.el9.x86_64/modules.dep does not exist"),
+        message
+            .contains("modules.dep nor /usr/lib/modules/5.14.0-362.el9.x86_64/modules.dep exists"),
         "{message}"
     );
     assert_eq!(
@@ -370,6 +374,79 @@ fn an_unknown_distribution_applies_min_and_only_warns() {
     );
     // A warning even for a required check: the engine adds nothing.
     assert_eq!(status_of("distro-unknown", None), Status::Warn);
+}
+
+#[test]
+fn an_unreadable_release_and_a_hostile_one_have_their_own_message() {
+    let hostile = run_case("hostile-release");
+    let unread = run_case("release-unreadable");
+    assert!(
+        hostile
+            .finding()
+            .message
+            .contains("the kernel release has characters rdy does not put in a path"),
+        "{}",
+        hostile.finding().message
+    );
+    assert!(
+        unread
+            .finding()
+            .message
+            .contains("the kernel release could not be read"),
+        "{}",
+        unread.finding().message
+    );
+    assert_ne!(hostile.finding().message, unread.finding().message);
+}
+
+#[test]
+fn a_kernel_below_min_carries_the_id_like_hint_in_its_blocking_message() {
+    let run = run_case("distro-like-below-min");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert!(
+        finding
+            .message
+            .starts_with("Kernel `5.14.0-362.el9.x86_64` is older than"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        finding
+            .message
+            .contains("distro_min has an entry for `rhel`")
+            && finding
+                .message
+                .contains("Ask the vendor to add a `rocky` entry."),
+        "{}",
+        finding.message
+    );
+    // Said once: in the message, not again in the notes.
+    assert!(
+        !finding.notes.iter().any(|n| n.contains("ID_LIKE")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn modules_builtin_is_read_when_modules_dep_is_missing() {
+    let run = run_case("builtin-without-dep");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["modules"]["br_netfilter"], "built_in");
+}
+
+#[test]
+fn both_module_directories_are_named_when_modules_dep_is_in_neither() {
+    let run = run_case("modules-dir-missing");
+    let message = &run.finding().message;
+    assert!(
+        message.contains(
+            "neither /lib/modules/5.14.0-362.el9.x86_64/modules.dep nor /usr/lib/modules/5.14.0-362.el9.x86_64/modules.dep exists"
+        ),
+        "{message}"
+    );
 }
 
 #[test]
@@ -559,4 +636,87 @@ fn on_macos_and_windows_the_check_says_it_has_no_source() {
         );
         assert!(test_run.action_log().actions.is_empty());
     }
+}
+
+// ---- a big modules.dep, through the whole check ----------------------------------------------------
+
+const RELEASE: &str = "5.14.0-362.el9.x86_64";
+
+/// A `modules.dep` of about `size` bytes: filler lines, with `br_netfilter` at `at` bytes when given.
+fn big_dep(size: usize, at: Option<usize>) -> String {
+    let filler = "kernel/drivers/net/filler_module_name_that_pads_the_line.ko.xz:\n";
+    let mut text = String::with_capacity(size + 128);
+    let mut placed = at.is_none();
+    while text.len() < size {
+        if !placed && at.is_some_and(|at| text.len() >= at) {
+            text.push_str("kernel/net/bridge/br_netfilter.ko.xz:\n");
+            placed = true;
+        } else {
+            text.push_str(filler);
+        }
+    }
+    text
+}
+
+/// What the check says about `br_netfilter` on a machine whose `modules.dep` is `dep`.
+fn state_with_dep(dep: String) -> Finding {
+    // The machine of `pass` gives the uname answer. Its module files are replaced.
+    let replay = load("pass")
+        .replay()
+        .clone()
+        .file("/proc/modules", "")
+        .file(format!("/lib/modules/{RELEASE}/modules.dep"), dep)
+        .file(format!("/lib/modules/{RELEASE}/modules.builtin"), "");
+    let test_run = TestRun::new(replay);
+    let scheduler = test_run.scheduler(1, Os::Linux, Vec::<Need>::new());
+    let planned = Planned::new(
+        Arc::new(kernel(
+            &json!({"id": "host.kernel", "modules": ["br_netfilter"]}),
+        )),
+        "host.kernel",
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("a runtime");
+    let mut ran = runtime.block_on(scheduler.run(vec![planned]));
+    let End::Done(done) = ran.remove(0).end else {
+        panic!("the check did not finish");
+    };
+    done.as_ref().clone().expect("a finding")
+}
+
+const MIB: usize = 1 << 20;
+
+#[test]
+fn a_modules_dep_of_1_5_mib_is_scanned_whole_from_both_ends() {
+    // The head read covers the first MiB and the tail read the last one, so 1.5 MiB is covered twice
+    // over and the scan is complete: a missing module is absent, a present one is found anywhere.
+    let early = state_with_dep(big_dep(MIB + MIB / 2, Some(100)));
+    assert_eq!(early.observed["modules"]["br_netfilter"], "available");
+    let middle = state_with_dep(big_dep(MIB + MIB / 2, Some(MIB + 200_000)));
+    assert_eq!(middle.observed["modules"]["br_netfilter"], "available");
+    let absent = state_with_dep(big_dep(MIB + MIB / 2, None));
+    assert_eq!(absent.observed["modules"]["br_netfilter"], "absent");
+    assert_eq!(absent.level, Level::Fail);
+}
+
+#[test]
+fn a_modules_dep_of_2_5_mib_cannot_prove_a_module_absent() {
+    // 2.5 MiB is more than the two reads can cover, with room for a long line between them. A module in
+    // the head or the tail is still found. One in the unread middle is not: the answer is unknown, a
+    // warning, never a block.
+    let head = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(100)));
+    assert_eq!(head.observed["modules"]["br_netfilter"], "available");
+    let tail = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(2 * MIB + 100_000)));
+    assert_eq!(tail.observed["modules"]["br_netfilter"], "available");
+    let middle = state_with_dep(big_dep(2 * MIB + MIB / 2, Some(MIB + MIB / 4)));
+    assert_eq!(middle.observed["modules"]["br_netfilter"], "unknown");
+    assert_eq!(middle.level, Level::Warn);
+    assert!(
+        middle.message.contains("is larger than rdy reads"),
+        "{}",
+        middle.message
+    );
 }
