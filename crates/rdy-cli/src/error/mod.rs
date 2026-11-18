@@ -26,7 +26,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use rdy_engine::privilege::PrivilegeError;
-use rdy_engine::report::JsonError;
+use rdy_engine::report::{HtmlError, JsonError};
 use rdy_spec::result::{ExitCode, Verdict};
 use rdy_spec::sig::SignatureError;
 use rdy_spec::{ScalarError, SpecError};
@@ -441,15 +441,33 @@ impl CliError {
         if !matches!(error, JsonError::TooLarge { .. } | JsonError::Io(_)) {
             return None;
         }
-        let text = error.to_string();
-        let (message, fix) = match text.split_once(" Fix: ") {
-            Some((message, fix)) => (message, fix),
-            None => (text.as_str(), "check that the output is open and has room"),
-        };
-        Some(Self::ReportWriter {
+        Some(Self::writer_words(
+            &error.to_string(),
+            "check that the output is open and has room",
+        ))
+    }
+
+    /// The HTML renderer refused (code `report_write`, exit 70), with its own words (M1-181).
+    ///
+    /// A writer refusal inside the page (the embedded JSON is too big) is the same error as for the
+    /// `.json` file, so both files fail the same way. Any other error is the renderer's own message,
+    /// which quotes no report text, with its `Fix:` as the fix line.
+    #[must_use]
+    pub fn report_html(error: &HtmlError) -> Self {
+        if let HtmlError::Json(json) = error {
+            return Self::report_writer(json).unwrap_or_else(Self::bug);
+        }
+        Self::writer_words(&error.to_string(), "this is a bug in rdy")
+    }
+
+    /// A `report_write` error from a message that ends with `Fix: <what to do>`. Without a `Fix:` the
+    /// whole text is the message and `default_fix` is the fix.
+    fn writer_words(text: &str, default_fix: &str) -> Self {
+        let (message, fix) = text.split_once(" Fix: ").unwrap_or((text, default_fix));
+        Self::ReportWriter {
             message: message.trim_end_matches('.').to_owned(),
             fix: fix.trim_end_matches('.').to_owned(),
-        })
+        }
     }
 
     /// A bug, with the standard hint.

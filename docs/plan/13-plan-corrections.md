@@ -595,3 +595,44 @@ the corrections log of `11-backlog.md`.
   parameters, which is M1-175, so that proof moves to M1-175's exit test. M1-113 keeps
   `Cluster::read_only_as` and `Cluster::is_openshift`, tested through the family holder. No 03 `###`
   heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-56, the family namespace in M1, the k8s registrations of M1-162 to M1-165, and the
+  autoscaler status ConfigMap.** From the reviews of the M1-175 build and the M1-113 k8s review.
+  Correction-49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
+  no `k8s:` block (03's "Spec block" was never in 01), 07 puts `--namespace` on `rdy bundle` only, and the
+  client never uses the kubeconfig's namespace (ADR 0031 decision 12). So k8s.storageclass never reads
+  claim evidence, k8s.ingress and k8s.cni read no Service or NetworkPolicy of the install namespace, and
+  k8s.admission and k8s.namespace fall back to the entry's own `namespace`. M1 adds no key and no flag.
+  03 says what M1 does in a "Not in M1" note under the Spec block and in the k8s.storageclass,
+  k8s.admission and k8s.namespace sections; its flag sentence now names `--kubeconfig` and
+  `--kube-context` (correction-07 asked for it); 07's kube flag row says `rdy run` has no `--namespace`.
+  The k8s.admission line also loses a wrong grant: a spec with no namespace is partial with a fix, not
+  `get namespaces`. ADR 0049 (Proposed) chooses the M2 source: a top-level `k8s:` block with one key,
+  `namespace`, and no run flag, because the namespace decides what the checks judge and M2-126 pins reads
+  to the namespaces the spec names. New M2-142 (3 h) builds it, with cli-ux and security review. M1-162 to
+  M1-165 now register their check in the family (M1-175's `build_check` arm, registry info, family test
+  counts) if M1-175 merges first, as M1-175's progress line defers. New M2-143 (3 h): k8s.nodes reads
+  `kube-system/cluster-autoscaler-status` by name, so GKE Standard and AKS managed autoscalers soften a
+  node shortfall; one guarded GET, a cut-down type, the 03 grant text, the role, the kind job, a new ADR
+  (ADR 0043 decision 4) and a security review. No M1 hours change. No 03 `###` heading or Appendix A row
+  changed, and no test-pinned text changed.
+- **Correction-57, the k8s.nodes pod list returns with M1-159, the Kubernetes page API reads, and two M2
+  tickets.** From the M1-115 k8s checks review (`docs/plan/reviews/k8s-checks-review.md`, on the M1-115
+  branch) and its code review, and from the M1-116 review. Correction-49 is PR #85. The `v1` `pods`
+  `ALLOWED` entry cites k8s.nodes, but only the free capacity half reads pods, and that is M1-159, so no
+  fixture read the pair and 0.1.0 would grant `list pods` for nothing (SF-01). M1-115 (approved, not
+  merged) removes the entry, the `pods` rule in `examples/rbac/rdy-readonly.yaml`, the pod reads of
+  `live_cluster.rs` and the guard's pod selector tests, and words 03's k8s.nodes Needs line and 02
+  Appendix B's `pods` row to say the Pod list arrives with M1-159. M1-159's row now adds all of it back,
+  with a fixture that reads the (`pods`, k8s.nodes) pair and the kind workflow green, and depends on
+  M1-115. It keeps its 1.5 h. Main still has the entry, the rule and the 03 text, so 02 and 03 do not
+  change here. New M2-144 (1 h) scopes k8s.version's three `v1beta1` removed-API rows to the kinds
+  removed in 1.22 (SF-03). New M2-145 (1 h) adds AKS `managed-csi` and a vSphere or Longhorn class
+  fixture to k8s.storageclass (SF-04). The review's folds onto M2-125 (SF-06) and M2-126 (SF-05) are
+  already in those rows, so they are not filed. M1-116's row now says the Kubernetes page gives each check
+  an API reads line from the guard's `ALLOWED` table, with a test. SF-02: PRs #62, #64, #65 and #78 add
+  duplicate `ALLOWED` entries and #62 and #78 both add `Access::GetIn`, so M1-115's one-entry-per-resource
+  guard test fails once they land. Each of M1-162 to M1-165, if M1-115 merged first, now folds its entries
+  into those on main, adds `Access::GetIn` only if no earlier PR did, and copies the pair test, +0.5 h
+  each. #62 also extends the `pods` entry that M1-115 removes, so the first of M1-159 and M1-162 to merge
+  adds the entry, the role rule and the live read citing only its own check, and the second adds its id.
+  Weeks 29 and 30 go to 13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
