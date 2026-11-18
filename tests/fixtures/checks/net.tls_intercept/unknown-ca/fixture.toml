@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-unknown-ca"
+summary = "A chain from a CA that no store holds"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

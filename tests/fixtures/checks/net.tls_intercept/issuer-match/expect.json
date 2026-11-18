@@ -1,0 +1,46 @@
+{
+  "entry": {
+    "expected_issuer": "^CN=Acme Test Issuing CA$",
+    "hosts": [
+      "web.acme.test"
+    ],
+    "id": "net.tls_intercept"
+  },
+  "result": {
+    "expected": {
+      "expected_issuer": "^CN=Acme Test Issuing CA$",
+      "forbid_interception": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 hosts present a chain the public roots validate; the issuer matches",
+    "notes": [
+      "no revocation check"
+    ],
+    "observed": {
+      "hosts": [
+        {
+          "chain_depth": 2,
+          "class": "public",
+          "expected_issuer_matches": true,
+          "host": "web.acme.test:443",
+          "issuer": "CN=Acme Test Issuing CA",
+          "last_sha256": "<sha256>",
+          "os_store": "unknown_issuer",
+          "os_store_roots": 1,
+          "protocol": "TLS 1.3",
+          "public_roots": "valid",
+          "root_in_os_store": null,
+          "root_sha256": null,
+          "subject": "CN=web.acme.test"
+        }
+      ],
+      "trust_store": {
+        "roots": 1,
+        "sources": [],
+        "status": "found"
+      }
+    },
+    "partial": null
+  }
+}

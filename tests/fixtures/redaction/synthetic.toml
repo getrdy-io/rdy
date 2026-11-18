@@ -9,6 +9,7 @@
 
 [parts]
 proxy_pw = ["pa", "55"]
+noscheme_pw = ["Hq4v", "Ln8t"]
 pg_pw = ["Zq9xK7", "mW2"]
 pct_pw = ["p%40ss%3A", "w0rd-canary"]
 bearer = ["canary", "Cr3dxp-0042"]

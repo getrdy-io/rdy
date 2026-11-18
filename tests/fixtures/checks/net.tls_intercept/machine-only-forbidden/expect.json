@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "forbid_interception": true,
+    "hosts": [
+      "web.acme.test"
+    ],
+    "id": "net.tls_intercept"
+  },
+  "result": {
+    "expected": {
+      "forbid_interception": true
+    },
+    "fix": "web.acme.test is presented with a chain that public roots do not vouch for but this machine's store trusts. An internal CA or a TLS-inspecting proxy is the usual cause. Ask the network team to bypass inspection for web.acme.test. The spec forbids interception, so the product cannot cross a proxy that re-signs TLS. Where the product reads another store, install that CA there. Debian and Ubuntu: copy the CA to `/usr/local/share/ca-certificates/acme-inspection.crt` (the name must end in `.crt`), then run `update-ca-certificates`. RHEL: copy it to `/etc/pki/ca-trust/source/anchors/`, then run `update-ca-trust`. SUSE: copy it to `/usr/share/pki/trust/anchors/`, then run `update-ca-certificates`. Alpine: copy it to `/usr/local/share/ca-certificates/`, then run `update-ca-certificates`. Java: `keytool -importcert -cacerts -alias acme-inspection -file ca.crt`. Container images and Java do not read the host store.",
+    "level": "fail",
+    "message": "web.acme.test:443 (chain is trusted by this machine only, issuer CN=Acme Test Issuing CA)",
+    "notes": [
+      "no revocation check"
+    ],
+    "observed": {
+      "hosts": [
+        {
+          "chain_depth": 2,
+          "class": "machine_only",
+          "host": "web.acme.test:443",
+          "issuer": "CN=Acme Test Issuing CA",
+          "last_sha256": "<sha256>",
+          "os_store": "valid",
+          "os_store_roots": 1,
+          "protocol": "TLS 1.3",
+          "public_roots": "unknown_issuer",
+          "root_in_os_store": null,
+          "root_sha256": null,
+          "subject": "CN=web.acme.test"
+        }
+      ],
+      "trust_store": {
+        "roots": 1,
+        "sources": [],
+        "status": "found"
+      }
+    },
+    "partial": null
+  }
+}
