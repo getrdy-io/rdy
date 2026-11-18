@@ -542,3 +542,97 @@ the corrections log of `11-backlog.md`.
   new M2-136 (1.5 h) replaces `root_sha256` with the real anchor's, through `TrustStore` root subjects.
   New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores. 03 net.tls_intercept's
   Source line says so; PR #91 edits its Thresholds line. No new M1 ticket. No test-pinned document changed.
+- **Correction-53, spec reads that hang on a FIFO, `spec sign` of an expired spec, and the signing review
+  carries.** From the M1-132 signing review (PR #96) and the security review of PR #92 (M1-182).
+  Correction-49 is PR #85. The spec reader of `rdy run`, `rdy verify` and `rdy spec lint` stats the path,
+  then opens it again with a blocking open and never checks the handle, so a FIFO swapped in hangs the
+  command before the watchdog arms and a swapped device is opened. `rdy spec sign` opens before it checks,
+  so a FIFO hangs it outright. That breaks 05 INV-02 (MF-01). `spec sign` lints with `lint_checks` only, so
+  an expired spec is signed, then fails the self-check with exit 70 (MF-01). New core M1-183 (2.5 h) reads
+  every spec through `signing::files::read_public`, proves a direct FIFO, a swapped FIFO and `/dev/zero`
+  exit 64 within 1 s for run, verify and sign, refuses an expired spec in `spec sign` with exit 64 and
+  `spec_expired` before any password prompt, keeps today's oversize results, and records in 05 Surface 2 that `read_public` still opens a device swapped in
+  during the gap. M1-138 depends on it. 01 section 4.2's future `signed_at` warning was never built; it
+  moves to M2-032 (0.5 h more) and 01 says "from M2-032" (SF-01). M1-134's page and M1-133's unsigned page
+  say to compare the full fingerprint from `rdy verify --key`, never the 48-bit short form in the banner
+  (SF-02); M1-134 depends on M1-133. New M2-137 (1.5 h) adds the container runtime proxy password to the
+  known-secret set (PR #92 F8, INV-15). M2-107 (0.25 h more) also refuses invisible code points in
+  trust-store notes (N-01). M1-133 moves to week 16 and M1-168 to week 17, so no week holds
+  more than 15 h. Only 01 prose changed; no test-pinned text changed.
+- **Correction-54, the plugin token and the `delegated` outcome, the `all-pass` k8s item, the
+  `nothing_verified` sentence, and four M2 tickets.** From the reviews of the M1-107 build, the security
+  review of PR #98 (M1-183) and the review of PR #100 (M1-140). Correction-49 is PR #85. The exec plugin
+  runs after the cluster line and kube does not hand rdy its token, so M1-107's row now says the token is
+  registered before the first request leaves, by a layer under kube's auth layer. 02 asks for an action-log
+  outcome `delegated`, which rdy-spec lacks, so M1-107 writes a `form: delegated` field; new M2-138 (1.5 h)
+  adds the value to rdy-spec, 01 section 5.4 and the result schema, and 02 says so. Whichever of M1-107 and
+  M1-117 (PR #80) merges second adds k8s.version and the `api/` tree to `all-pass`; M1-117's row now says
+  so, which correction-48 did not. New M2-139 (1.5 h) opens spec reads with `O_PATH` on Linux, so a device
+  swapped in is never opened. New M2-140 (1.5 h) makes `rdy spec sign` open `--sig` and `--secret-key` at
+  identification level on Windows. New M2-141 (2 h) runs `rdy run` on a k8s.version spec in the kind job
+  and pages the node list on a three-node cluster. 07 D.7's `nothing_verified` sentence said every check is
+  for another OS; the verdict rule also gives it when every check is optional and was not run, so the
+  sentence now says that too. The rule is unchanged. No new M1 ticket, and no test-pinned text changed.
+- **Correction-55, the handshake signature test, the "no revocation check" note, the OS roots source,
+  the CA pin advice and the `as:` run proof.** From the M1-101 TLS verifier review
+  (`docs/plan/reviews/tls-verifier-review.md`), its cold review and the M1-113 code review. Correction-49 is PR #85. The recording verifier accepts every chain, and only the
+  handshake signature ties the chain to the server, but no test proves that rdy checks it, so a change to
+  `assertion()` would pass every test and let any server replay a pinned leaf (SF-02). ADR 0014, 02 and 05
+  say the report says "no revocation check", and no check does (SF-01). The review folded SF-01 into
+  M1-096, but PR #74 (M1-096) is approved and not merged, so it is not widened. New core M1-184 (1.5 h)
+  takes both: a server that presents leaf A and signs with key B fails `Probe::tls_chain` on TLS 1.2 and
+  1.3, net.tls_intercept with that leaf pinned gives `not_tested`, its unknown-CA case asserts zero
+  application bytes, and each net.tls_intercept result with a chain and each net.egress result with a TLS
+  stage carries `REVOCATION_NOTE` once. It depends on M1-096, M1-099 and M1-100, and M1-138 depends on it.
+  02 says the note comes from M1-184. 03's net.tls_intercept Source line and section 3's "Shared stack"
+  named `rustls-native-certs` as the OS store; they now name `NativeCall::SystemRoots`: PEM bundles
+  through the facade on Linux, and on macOS when a variable is set, and `rustls-native-certs` on macOS
+  and Windows otherwise. 03's Thresholds line and M1-116's network page say that until M2-135 a CA pin is
+  at best a warning, so pin the leaf or set `forbid_interception` to block (AR-01). PR #91 rewrites the
+  same Thresholds line; the second to merge keeps both. M1-073 (merged) moves back to week 14, so weeks 14
+  and 18 hold 15 h. From the M1-113 code review: M1-113 cannot prove in a real run that a spec `as:`
+  works and k8s.rbac shows the OpenShift grant text until the family builds k8s.rbac from its
+  parameters, which is M1-175, so that proof moves to M1-175's exit test. M1-113 keeps
+  `Cluster::read_only_as` and `Cluster::is_openshift`, tested through the family holder. No 03 `###`
+  heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-56, the family namespace in M1, the k8s registrations of M1-162 to M1-165, and the
+  autoscaler status ConfigMap.** From the reviews of the M1-175 build and the M1-113 k8s review.
+  Correction-49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
+  no `k8s:` block (03's "Spec block" was never in 01), 07 puts `--namespace` on `rdy bundle` only, and the
+  client never uses the kubeconfig's namespace (ADR 0031 decision 12). So k8s.storageclass never reads
+  claim evidence, k8s.ingress and k8s.cni read no Service or NetworkPolicy of the install namespace, and
+  k8s.admission and k8s.namespace fall back to the entry's own `namespace`. M1 adds no key and no flag.
+  03 says what M1 does in a "Not in M1" note under the Spec block and in the k8s.storageclass,
+  k8s.admission and k8s.namespace sections; its flag sentence now names `--kubeconfig` and
+  `--kube-context` (correction-07 asked for it); 07's kube flag row says `rdy run` has no `--namespace`.
+  The k8s.admission line also loses a wrong grant: a spec with no namespace is partial with a fix, not
+  `get namespaces`. ADR 0049 (Proposed) chooses the M2 source: a top-level `k8s:` block with one key,
+  `namespace`, and no run flag, because the namespace decides what the checks judge and M2-126 pins reads
+  to the namespaces the spec names. New M2-142 (3 h) builds it, with cli-ux and security review. M1-162 to
+  M1-165 now register their check in the family (M1-175's `build_check` arm, registry info, family test
+  counts) if M1-175 merges first, as M1-175's progress line defers. New M2-143 (3 h): k8s.nodes reads
+  `kube-system/cluster-autoscaler-status` by name, so GKE Standard and AKS managed autoscalers soften a
+  node shortfall; one guarded GET, a cut-down type, the 03 grant text, the role, the kind job, a new ADR
+  (ADR 0043 decision 4) and a security review. No M1 hours change. No 03 `###` heading or Appendix A row
+  changed, and no test-pinned text changed.
+- **Correction-57, the k8s.nodes pod list returns with M1-159, the Kubernetes page API reads, and two M2
+  tickets.** From the M1-115 k8s checks review (`docs/plan/reviews/k8s-checks-review.md`, on the M1-115
+  branch) and its code review, and from the M1-116 review. Correction-49 is PR #85. The `v1` `pods`
+  `ALLOWED` entry cites k8s.nodes, but only the free capacity half reads pods, and that is M1-159, so no
+  fixture read the pair and 0.1.0 would grant `list pods` for nothing (SF-01). M1-115 (approved, not
+  merged) removes the entry, the `pods` rule in `examples/rbac/rdy-readonly.yaml`, the pod reads of
+  `live_cluster.rs` and the guard's pod selector tests, and words 03's k8s.nodes Needs line and 02
+  Appendix B's `pods` row to say the Pod list arrives with M1-159. M1-159's row now adds all of it back,
+  with a fixture that reads the (`pods`, k8s.nodes) pair and the kind workflow green, and depends on
+  M1-115. It keeps its 1.5 h. Main still has the entry, the rule and the 03 text, so 02 and 03 do not
+  change here. New M2-144 (1 h) scopes k8s.version's three `v1beta1` removed-API rows to the kinds
+  removed in 1.22 (SF-03). New M2-145 (1 h) adds AKS `managed-csi` and a vSphere or Longhorn class
+  fixture to k8s.storageclass (SF-04). The review's folds onto M2-125 (SF-06) and M2-126 (SF-05) are
+  already in those rows, so they are not filed. M1-116's row now says the Kubernetes page gives each check
+  an API reads line from the guard's `ALLOWED` table, with a test. SF-02: PRs #62, #64, #65 and #78 add
+  duplicate `ALLOWED` entries and #62 and #78 both add `Access::GetIn`, so M1-115's one-entry-per-resource
+  guard test fails once they land. Each of M1-162 to M1-165, if M1-115 merged first, now folds its entries
+  into those on main, adds `Access::GetIn` only if no earlier PR did, and copies the pair test, +0.5 h
+  each. #62 also extends the `pods` entry that M1-115 removes, so the first of M1-159 and M1-162 to merge
+  adds the entry, the role rule and the live read citing only its own check, and the second adds its id.
+  Weeks 29 and 30 go to 13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.

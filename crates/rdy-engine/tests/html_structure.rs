@@ -13,6 +13,9 @@
 //! M1-141 adds its bdi and bidi checks on top of `tokens`, `Token`, `opens`, `text_of` and `inside`, with
 //! one `*_problems` function per rule. `problems_in` runs a rule over any rendered page and `each_golden`
 //! runs it over the three goldens.
+//!
+//! M1-181 includes this file in the CLI's environment harness (`#[path]`) and runs the same rules over the
+//! page that `rdy run` wrote. The names that harness uses are `pub(crate)`.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -47,7 +50,7 @@ const VOID: [&str; 6] = ["meta", "link", "br", "hr", "img", "input"];
 
 /// One piece of a page.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Token {
+pub(crate) enum Token {
     /// `<name attr="value">`. Names are lower case. Values are kept as written.
     Open {
         name: String,
@@ -308,7 +311,7 @@ fn opens(tokens: &[Token]) -> impl Iterator<Item = (usize, &str, &[(String, Stri
 }
 
 /// The problems with heading levels: one `h1`, and no level more than one below the one before.
-fn heading_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn heading_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut last = 0u8;
     let mut h1s = 0;
@@ -333,7 +336,7 @@ fn heading_problems(tokens: &[Token]) -> Vec<String> {
 
 /// The problems with `h3` status words: each `h3` starts with a `status` span whose whole text is a status
 /// word.
-fn status_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn status_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     for (i, name, _) in opens(tokens) {
         if name != "h3" {
@@ -361,7 +364,7 @@ fn status_problems(tokens: &[Token]) -> Vec<String> {
 }
 
 /// The problems with tables: each `table` holds at least one `th`, and each `th` has `scope` `col` or `row`.
-fn table_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn table_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut tables = 0;
     let mut open: Vec<(usize, usize)> = Vec::new();
@@ -391,7 +394,7 @@ fn table_problems(tokens: &[Token]) -> Vec<String> {
 }
 
 /// The problems with ids and in-page links: no id twice, and each `href="#id"` has a target.
-fn id_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn id_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let mut ids = BTreeSet::new();
     for (_, _, attrs) in opens(tokens) {
@@ -423,7 +426,7 @@ fn valid_product(product: &str) -> bool {
 
 /// The problems with `href` and `src`: only `#id`, the footer link and the repo link for `href`, and only
 /// `data:` for `src`. The footer link ends with a valid product name, which is `product` when it is given.
-fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
+pub(crate) fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
     let mut problems = Vec::new();
     for (_, name, attrs) in opens(tokens) {
         if let Some(href) = attr(attrs, "href") {
@@ -449,7 +452,7 @@ fn link_problems(tokens: &[Token], product: Option<&str>) -> Vec<String> {
 }
 
 /// The problems with the page itself: `lang` on `html` and the four landmarks of D.4.
-fn page_problems(tokens: &[Token]) -> Vec<String> {
+pub(crate) fn page_problems(tokens: &[Token]) -> Vec<String> {
     let mut problems = Vec::new();
     let lang = opens(tokens)
         .find(|(_, name, _)| *name == "html")
@@ -474,8 +477,31 @@ fn page_problems(tokens: &[Token]) -> Vec<String> {
     problems
 }
 
+/// Every rule above, run over the page `html`, each problem named by its rule. M1-141 adds its rules here,
+/// so they also run on the page that `rdy run` wrote (M1-181).
+pub(crate) fn all_rules(html: &str, product: Option<&str>) -> Vec<String> {
+    type Rule<'a> = (&'a str, &'a dyn Fn(&[Token]) -> Vec<String>);
+    let rules: [Rule; 6] = [
+        ("headings", &heading_problems),
+        ("status", &status_problems),
+        ("tables", &table_problems),
+        ("ids", &id_problems),
+        ("page", &page_problems),
+        ("links", &|tokens| link_problems(tokens, product)),
+    ];
+    let mut all = Vec::new();
+    for (name, rule) in rules {
+        all.extend(
+            problems_in(html, rule)
+                .into_iter()
+                .map(|problem| format!("{name}: {problem}")),
+        );
+    }
+    all
+}
+
 /// Runs `check` over the page `html`. A page the tokenizer refuses is one problem.
-fn problems_in(html: &str, check: impl Fn(&[Token]) -> Vec<String>) -> Vec<String> {
+pub(crate) fn problems_in(html: &str, check: impl Fn(&[Token]) -> Vec<String>) -> Vec<String> {
     match tokens(html) {
         Ok(tokens) => check(&tokens),
         Err(e) => vec![format!("the page does not tokenize: {e}")],
@@ -525,6 +551,15 @@ fn ids_are_unique_and_every_in_page_link_has_a_target() -> TestResult {
 #[test]
 fn the_only_links_are_in_page_the_footer_and_the_repo_and_the_only_src_is_data() -> TestResult {
     each_golden(|tokens| link_problems(tokens, None))
+}
+
+#[test]
+fn every_rule_together_passes_on_the_goldens() -> TestResult {
+    for stem in GOLDENS {
+        let found = all_rules(&golden_html(stem)?, Some(&golden_product(stem)?));
+        assert_eq!(found, Vec::<String>::new(), "{stem}");
+    }
+    Ok(())
 }
 
 #[test]
@@ -685,4 +720,402 @@ fn the_page_rule_catches_an_empty_lang_and_a_duplicate_landmark() {
         ),
         ["html has no lang", "2 header landmarks, want 1"]
     );
+}
+
+// ---------------------------------------------------------------------------------------------------
+// M1-141: untrusted text is in `<bdi>`, and no format or zero-width character reaches the page raw.
+// ---------------------------------------------------------------------------------------------------
+
+/// A closing isolate, then a reversal (SEC-149-11): the string that closes a `<bdi>` early and flips what
+/// follows. Every planted field below is a tag word followed by this.
+const HOSTILE: &str = "x\u{2069}\u{202e}";
+
+/// `HOSTILE` as the page must show it: the two controls written out, the `x` kept.
+const HOSTILE_SHOWN: &str = "x\\u{2069}\\u{202e}";
+
+/// The planted fields: the tag word that starts each value. A tag starts with a capital letter, because
+/// Found and Needed labels are capitalised by the page. `hostile_page` says where each one goes.
+const PLANTED: [&str; 27] = [
+    "Product", "Version", "Host", "User", "Rdyver", "Message", "Fix", "Builtin", "Note", "Grant",
+    "Partial", "Fkey", "Fval", "Nkey", "Nval", "Cname", "Cdetail", "Chint", "File", "Cid", "Apath",
+    "Acheck", "Ahost", "Runid", "Contact", "Keyid", "Trust",
+];
+
+/// Fields on the page only in one of the pages of `hostile_page`.
+const ONLY_UNSIGNED: [&str; 1] = ["File"];
+
+/// Fields on the page only when the spec is signed: the unsigned page has no signature to show.
+const ONLY_SIGNED: [&str; 2] = ["Keyid", "Trust"];
+
+/// Planted needles that are not a tag word followed by `HOSTILE`: a fix that holds a lone U+2066 (an
+/// isolate that is never closed), the capability need name, and the short fingerprint of the not-pinned
+/// banner, which keeps the first eight characters and so cuts `HOSTILE` after its U+2069.
+const OTHER_NEEDLES: [&str; 3] = ["Fixopen\\u{2066}rm -rf /", "Capname", "Fprintx\\u{2069}"];
+
+/// Whether `c` is a Unicode format (Cf) character or one of the zero-width characters outside Cf. The list
+/// is written out here on purpose, not taken from the engine, so the test does not agree with the engine
+/// by sharing its mistake.
+fn is_format_or_zero_width(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x00AD
+            | 0x0600..=0x0605
+            | 0x061C
+            | 0x06DD
+            | 0x070F
+            | 0x0890..=0x0891
+            | 0x08E2
+            | 0x180E
+            | 0x200B..=0x200F
+            | 0x2028..=0x202E
+            | 0x2060..=0x206F
+            | 0xFEFF
+            | 0xFFF9..=0xFFFB
+            | 0x110BD
+            | 0x110CD
+            | 0x13430..=0x1343F
+            | 0x1BCA0..=0x1BCA3
+            | 0x1D173..=0x1D17A
+            | 0xE0001
+            | 0xE0020..=0xE007F
+            // Zero-width or blank, and not Cf.
+            | 0x034F
+            | 0x115F..=0x1160
+            | 0x17B4..=0x17B5
+            | 0x3164
+            | 0xFFA0
+    )
+}
+
+/// The problems with raw format characters and control characters (line feed and tab excepted): none in
+/// any text or attribute value. The one exception is the
+/// `<title>`, which cannot hold elements, so the page wraps the product in U+2068 and U+2069 there: one of
+/// each is allowed, and nothing else. The body of the embedded `<script>` data block is not a token, so it
+/// is not judged here: the JSON writer keeps the report's text as it is, and no browser shows that block.
+pub(crate) fn raw_format_problems(tokens: &[Token]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let bad = |text: &str| -> Option<String> {
+        text.chars()
+            .find(|c| is_format_or_zero_width(*c) || (c.is_control() && *c != '\n' && *c != '\t'))
+            .map(|c| format!("U+{:04X}", u32::from(c)))
+    };
+    for (i, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Text(text) if inside(tokens, i, "title") => {
+                let mut rest = text.clone();
+                if let Some(at) = rest.find('\u{2068}') {
+                    rest.remove(at);
+                }
+                if let Some(at) = rest.rfind('\u{2069}') {
+                    rest.remove(at);
+                }
+                if let Some(found) = bad(&rest) {
+                    problems.push(format!("raw {found} in the title"));
+                }
+            }
+            Token::Text(text) => {
+                if let Some(found) = bad(text) {
+                    problems.push(format!("raw {found} in text {}", head(text)));
+                }
+            }
+            Token::Open { name, attrs } => {
+                for (key, value) in attrs {
+                    if let Some(found) = bad(value) {
+                        problems.push(format!("raw {found} in {name} {key}"));
+                    }
+                }
+            }
+            Token::Close(_) => {}
+        }
+    }
+    problems
+}
+
+/// The needles for `tags`: each tag word followed by the escaped hostile text.
+fn needles(tags: &[&str]) -> Vec<String> {
+    tags.iter()
+        .map(|tag| format!("{tag}{HOSTILE_SHOWN}"))
+        .collect()
+}
+
+/// The problems with isolation: every piece of text that shows a needle sits inside a `<bdi>`, and every
+/// needle was found. The `<title>` is skipped, because it cannot
+/// hold a `<bdi>`; `title_problems` has its own rule.
+fn bdi_problems(tokens: &[Token], needles: &[String]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for needle in needles {
+        let tag = needle;
+        let mut found = 0;
+        for (i, token) in tokens.iter().enumerate() {
+            let Token::Text(text) = token else { continue };
+            if !text.contains(needle.as_str()) || inside(tokens, i, "title") {
+                continue;
+            }
+            found += 1;
+            if !inside(tokens, i, "bdi") {
+                problems.push(format!("{tag}: {} is not inside a bdi", head(text)));
+            }
+        }
+        if found == 0 {
+            problems.push(format!("{tag}: {needle:?} is not on the page"));
+        }
+    }
+    problems
+}
+
+/// The problems with the `<title>`: it holds the escaped product between one U+2068 and one U+2069.
+fn title_problems(tokens: &[Token]) -> Vec<String> {
+    let want = format!("rdy report: NOT READY, \u{2068}Product{HOSTILE_SHOWN}\u{2069}");
+    let titles: Vec<&str> = tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| match t {
+            Token::Text(text) if inside(tokens, i, "title") => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    if titles == [want.as_str()] {
+        Vec::new()
+    } else {
+        vec![format!("the title is {titles:?}, want {want:?}")]
+    }
+}
+
+/// How the signature of the hostile page is: verified with a pinned key (the vendor's name is on fixes),
+/// verified with a key given for one run (the banner shows the short fingerprint), or unsigned (the banner
+/// names the spec file).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Pinned {
+    Yes,
+    Flag,
+    Unsigned,
+}
+
+/// The sample report with `HOSTILE` planted in every field of `PLANTED` and the other needles, rendered.
+fn hostile_page(pinned: Pinned) -> TestResult<String> {
+    use rdy_engine::redact::{Redactor, TagKey};
+    use rdy_engine::report::render_html;
+    use rdy_spec::result::Report;
+    use serde_json::json;
+
+    let path = fixtures_dir().join("reports/not-ready-7.2.json");
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+    let plant = |tag: &str| json!(format!("{tag}{HOSTILE}"));
+    doc["spec"]["product"] = plant("Product");
+    doc["spec"]["version"] = plant("Version");
+    doc["spec"]["file_name"] = plant("File");
+    doc["host"]["hostname"] = plant("Host");
+    doc["identity"]["user"] = plant("User");
+    doc["producer"]["version"] = plant("Rdyver");
+    doc["capabilities"][0]["detail"] = plant("Cdetail");
+    doc["capabilities"][0]["hint"] = plant("Chint");
+    doc["checks"][0]["observed"] = json!({ format!("Fkey{HOSTILE}"): plant("Fval") });
+    doc["checks"][0]["expected"] = json!({ format!("Nkey{HOSTILE}"): plant("Nval") });
+    doc["checks"][1]["message"] = plant("Message");
+    doc["checks"][1]["fix"] = plant("Fix");
+    doc["checks"][1]["builtin_fix"] = plant("Builtin");
+    doc["checks"][1]["name"] = plant("Cname");
+    doc["checks"][1]["notes"] = json!([format!("Note{HOSTILE}")]);
+    doc["checks"][2]["partial"] = json!({
+        "missing": [],
+        "missing_grants": [format!("Grant{HOSTILE}")],
+        "note": format!("Partial{HOSTILE}"),
+    });
+    doc["checks"][1]["id"] = plant("Cid");
+    doc["checks"][2]["fix"] = json!("Fixopen\u{2066}rm -rf /");
+    doc["actions"][2]["path"] = plant("Apath");
+    doc["actions"][2]["check"] = plant("Acheck");
+    doc["actions"][7]["host"] = plant("Ahost");
+    doc["run"]["id"] = plant("Runid");
+    doc["spec"]["contact"] = plant("Contact");
+    doc["signature"]["key_id"] = plant("Keyid");
+    doc["signature"]["trust_note"] = plant("Trust");
+    doc["capabilities"][1]["need"] = json!("command");
+    doc["capabilities"][1]["name"] = json!(format!("Capname{HOSTILE}"));
+    if pinned == Pinned::Flag {
+        doc["signature"]["trust_source"] = json!("flag");
+        doc["signature"]["key_fingerprint"] = json!(format!("Fprint{HOSTILE}0123456789abcdef"));
+    }
+    if pinned == Pinned::Unsigned {
+        doc["signature"] = json!({ "state": "unsigned" });
+    }
+    let report: Report = serde_json::from_value(doc)?;
+    let redacted = Redactor::new(TagKey::fixed([5; 32])).redact_report(report)?;
+    Ok(render_html(&redacted)?)
+}
+
+#[test]
+fn hostile_text_in_every_untrusted_field_is_in_a_bdi_and_shown_as_escapes() -> TestResult {
+    for pinned in [Pinned::Yes, Pinned::Flag, Pinned::Unsigned] {
+        let html = hostile_page(pinned)?;
+        let mut wanted = needles(
+            &PLANTED
+                .iter()
+                .copied()
+                .filter(|tag| {
+                    if pinned == Pinned::Unsigned {
+                        !ONLY_SIGNED.contains(tag)
+                    } else {
+                        !ONLY_UNSIGNED.contains(tag)
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        wanted.extend(OTHER_NEEDLES.iter().map(|n| (*n).to_owned()));
+        if pinned != Pinned::Flag {
+            // The short fingerprint is in the not-pinned banner only. The details row shows it whole.
+            wanted.retain(|n| !n.starts_with("Fprint"));
+        }
+        assert_eq!(
+            problems_in(&html, |t| bdi_problems(t, &wanted)),
+            Vec::<String>::new(),
+            "{pinned:?}"
+        );
+        assert_eq!(
+            problems_in(&html, raw_format_problems),
+            Vec::<String>::new(),
+            "{pinned:?}"
+        );
+        assert_eq!(
+            problems_in(&html, title_problems),
+            Vec::<String>::new(),
+            "{pinned:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_banner_line_names_the_file_in_a_bdi_with_the_controls_written_out() -> TestResult {
+    let html = hostile_page(Pinned::Unsigned)?;
+    let t = tokens(&html)?;
+    let at = t
+        .iter()
+        .position(|x| *x == Token::Text(format!("File{HOSTILE_SHOWN}")))
+        .ok_or("the banner does not name the file")?;
+    assert!(inside(&t, at, "bdi"));
+    assert!(opens(&t).any(|(i, name, attrs)| {
+        name == "div" && attr(attrs, "class") == Some("banner") && i < at
+    }));
+    Ok(())
+}
+
+#[test]
+fn the_goldens_hold_no_raw_format_character() -> TestResult {
+    each_golden(raw_format_problems)
+}
+
+#[test]
+fn the_bdi_rule_catches_text_outside_and_text_that_is_missing() {
+    let shown = format!("Host{HOSTILE_SHOWN}");
+    let ok = format!("<p>on <bdi>{shown}</bdi></p>");
+    let outside = format!("<p>on {shown}</p>");
+    let tags = needles(&["Host"]);
+    assert_eq!(
+        problems_in(&ok, |t| bdi_problems(t, &tags)),
+        Vec::<String>::new()
+    );
+    assert_eq!(problems_in(&outside, |t| bdi_problems(t, &tags)).len(), 1);
+    // A bdi that closed early does not cover the text after it.
+    let early = format!("<p><bdi>a</bdi>{shown}</p>");
+    assert_eq!(problems_in(&early, |t| bdi_problems(t, &tags)).len(), 1);
+    // A tag word that is not on the page at all is a problem, not a pass.
+    assert_eq!(problems_in("<p>x</p>", |t| bdi_problems(t, &tags)).len(), 1);
+}
+
+#[test]
+fn the_raw_format_rule_catches_controls_zero_width_text_and_entities() {
+    for c in [
+        '\u{202e}', '\u{2066}', '\u{200b}', '\u{feff}', '\u{ad}', '\u{3164}',
+    ] {
+        let html = format!("<p><bdi>a{c}b</bdi></p>");
+        assert_eq!(problems_in(&html, raw_format_problems).len(), 1, "{c:?}");
+    }
+    // Controls other than line feed and tab are caught too.
+    for c in ['\u{1b}', '\u{8}', '\u{7f}', '\u{85}', '\u{9b}', '\r'] {
+        let html = format!("<p><bdi>a{c}b</bdi></p>");
+        assert_eq!(problems_in(&html, raw_format_problems).len(), 1, "{c:?}");
+    }
+    assert_eq!(
+        problems_in("<p>a\nb\tc</p>", raw_format_problems),
+        Vec::<String>::new()
+    );
+    // A numeric entity decodes to the raw character, so it is caught too.
+    assert_eq!(
+        problems_in("<p>a&#8238;b</p>", raw_format_problems).len(),
+        1
+    );
+    assert_eq!(
+        problems_in("<p title=\"a\u{202e}\">b</p>", raw_format_problems).len(),
+        1
+    );
+    // The title may hold its one pair of isolates, and nothing else.
+    let ok = "<title>rdy report: READY, \u{2068}acme\u{2069}</title>";
+    assert_eq!(problems_in(ok, raw_format_problems), Vec::<String>::new());
+    let bad = "<title>rdy report: READY, \u{2068}ac\u{202e}me\u{2069}</title>";
+    assert_eq!(problems_in(bad, raw_format_problems).len(), 1);
+    assert_eq!(
+        problems_in("<p>caf\u{e9} \u{4e2d} \u{1f600}</p>", raw_format_problems),
+        Vec::<String>::new()
+    );
+}
+
+/// The golden page of the hostile hostname (a line separator and a paragraph separator among other
+/// things) shows them as escapes, inside the `<bdi>`.
+#[test]
+fn the_hostile_host_golden_shows_the_separators_as_escapes() -> TestResult {
+    let html = golden_html("not-ready-hostile-host")?;
+    assert_eq!(
+        problems_in(&html, raw_format_problems),
+        Vec::<String>::new()
+    );
+    let t = tokens(&html)?;
+    let at = t
+        .iter()
+        .position(|x| matches!(x, Token::Text(text) if text.contains("\\u{2028}")))
+        .ok_or("the hostname shows no escape")?;
+    assert!(inside(&t, at, "bdi"));
+    Ok(())
+}
+
+/// C1: a hostname that holds every character `is_format_or_zero_width` names shows each one as
+/// `\u{..}` and leaves no raw one on the page.
+#[test]
+fn a_hostname_with_every_format_and_zero_width_character_shows_each_as_an_escape() -> TestResult {
+    use rdy_engine::redact::{Redactor, TagKey};
+    use rdy_engine::report::render_html;
+    use rdy_spec::result::Report;
+
+    let all: Vec<char> = (0..=0x0010_FFFFu32)
+        .filter_map(char::from_u32)
+        .filter(|c| is_format_or_zero_width(*c))
+        .collect();
+    // The list has about 180 characters, so the loop is not empty by accident.
+    assert!(all.len() > 150, "{} characters", all.len());
+    let path = fixtures_dir().join("reports/not-ready-7.2.json");
+    let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+    let hostname: String = all.iter().flat_map(|c| ['h', *c]).collect();
+    doc["host"]["hostname"] = serde_json::json!(hostname);
+    let report: Report = serde_json::from_value(doc)?;
+    let redacted = Redactor::new(TagKey::fixed([5; 32])).redact_report(report)?;
+    let html = render_html(&redacted)?;
+    assert_eq!(
+        problems_in(&html, raw_format_problems),
+        Vec::<String>::new()
+    );
+    let t = tokens(&html)?;
+    let shown: String = all
+        .iter()
+        .flat_map(|c| {
+            format!("h\\u{{{:x}}}", u32::from(*c))
+                .chars()
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let at = t
+        .iter()
+        .position(|x| *x == Token::Text(shown.clone()))
+        .ok_or("the hostname does not show every character as an escape")?;
+    assert!(inside(&t, at, "bdi"));
+    Ok(())
 }

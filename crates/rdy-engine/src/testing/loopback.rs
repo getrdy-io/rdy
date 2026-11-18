@@ -35,7 +35,7 @@ mod proxy;
 mod raw;
 
 pub use ca::{Leaf, TestCa, Validity};
-pub use http::{HttpOptions, HttpServer, Reply, Request};
+pub use http::{HttpOptions, HttpServer, Reply, Request, TlsVersion};
 pub use proxy::{ConnectProxy, ConnectRequest, ProxyMode};
 pub use raw::{
     DualStack, NeverAccepts, ResetAfterClientHello, closed_port, ipv6_loopback_available,
