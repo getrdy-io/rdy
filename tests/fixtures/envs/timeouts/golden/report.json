@@ -141,7 +141,9 @@
           "need": "network"
         }
       ],
-      "notes": [],
+      "notes": [
+        "hole.acme.test:8080: no reply within 3 s from 192.0.2.9:8080"
+      ],
       "observed": {
         "endpoints": [
           {
