@@ -642,3 +642,36 @@ async fn off_linux_a_note_says_direct_lookups_were_skipped() {
         ran.finding().notes
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn an_ipv6_only_system_answer_with_a_failed_aaaa_is_not_compared() {
+    // The system answer is IPv6 only. The nameserver says NOERROR with no A record and then fails the AAAA
+    // question, so the families asked leave nothing of the system answer to compare: no split-horizon warning.
+    let first = std::sync::atomic::AtomicUsize::new(0);
+    let flaky = move |q: &[u8], t: DnsTransport| {
+        if first.fetch_add(1, Ordering::SeqCst) == 0 {
+            zone(&[("web.acme.test", &[])])(q, t)
+        } else {
+            DnsScript::Refused
+        }
+    };
+    let replay = Replay::for_os(Os::Linux)
+        .file("/etc/resolv.conf", "nameserver 192.0.2.53\n")
+        .file("/etc/nsswitch.conf", "hosts: files dns\n")
+        .command(
+            "getent",
+            &["ahosts", "--", "web.acme.test"],
+            0,
+            "2001:db8::10 STREAM web.acme.test\n",
+        )
+        .dns_server(addr(NS1), flaky);
+    let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
+    let finding = ran.finding();
+    assert_eq!(positions(&ran, 0)[0]["aaaa_asked"], false);
+    assert!(
+        !finding.message.contains("split horizon"),
+        "{}",
+        finding.message
+    );
+    assert_ne!(finding.level, Level::Fail, "{finding:?}");
+}
