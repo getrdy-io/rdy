@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/getent",
+    "ahosts",
+    "--",
+    "v6.acme.test"
+  ],
+  "stdout": "2001:db8::20    STREAM v6.acme.test\n2001:db8::20    DGRAM\n2001:db8::20    RAW\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

@@ -20,7 +20,7 @@ rdy installs one file, `rdy`. It has no daemon and it needs no runtime.
 
 Each release has an `install.sh` file. Its address has this form, where `<tag>` is the release tag, for example `v0.1.0`:
 
-```sh
+```sh skip=placeholder
 RDY_INSTALL_URL=https://github.com/getrdy-io/rdy/releases/download/<tag>/install.sh
 ```
 
@@ -48,7 +48,7 @@ The output names the version you installed.
 
 The script does not edit your shell profile. If `rdy` is not found, add the folder to your `PATH`:
 
-```sh
+```sh tested shape=\A\z
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -58,7 +58,7 @@ Put that line in your shell profile to keep it. The other pages assume `rdy` is 
 
 The script refuses to run as root. To install as root, add `--allow-root` after `sh -s --`:
 
-```sh
+```sh skip=network
 curl --proto '=https' --tlsv1.2 -sSf "$RDY_INSTALL_URL" | sh -s -- --allow-root
 ```
 
@@ -72,7 +72,7 @@ Use this route when the host has no network, or when you do not want to run a sc
 2. Check the folder against the signature. Use a checkout of `main` that you have read. Run `scripts/verify-release.sh --dir <folder> <tag>`. The script needs every file that `SHA256SUMS` lists. The script is a POSIX shell script, so run it with a POSIX shell such as `sh` or `dash`, not bash-only syntax. The [release steps in RELEASING.md](https://github.com/getrdy-io/rdy/blob/main/RELEASING.md#every-release) describe the script and its output.
 3. Copy the folder to the host. On the host, check each file against `SHA256SUMS`. Run one of these from the folder:
 
-   ```sh
+   ```sh skip=needs-release-files
    sha256sum -c --ignore-missing SHA256SUMS
    ```
 
@@ -90,7 +90,7 @@ The Windows install script ships in M3. In M1, install by hand from the zip. Use
 2. Check the folder with `scripts/verify-release.sh --dir <folder> <tag>`, as in step 2 above. That script runs under bash, so use Git Bash or WSL on that machine.
 3. Copy the folder to the Windows host. Compare the hash of the zip with its line in `SHA256SUMS`:
 
-   ```powershell
+   ```powershell skip=windows-only
    Get-FileHash -Algorithm SHA256 .\rdy-x86_64-pc-windows-msvc.zip
    ```
 
@@ -115,7 +115,7 @@ On Windows, rdy refuses a trust store file that it finds. Read [Unsigned specs](
 
 Run a signed spec. Your vendor sends the spec and a `.minisig` file. Keep both in one folder, then run:
 
-```sh
+```sh skip=placeholder
 "$HOME/.local/bin/rdy" run <spec>
 ```
 

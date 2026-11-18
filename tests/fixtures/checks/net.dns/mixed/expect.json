@@ -1,0 +1,77 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      {
+        "expect_in": [
+          "10.0.0.0/8"
+        ],
+        "expect_public": false,
+        "name": "app.acme.test"
+      },
+      {
+        "expect_public": true,
+        "name": "cdn.acme.test"
+      },
+      "gone.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": [
+        {
+          "expect_in": [
+            "10.0.0.0/8"
+          ],
+          "expect_public": false,
+          "name": "app.acme.test"
+        },
+        {
+          "expect_in": [],
+          "expect_public": true,
+          "name": "cdn.acme.test"
+        }
+      ]
+    },
+    "fix": "`gone.acme.test` does not resolve on this machine: the system resolver found no record, or no nameserver answered. Ask the DNS team for a record or a conditional forwarder for `acme.test`. Check that the `hosts:` line of `/etc/nsswitch.conf` lists `dns`. As a stopgap add a line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 3 names do not resolve: `gone.acme.test` (not found)",
+    "notes": [],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "10.20.30.40"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "app.acme.test",
+          "result": "found",
+          "source": "getent"
+        },
+        {
+          "addresses": [
+            "198.51.100.7"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "cdn.acme.test",
+          "result": "found",
+          "source": "getent"
+        },
+        {
+          "ms": 0,
+          "name": "gone.acme.test",
+          "result": "not_found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

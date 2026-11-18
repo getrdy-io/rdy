@@ -1,0 +1,41 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": []
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": []
+      }
+    },
+    "fix": "Ask the vendor to fix the spec's allow list.",
+    "level": "fail",
+    "message": "SELinux is enforcing, but the spec's allow list is empty, so no mode is accepted.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "count": 0,
+          "groups": [],
+          "inspected": true,
+          "permissive": 0,
+          "watched": {},
+          "window": "24h",
+          "window_truncated": false
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": null
+  }
+}
