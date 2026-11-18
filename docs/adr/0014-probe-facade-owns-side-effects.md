@@ -91,7 +91,9 @@ configuration: a `WebPkiServerVerifier` on the system roots (`NativeCall::System
 `http/1.1` only. A chain the roots refuse fails the handshake before a request byte
 (`NetFailure::TlsUntrusted`). (b) hyper is a direct dependency of `rdy-engine` (`client`, `http1`; `deny.toml`
 lists `rdy-engine` as a wrapper), reached through a safe `Io` adapter, with no `hyper-util`. (c) A plain
-`http://` target through the proxy is refused until M1-097 writes the absolute form. (d) A `testing`-gated
+`http://` target through the proxy was refused until M1-097, which built the absolute form: the request line
+holds the full URL, `Proxy-Authorization` rides on that one request to the proxy (marked sensitive, never
+logged), and no `CONNECT` is sent. A 407 to it is `NetFailure::ProxyAuthRequired`; a 403 is a status. (d) A `testing`-gated
 hub clock (`ProbeHub::pin_clock`) feeds the `time_provider` of both the recording and the strict
 configuration. (e) `Probe::trust_store` gives a check the OS store's sources and the SHA-256 of each root.
 It is a probe call like any other: it writes one `native` entry (`api: system_roots`) with the check's id,
