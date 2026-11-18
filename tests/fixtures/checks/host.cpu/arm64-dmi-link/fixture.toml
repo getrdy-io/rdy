@@ -1,0 +1,12 @@
+schema = 1
+name = "arm64-dmi-link"
+summary = "Arm host whose DMI class directory is a link to the real directory: both paths are read"
+origin = "hand"
+os = "linux"
+arch = "aarch64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

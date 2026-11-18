@@ -1,0 +1,12 @@
+schema = 1
+name = "alpine-version-prefix"
+summary = "Alpine 3.19.1 against a list that says 3.19: the dotted prefix note"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -874,6 +874,50 @@ fn a_hung_daemon_does_not_cost_the_other_runtimes_their_result() {
 }
 
 #[test]
+fn three_slow_sockets_are_asked_together_and_cost_one_limit_not_three() {
+    // Docker, Podman and a rootless Docker all accept the connection and never answer. Asked one
+    // after the other they would cost 3 x 1.5 s. Asked together they cost one 1.5 s limit.
+    let fixture = load("docker-slow");
+    let hour = Duration::from_secs(3600);
+    let replay = machine("docker-slow", &fixture)
+        .symlink(SOCK_PODMAN, "socket:[1001]")
+        .unix_get_after(SOCK_PODMAN, "/version", 200, "{}", hour)
+        .env("XDG_RUNTIME_DIR", "/run/user/0")
+        .unix_get_after("/run/user/0/docker.sock", "/version", 200, "{}", hour);
+    let test_run = TestRun::new(replay);
+    let entry = json!({"id": "host.container_runtime"});
+    let scheduler = test_run.scheduler(1, Os::Linux, fixture.available_needs());
+    let planned = Planned::new(Arc::new(check(&entry)), "host.container_runtime");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("a runtime");
+    let started = tokio::time::Instant::now();
+    let mut ran = runtime.block_on(async {
+        let ran = scheduler.run(vec![planned]).await;
+        assert!(
+            started.elapsed() <= Duration::from_millis(1600),
+            "the three slow sockets cost {:?}, not one limit",
+            started.elapsed()
+        );
+        ran
+    });
+    let End::Done(done) = ran.remove(0).end else {
+        panic!("the check did not finish");
+    };
+    let finding = done.as_ref().as_ref().expect("a finding");
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    let timeouts = test_run
+        .action_log()
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Http && a.outcome == ActionOutcome::Timeout)
+        .count();
+    assert_eq!(timeouts, 3, "one timed-out request per socket");
+}
+
+#[test]
 fn the_snapshotter_fix_names_the_table_of_the_config_version_and_the_value_of_the_spec() {
     let v3 = run("containerd-v3-snapshotter");
     let fix = v3.finding().fix.clone().expect("a fix");

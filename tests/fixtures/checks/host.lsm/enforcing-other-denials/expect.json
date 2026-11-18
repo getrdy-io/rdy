@@ -27,7 +27,7 @@
     "level": "warn",
     "message": "SELinux is enforcing and denied 3 actions in the last 24h for container_t.",
     "notes": [
-      "1 of the denials were logged in permissive mode, so they were not blocked."
+      "1 of the 3 denials was logged in permissive mode, so it was not blocked. The other 2 were blocked."
     ],
     "observed": {
       "apparmor": {

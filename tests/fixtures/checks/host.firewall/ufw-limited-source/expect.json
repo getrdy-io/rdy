@@ -24,16 +24,18 @@
         {
           "interface": "eth0",
           "manager": "ufw",
-          "ports": {
-            "10250": {
-              "detail": "rule: allow 10250/tcp",
-              "verdict": "open"
-            },
-            "6443": {
+          "ports": [
+            {
               "detail": "a rule limits it to some addresses or interfaces, which rdy cannot judge",
+              "port": 6443,
               "verdict": "unknown"
+            },
+            {
+              "detail": "rule: allow 10250/tcp",
+              "port": 10250,
+              "verdict": "open"
             }
-          },
+          ],
           "zone": null
         }
       ]
