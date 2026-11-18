@@ -436,12 +436,31 @@ mod tests {
         let _ = assert_cases_in(tree.path(), "fake.plain", build);
     }
 
+    /// `UPDATE_GOLDENS=1` is set for this test process (any other value fails elsewhere first).
+    fn updating() -> bool {
+        std::env::var("UPDATE_GOLDENS").is_ok_and(|value| value == "1")
+    }
+
     #[test]
-    #[should_panic(expected = "1 of 1 cases of fake.plain failed")]
     fn a_result_that_differs_from_the_golden_fails() {
-        let text = right_bytes().replace("\"pass\"", "\"fail\"");
-        let tree = plant(MANIFEST, Some(&text));
-        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+        let wrong = right_bytes().replace("\"pass\"", "\"fail\"");
+        let tree = plant(MANIFEST, Some(&wrong));
+        let ran = catch_unwind(AssertUnwindSafe(|| {
+            assert_cases_in(tree.path(), "fake.plain", build)
+        }));
+        if updating() {
+            // The accept run rewrites the planted golden. It must not fail this test.
+            assert!(ran.is_ok(), "an accept run rewrites the golden");
+            let written =
+                fs::read_to_string(tree.path().join("checks/fake.plain/case/expect.json"))
+                    .expect("the golden");
+            assert_eq!(written, right_bytes());
+            return;
+        }
+        let payload = ran.expect_err("a different golden fails");
+        let text = payload.downcast_ref::<String>().expect("a text message");
+        assert!(text.contains("1 of 1 cases of fake.plain failed"), "{text}");
+        assert!(text.contains("golden differs"), "{text}");
     }
 
     #[test]

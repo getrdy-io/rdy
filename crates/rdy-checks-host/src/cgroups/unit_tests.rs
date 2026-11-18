@@ -423,6 +423,8 @@ fn the_v1_fix_says_where_v1_is_gone() {
     for text in [
         fix::version_fix(Boot::Grub, false, None),
         fix::version_fix(Boot::Grubby, true, None),
+        // The EL 10 text has no boot edit, and it still names only listed commands and settings.
+        fix::version_fix(Boot::Grubby, false, rhel10.as_ref()),
     ] {
         if let Err(error) = rdy_engine::fixtext::check(&text) {
             panic!("{error}");

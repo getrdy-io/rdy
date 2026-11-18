@@ -361,7 +361,8 @@ fn denials_that_name_no_watched_context_warn() {
     assert!(
         f.notes
             .iter()
-            .any(|n| n.starts_with("1 of the denials were logged in permissive mode")),
+            .any(|n| n
+                == "1 of the 3 denials was logged in permissive mode, so it was not blocked. The other 2 were blocked."),
         "{:?}",
         f.notes
     );
