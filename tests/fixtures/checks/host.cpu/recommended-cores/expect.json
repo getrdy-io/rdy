@@ -1,0 +1,30 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 4,
+    "recommended": 16
+  },
+  "result": {
+    "expected": {
+      "min": 4,
+      "recommended": 16
+    },
+    "fix": "Resize the instance to at least 16 vCPUs. This host has 8 vCPUs.",
+    "level": "warn",
+    "message": "8 vCPUs found, 4 needed, 16 recommended",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": null
+  }
+}

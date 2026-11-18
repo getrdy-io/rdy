@@ -24,16 +24,18 @@
         {
           "interface": "eth0",
           "manager": "ufw",
-          "ports": {
-            "10250": {
-              "detail": "rule: allow 10250/tcp",
-              "verdict": "open"
-            },
-            "6443": {
+          "ports": [
+            {
               "detail": "no rule allows it and the default input policy is DROP",
+              "port": 6443,
               "verdict": "closed"
+            },
+            {
+              "detail": "rule: allow 10250/tcp",
+              "port": 10250,
+              "verdict": "open"
             }
-          },
+          ],
           "zone": null
         }
       ]

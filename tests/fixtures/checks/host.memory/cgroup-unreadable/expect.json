@@ -30,6 +30,9 @@
       "swap_used_bytes": 0,
       "total_bytes": 67420155904
     },
-    "partial": null
+    "partial": {
+      "missing": [],
+      "note": "Some cgroup memory files could not be read, so a cgroup limit may have been missed."
+    }
   }
 }

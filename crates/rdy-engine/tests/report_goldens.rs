@@ -421,6 +421,7 @@ fn every_golden_page_passes_the_static_checks() -> TestResult {
             "not-ready-7.2.html",
             "not-ready-hostile-host.html",
             "not-ready-no-blocks.html",
+            "ready-with-warnings-nothing-verified.html",
             "results-b1-ready.html",
             "results-b2-ready-with-warnings.html",
             "results-b3-not-ready.html",
