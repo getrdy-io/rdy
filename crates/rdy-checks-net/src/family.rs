@@ -5,6 +5,7 @@ use rdy_engine::family::{BuildError, Built, Family, HostSet};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::dns::{self, DnsCheck};
 use crate::egress::{self, EgressCheck};
 use crate::mtu::{self, MtuCheck};
 use crate::tls_intercept::{self, TlsInterceptCheck};
@@ -13,15 +14,15 @@ use crate::tls_intercept::{self, TlsInterceptCheck};
 mod tests;
 
 /// Every net check this build lists, in catalog order (03 section 3).
-static CHECKS: [&CheckInfo; 3] = [&egress::INFO, &mtu::INFO, &tls_intercept::INFO];
+static CHECKS: [&CheckInfo; 4] = [&egress::INFO, &mtu::INFO, &tls_intercept::INFO, &dns::INFO];
 
 /// The `net` family.
 ///
 /// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.mtu` ([`MtuCheck`]) and
-/// `net.tls_intercept` ([`TlsInterceptCheck`]). A check gets the hosts its own spec entry lists and no
+/// `net.tls_intercept` ([`TlsInterceptCheck`]) and `net.dns` ([`DnsCheck`]). A check gets the hosts its own spec entry lists and no
 /// others (INV-11): for `net.egress`, its `endpoints`; for `net.tls_intercept`, its `hosts`, or by
-/// default the TLS endpoints of the spec's `net.egress` entries.
-/// `net.proxy`, `net.dns`, `net.registry` and `net.bandwidth` are reserved ids that
+/// default the TLS endpoints of the spec's `net.egress` entries; for `net.dns`, its `names`.
+/// `net.proxy`, `net.registry` and `net.bandwidth` are reserved ids that
 /// no family lists yet, so the planner skips them with `not_in_build`. Each ticket that writes one adds
 /// its [`CheckInfo`] to the list and its arm to [`Family::build`]. There are no stubs, so the family may
 /// be registered in the CLI as it is.
@@ -51,6 +52,11 @@ impl Family for NetFamily {
                     BuildError::Unsupported(format!("expected_issuer does not compile: {reason}"))
                 })?;
                 Ok(Built::new(Box::new(check)).with_hosts(set))
+            }
+            CheckParams::NetDns(params) => {
+                let check = DnsCheck::from_params(&params);
+                let hosts = check.hosts();
+                Ok(Built::new(Box::new(check)).with_hosts(hosts))
             }
             _ => Err(BuildError::Unsupported(
                 "not a net check this rdy can build".to_owned(),
