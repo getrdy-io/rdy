@@ -43,7 +43,10 @@ fn skip_kind(plan: &RunPlan, key: &str) -> Option<SkipKind> {
 #[test]
 fn the_family_lists_its_checks_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
-    assert_eq!(ids, ["net.egress", "net.proxy", "net.mtu"]);
+    assert_eq!(
+        ids,
+        ["net.egress", "net.proxy", "net.mtu", "net.tls_intercept"]
+    );
     let mut twice = registry();
     assert_eq!(
         twice.register(NetFamily).map(|_| ()),
@@ -58,12 +61,12 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         assert_eq!(info.family, "net");
         let timeout = info.default_timeout.expect("a timeout from the catalog");
         assert!(timeout.as_secs() >= 1 && timeout <= rdy_engine::check::MAX_TIMEOUT);
-        // Only net.egress needs the network (`--no-network` skips it as `missing_need`); net.mtu reads the
-        // interface table and needs nothing.
-        let expected: &[Need] = if info.id == "net.egress" {
-            &[Need::Network]
-        } else {
+        // net.egress and net.tls_intercept need the network (`--no-network` skips them as `missing_need`);
+        // net.mtu reads the interface table and net.proxy reads the environment: they need nothing.
+        let expected: &[Need] = if matches!(info.id, "net.mtu" | "net.proxy") {
             &[]
+        } else {
+            &[Need::Network]
         };
         assert_eq!(info.needs, expected, "{} needs", info.id);
     }
@@ -143,6 +146,21 @@ fn build_makes_the_check_from_its_params_and_refuses_another_id() {
             .build(&other, other.decode_params(), &spec)
             .is_err()
     );
+}
+
+#[test]
+fn net_tls_intercept_builds_with_the_hosts_of_its_own_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "net.tls_intercept", "hosts": ["a.acme.test", "b.acme.test:8443", "a.acme.test:443"]}),
+    )
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.tls_intercept");
+    // `a.acme.test` and `a.acme.test:443` are one host.
+    assert_eq!(built.hosts.len(), 2);
 }
 
 #[test]

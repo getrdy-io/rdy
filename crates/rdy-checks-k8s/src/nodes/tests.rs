@@ -745,6 +745,32 @@ async fn more_autoscalers_are_found_by_node_pool_group_and_helm_label() {
 }
 
 #[tokio::test]
+async fn a_stopped_or_lookalike_autoscaler_is_not_found_and_gke_gets_the_hand_check_note() {
+    let rig = rig("scaler-stopped");
+    let finding = rig.finding(json!({"min_ready": 3})).await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.observed["autoscaler"], "none found");
+    assert!(
+        finding.notes.iter().all(|note| !note.contains("invisible")),
+        "{:?}",
+        finding.notes
+    );
+    rig.audit();
+
+    let gke = self::rig("scaler-gke-hosted");
+    let finding = gke.finding(json!({"min_ready": 3})).await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert!(
+        finding.notes.iter().any(|note| note.starts_with(
+            "managed autoscalers are invisible without a ConfigMap read, so check by hand"
+        )),
+        "{:?}",
+        finding.notes
+    );
+    gke.audit();
+}
+
+#[tokio::test]
 async fn per_node_is_only_a_hint_where_new_nodes_are_sized_to_pending_pods() {
     let rig = rig("scaler-auto-mode");
     let finding = rig

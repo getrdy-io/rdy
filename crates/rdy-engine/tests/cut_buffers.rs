@@ -15,8 +15,8 @@
 //! - A secret in a whole line near the cap needs a rule for its shape (key id, URL userinfo, a complete
 //!   PEM block). Those rules are M1-060, which enables the whole-line case below. Its geometry is also
 //!   checked on its own.
-//! - The HTML part of the exit test belongs to M1-083 (there is no renderer yet), and the stderr half of
-//!   cut buffers to M1-086. `rdy-cli/tests/log_redaction.rs` covers a known secret on stderr.
+//! - The HTML part of the exit test is in `report_goldens.rs` (M1-083), and the stderr half of
+//!   cut buffers belongs to M1-086. `rdy-cli/tests/log_redaction.rs` covers a known secret on stderr.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};

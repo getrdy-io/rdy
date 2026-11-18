@@ -168,7 +168,8 @@ def groups(case, names=(), code=200):
 
 def scaler_deployments(case, found=False, code=200, items=None):
     if items is None:
-        items = [{"metadata": {"name": "cluster-autoscaler", "namespace": "kube-system"}}] if found else []
+        items = [{"metadata": {"name": "cluster-autoscaler", "namespace": "kube-system"},
+                  "status": {"readyReplicas": 1}}] if found else []
         if not found:
             items = [{"metadata": {"name": "coredns", "namespace": "kube-system", "labels": {"k8s-app": "kube-dns"}}}]
     body = listing("DeploymentList", "apps/v1", items) if code == 200 else status(
@@ -348,8 +349,21 @@ nodes("scaler-helm", [node("acme-node-1", zone="us-east-1a")])
 groups("scaler-helm")
 scaler_deployments("scaler-helm", items=[
     {"metadata": {"name": "acme-autoscaler", "namespace": "kube-system",
-                  "labels": {"app.kubernetes.io/name": "aws-cluster-autoscaler"}}},
+                  "labels": {"app.kubernetes.io/name": "aws-cluster-autoscaler"}},
+     "status": {"readyReplicas": 2}},
 ])
+
+case("scaler-stopped", "One node, and a cluster autoscaler Deployment with no ready replica, and a lookalike name")
+nodes("scaler-stopped", [node("acme-node-1", zone="us-east-1a")])
+groups("scaler-stopped")
+scaler_deployments("scaler-stopped", items=[
+    {"metadata": {"name": "cluster-autoscaler", "namespace": "kube-system"}, "status": {"readyReplicas": 0}},
+    {"metadata": {"name": "my-cluster-autoscaler-proxy", "namespace": "kube-system"}, "status": {"readyReplicas": 1}},
+])
+
+case("scaler-gke-hosted", "One GKE node and no autoscaler object to read")
+nodes("scaler-gke-hosted", [node("acme-node-1", zone="us-east-1a", kubelet="v1.29.4-gke.1000", labels={"cloud.google.com/gke-nodepool": "default-pool"})])
+no_scaler("scaler-gke-hosted")
 
 case("zero-auto-mode", "Every node is cordoned, and one is managed by EKS Auto Mode")
 nodes("zero-auto-mode", [node("acme-node-1", cordoned=True, zone="us-east-1a", labels={"eks.amazonaws.com/compute-type": "auto"})])

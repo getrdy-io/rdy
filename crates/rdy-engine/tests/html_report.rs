@@ -365,8 +365,9 @@ fn untrusted_text_is_shown_as_text() -> TestResult {
 /// The HTML half of the M1-056 exit test (PC-43, carried by M1-062): the canaries of the JSON test never
 /// reach the page, and neither do canaries planted in the free text the page does show.
 ///
-/// The page shows the action log (M1-080) but not `observed` or `expected` yet (M1-081 adds them), so the
-/// `observed` canaries are vacuous until then: that test must keep passing when it lands. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
+/// The page shows the action log (M1-080) and `observed` and `expected` (M1-081), so the canaries of the
+/// JSON test are checked where they would show. `html_found_needed.rs` also asserts the redaction marker.
+/// A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
 /// registration of the proxy password is M1-091's.
 #[test]
 fn canaries_never_reach_the_page() -> TestResult {
@@ -424,6 +425,27 @@ fn canaries_never_reach_the_page() -> TestResult {
     for canary in CANARIES {
         assert!(!html.contains(canary), "{canary} reached the page");
     }
+    // The planted `observed` fields are shown, each with a marker where its secret was (M1-081).
+    let head = at(&html, "<span class=\"id\"><bdi>host.cpu</bdi></span>")?;
+    let list = &html[head..head + html[head..].find("</article>").ok_or("no end")?];
+    let found = &list[at(list, "<p class=\"label\">Found</p>")?..];
+    for (name, line) in [
+        ("env", "<bdi>Value</bdi>: <bdi>[REDACTED:secret_by_key:"),
+        // The writer cuts nesting past three levels, so the page shows the cut, as the JSON does.
+        ("kubeconfig", "<bdi>Users</bdi>: <bdi>[truncated]</bdi>"),
+        (
+            "kubeconfig_text",
+            "    token: [REDACTED:kubeconfig_credential:",
+        ),
+        ("stdout", "Authorization: Bearer [REDACTED:auth_header:"),
+        (
+            "cmdline",
+            "<dd><bdi>--token</bdi></dd>\n<dd><bdi>[REDACTED:",
+        ),
+    ] {
+        assert!(found.contains(line), "{name}: {line:?} is not in {found}");
+    }
+    assert!(found.matches("[REDACTED:").count() >= 4, "{found}");
     // The planted fields are still shown, with the secret replaced, so the test is not passing because
     // the page left the fields out.
     assert!(html.contains("web-01 password="));
@@ -485,7 +507,7 @@ fn text_from_the_report_inside_a_sentence_is_isolated() -> TestResult {
     doc["producer"]["version"] = json!("1.0\u{202e}x");
     let html = html_of(doc)?;
     assert!(html.contains("with rdy <bdi>1.0\u{202e}x</bdi>"));
-    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi></p>"));
+    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi> | source: <a href="));
     assert!(html.contains("<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy"));
     Ok(())
 }

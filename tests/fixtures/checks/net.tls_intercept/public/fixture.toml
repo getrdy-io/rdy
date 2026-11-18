@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-public"
+summary = "A chain the bundled public roots validate"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false
