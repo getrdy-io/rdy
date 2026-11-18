@@ -12,12 +12,14 @@ use rdy_spec::{Location, SpecError};
 use serde_json::Value;
 
 mod common;
+use common::NoProxyEnv;
 
 fn rdy(args: &[&str]) -> Output {
     common::quiet(
         Command::new(env!("CARGO_BIN_EXE_rdy"))
             .args(args)
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .output()
             .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
     )
