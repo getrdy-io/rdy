@@ -12,7 +12,7 @@ use super::level::{Label, Labels, Need, Standard, Version, need_of};
 use super::scc::uid_range;
 use super::*;
 
-fn params(spec: Value) -> K8sAdmission {
+pub(super) fn params(spec: Value) -> K8sAdmission {
     serde_json::from_value(spec).expect("the parameters parse")
 }
 
@@ -24,7 +24,7 @@ fn labels(pairs: &[(&str, &str)]) -> Labels {
     Labels::from_map(&map)
 }
 
-fn clean(finding: &Finding) {
+pub(super) fn clean(finding: &Finding) {
     for text in finding.fix.iter().chain(&finding.notes) {
         if let Err(error) = rdy_engine::fixtext::check(text) {
             panic!("fix text breaks the allow-list: {error}\n{text}");
@@ -33,7 +33,7 @@ fn clean(finding: &Finding) {
 }
 
 /// A gathered cluster with a readable namespace and nothing else found.
-fn plain(facts: NsFacts) -> Gathered {
+pub(super) fn plain(facts: NsFacts) -> Gathered {
     Gathered {
         namespace: Some("acme".to_owned()),
         ns: Some(Read::Ok(facts)),
@@ -42,12 +42,26 @@ fn plain(facts: NsFacts) -> Gathered {
         engines: Vec::new(),
         scc: None,
         rke2: false,
+        webhooks: Webhooks {
+            validating: Read::Ok(Listed::default()),
+            mutating: Read::Ok(Listed::default()),
+            services: Vec::new(),
+        },
+        policies: Policies {
+            policies: Read::Ok(Listed::default()),
+            bindings: None,
+        },
+        engine_policies: EnginePolicies::default(),
     }
 }
 
-fn facts(pairs: &[(&str, &str)]) -> NsFacts {
+pub(super) fn facts(pairs: &[(&str, &str)]) -> NsFacts {
     NsFacts {
         labels: labels(pairs),
+        all_labels: pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
         uid_range: None,
         label_sync_off: false,
     }
@@ -55,7 +69,7 @@ fn facts(pairs: &[(&str, &str)]) -> NsFacts {
 
 // ---- the level the product needs ----------------------------------------------------------------------------
 
-fn need(spec: Value) -> Option<Need> {
+pub(super) fn need(spec: Value) -> Option<Need> {
     need_of(&params(spec))
 }
 
@@ -363,6 +377,7 @@ fn the_worst_finding_is_the_message_and_the_rest_are_notes() {
             kinds: vec!["ClusterPolicy".to_owned()],
             more: 0,
             legacy_policies: Some(true),
+            lists: Vec::new(),
         }],
     }];
     let spec = json!({"uses": ["hostPath"]});
@@ -497,6 +512,9 @@ fn the_observed_value_is_complete_for_a_found_namespace() {
             "uid_range": null,
             "scc_on_cluster": null,
             "policy_engines": [],
+            "webhooks": {"validating": 0, "mutating": 0, "applying": []},
+            "validating_admission_policies": {"policies": 0, "denying": []},
+            "engine_policies": [],
         })
     );
     assert_eq!(

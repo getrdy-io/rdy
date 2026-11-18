@@ -181,6 +181,7 @@ pub enum Kind {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "schema", schemars(title = "rdy/v1 readiness spec"))]
+#[cfg_attr(feature = "schema", schemars(example = quickstart_example()))]
 #[non_exhaustive]
 pub struct Spec {
     /// Format version. Must be `rdy/v1`. Kept as text so the message for a wrong version can quote
@@ -214,6 +215,57 @@ impl Spec {
             bundle: None,
         }
     }
+}
+
+/// The quickstart spec as JSON. It is `examples/specs/acme-quickstart.yaml` written as JSON, and the
+/// spec reference page shows it as a whole example. A test in the xtask crate checks that the two are
+/// the same document, so the page cannot drift from the file.
+#[cfg(feature = "schema")]
+fn quickstart_example() -> Value {
+    serde_json::json!({
+        "apiVersion": "rdy/v1",
+        "kind": "Readiness",
+        "metadata": {"product": "acme-quickstart", "version": ">=1.0"},
+        "checks": [
+            {
+                "id": "host.cpu",
+                "min": 4,
+                "severity": "block",
+                "fix": "Use a machine with at least 4 CPU cores."
+            },
+            {
+                "id": "host.memory",
+                "min": "8Gi",
+                "severity": "block",
+                "fix": "Add RAM or choose a larger node class."
+            },
+            {
+                "id": "host.disk",
+                "name": "root",
+                "os": ["linux", "macos"],
+                "path": "/",
+                "min": "20Gi",
+                "severity": "warn",
+                "fix": "Free space on / or mount a larger volume."
+            },
+            {
+                "id": "host.disk",
+                "name": "system",
+                "os": ["windows"],
+                "path": "C:\\",
+                "min": "20Gi",
+                "severity": "warn",
+                "fix": "Free space on C: or use a larger disk."
+            },
+            {
+                "id": "net.egress",
+                "endpoints": ["registry.acme.example:443", "license.acme.example:443"],
+                "via_proxy": "auto",
+                "severity": "block",
+                "fix": "Ask your network team to allow these endpoints through the proxy."
+            }
+        ]
+    })
 }
 
 /// The keys of the top level of a spec, for did-you-mean. A test compares the lists of this section with

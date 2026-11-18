@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-handshake-never-completes"
+summary = "A peer that opens the connection and never answers the ClientHello, so the handshake stalls and is cut to its limit"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

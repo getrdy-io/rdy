@@ -132,3 +132,19 @@ where
 {
     run_on(unprivileged(), argv, out, err)
 }
+
+/// A validator for the `ErrorOutput` definition of the result schema (07 section 4.1).
+#[must_use]
+pub fn error_output_validator() -> jsonschema::Validator {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rdy-spec/schema/result.v1.schema.json");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let mut schema: serde_json::Value =
+        serde_json::from_str(&source).unwrap_or_else(|e| panic!("schema is not JSON: {e}"));
+    schema["$ref"] = serde_json::Value::String("#/$defs/ErrorOutput".into());
+    jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .unwrap_or_else(|e| panic!("schema does not build: {e}"))
+}

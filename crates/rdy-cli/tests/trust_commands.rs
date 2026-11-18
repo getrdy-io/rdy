@@ -253,12 +253,9 @@ fn add_with_yes_pins_and_list_shows_the_key_id_and_the_fingerprint_in_groups_of_
 
 #[test]
 fn other_commands_with_key_leave_the_store_unchanged() {
-    // `--key` trusts a key for one run and saves nothing (01 section 4.3). `run` and `verify` are not
-    // built yet (M1-126), so today they exit 70 before they look at the key. The spec and signature are
-    // the real ones that key `b` signed, so when M1-126 makes the commands real, the run goes through the
-    // key path. The exit code is pinned to 70 on purpose: this test turns red when M1-126 lands, and
-    // M1-126 must change it to assert the real run result and an unchanged store (12-progress carry
-    // note). Until then it checks that the store and its folder are what they were.
+    // `--key` trusts a key for one run and saves nothing (01 section 4.3). The spec and signature are the
+    // real ones that key `b` signed, so `run` and `verify` go through the key path (M1-126). Pinning `a`
+    // first makes the store worth comparing: it must be the same bytes after every command.
     if skip_as_root() {
         return;
     }
@@ -288,24 +285,37 @@ fn other_commands_with_key_leave_the_store_unchanged() {
         "acme-platform.yaml.minisig",
         &fixture("minisign-c/acme-platform.yaml.minisig"),
     );
-    for args in [
-        // Offline: the fixture spec lists net.egress, which must look nothing up (M1-095).
-        vec!["run", &spec, "--key", &b, "--no-network"],
-        vec![
-            "run",
-            &spec,
-            "--key",
-            &b,
-            "--allow-unsigned",
-            "--no-network",
-        ],
-        vec!["verify", &spec, "--key", &b],
+    for (args, verdicts) in [
+        // Offline: the fixture spec lists net.egress, which must look nothing up (M1-095). The verdict of a
+        // run depends on the machine, so a run is only held to "a verdict, not a refusal".
+        (
+            vec!["run", &spec, "--key", &b, "--no-network", "--no-report"],
+            vec![0, 1, 2],
+        ),
+        (
+            vec![
+                "run",
+                &spec,
+                "--key",
+                &b,
+                "--allow-unsigned",
+                "--no-network",
+                "--no-report",
+            ],
+            vec![0, 1, 2],
+        ),
+        (vec!["verify", &spec, "--key", &b], vec![0]),
     ] {
         let out = home.run(&args);
-        assert_eq!(
+        assert!(
+            verdicts.contains(&code(&out)),
+            "{args:?}: {}: {}",
             code(&out),
-            70,
-            "run and verify are stubs until M1-126, which must change this assertion: {args:?}: {}",
+            stderr(&out)
+        );
+        assert!(
+            stderr(&out).contains("WARNING: KEY NOT PINNED"),
+            "{args:?}: {}",
             stderr(&out)
         );
         let after = (

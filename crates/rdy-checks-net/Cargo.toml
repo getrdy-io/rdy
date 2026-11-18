@@ -16,6 +16,8 @@ futures-util = { workspace = true, features = ["alloc"] }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }
+# Reads the issuer and subject of the chain the server presented (M1-100). A parser: it opens no file or socket.
+x509-parser = { workspace = true }
 
 [dev-dependencies]
 # The test run applies the real probe policy and writes the real action log. `loopback` adds the TLS server
