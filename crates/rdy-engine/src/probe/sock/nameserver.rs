@@ -33,6 +33,10 @@
 //!   port is 53 by construction. A spec host at that address, any other port, and the IPv4-mapped and
 //!   NAT64 forms stay refused.
 //!
+//! **The message ID is the facade's.** It overwrites the first two bytes of the payload with a random
+//! 16-bit ID from the OS random source and returns it as [`UdpReply::query_id`], so the ID of a query is
+//! not something a check, a spec or the name can predict. The check compares the reply's ID with it.
+//!
 //! **Caps.** The reply is cut at [`MAX_NAMESERVER_UDP_REPLY`] over UDP and [`MAX_NAMESERVER_TCP_REPLY`]
 //! over TCP, and the cut is flagged. The whole call takes at most [`NAMESERVER_TIMEOUT`]. A silent
 //! server is [`ProbeError::Timeout`].
@@ -172,15 +176,21 @@ impl Probe {
                         return Err(ProbeError::denied(RULE_NS_ADDRESS, &what));
                     }
                     let left = timeout.saturating_sub(started.elapsed());
-                    hub.backend
+                    let id = random_id()?;
+                    let mut sent = payload.to_vec();
+                    sent[..2].copy_from_slice(&id.to_be_bytes());
+                    let mut reply = hub
+                        .backend
                         .dns_exchange(
                             SocketAddr::new(ip, NAMESERVER_PORT),
-                            payload,
+                            &sent,
                             transport,
                             transport.reply_cap(),
                             left,
                         )
-                        .await
+                        .await?;
+                    reply.query_id = Some(id);
+                    Ok(reply)
                 };
                 self.unless_ended(&what, work).await
             }
@@ -283,6 +293,16 @@ impl Probe {
             .cloned()
             .unwrap_or_default())
     }
+}
+
+/// A random 16-bit message ID from the OS random source. There is no weaker fallback.
+fn random_id() -> Result<u16, ProbeError> {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let mut bytes = [0_u8; 2];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| ProbeError::Io("the OS random source failed".to_owned()))?;
+    Ok(u16::from_be_bytes(bytes))
 }
 
 /// The nameservers of a `resolv.conf`, in order, at most [`MAX_NAMESERVERS`]. A line that is not

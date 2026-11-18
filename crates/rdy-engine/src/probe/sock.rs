@@ -134,6 +134,9 @@ pub struct UdpReply {
     pub truncated: bool,
     /// The address that answered.
     pub addr: IpAddr,
+    /// The message ID the facade put in the query it sent (`Probe::nameserver_exchange` picks a random
+    /// one and overwrites the caller's). `None` for a call that does not choose an ID.
+    pub query_id: Option<u16>,
 }
 
 impl UdpReply {
@@ -144,6 +147,7 @@ impl UdpReply {
             bytes,
             truncated: false,
             addr,
+            query_id: None,
         }
     }
 }

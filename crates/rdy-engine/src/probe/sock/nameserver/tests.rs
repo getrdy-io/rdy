@@ -908,3 +908,40 @@ async fn the_resolver_files_of_resolvconf_and_networkmanager_are_read_and_nothin
         );
     }
 }
+
+#[tokio::test]
+async fn the_facade_picks_the_message_id_and_returns_it() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<u16>::new()));
+    let log = Arc::clone(&seen);
+    let replay = resolv("nameserver 10.0.0.2\n").dns_server(addr("10.0.0.2:53"), move |q, _| {
+        log.lock()
+            .expect("lock")
+            .push(u16::from_be_bytes([q[0], q[1]]));
+        DnsScript::Answer(q.to_vec())
+    });
+    let hub = hub(replay, true);
+    let probe = probe(&hub, resolver(), Os::Linux);
+    let q = query("db.corp.example", 1);
+    assert_eq!(&q[..2], &[0x12, 0x34]);
+    let mut ids = Vec::new();
+    for transport in [DnsTransport::Udp, DnsTransport::Tcp] {
+        for _ in 0..8 {
+            let reply = probe
+                .nameserver_exchange(0, &q, transport)
+                .await
+                .expect("a reply");
+            ids.push(reply.query_id.expect("the id the facade sent"));
+        }
+    }
+    // What the server saw is what the facade reported, and it is not the caller's ID (a chance of 1 in
+    // 65536 per call, so sixteen calls all matching 0x1234 cannot happen by luck).
+    assert_eq!(*seen.lock().expect("lock"), ids);
+    assert!(ids.iter().any(|id| *id != 0x1234), "{ids:?}");
+    assert!(ids.windows(2).any(|w| w[0] != w[1]), "{ids:?}");
+    // The rest of the payload is untouched.
+    let echoed = probe
+        .nameserver_exchange(0, &q, DnsTransport::Udp)
+        .await
+        .expect("a reply");
+    assert_eq!(echoed.bytes[2..], q[2..]);
+}
