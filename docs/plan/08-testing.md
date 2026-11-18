@@ -575,7 +575,7 @@ Day-one rows, the target for `0.1.0`. Everything else is `none`.
 | OS | Linux aarch64, Ubuntu 24.04 | host, net | `live` | linux-arm64 leg |
 | OS | RHEL, Rocky, Alma 9 | host | `fixture` | env `all-pass` (origin `hand`) |
 | OS | RHEL, Rocky 8; Debian 12; Amazon Linux 2023; Alpine | host.os only | `fixture` | `checks/host.os/*` cases (`hand`) |
-| OS | macOS 15 arm64 and x86_64 | net | `live` | macos-15 and macos-15-intel legs. Host checks are `not_yet_on_os` |
+| OS | macOS 15 arm64 and x86_64 | net | `live` | macos-15 legs in ci.yml and `macos-intel.yml`. Host checks are `not_yet_on_os` |
 | OS | Windows Server 2022 x86_64 | net | `live` | windows-2022 leg. Host checks are `not_yet_on_os` |
 | Container runtime | Docker, containerd, Podman, CRI-O | host.container_runtime (M1-late) | `none` | |
 | Kubernetes | kind, oldest and newest minor upstream still patches (1.35 and 1.37 on 2026-10-30) | k8s | `live` | kind job |

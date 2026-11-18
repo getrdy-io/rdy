@@ -11,7 +11,8 @@ with "The job was not acquired by Runner". CI is the bottleneck for every PR. A 
 help and is not available: `getrdy-io` is a personal account, not an organization.
 
 ADR 0006 decision 8 recorded that `macos-15` (arm64) had never been assigned a runner. That was
-observed on the old organization. The repository was recreated on 2026-10-30 (ADR 0041). The founder
+observed on the old organization. The repository was recreated on 2026-10-30 (ADR 0041). Three runs of `macos-arm64.yml` on `macos-15`
+(44188943905, 44205402569 and 44210399715, on 2026-11-17 and 18) got a runner and passed. The founder
 decided to use the arm64 image again. 06 already allows this fallback for a slow Intel image.
 
 ## Decision
@@ -24,7 +25,8 @@ decided to use the arm64 image again. 06 already allows this fallback for a slow
 4. `ci-ok` still lists only the `test` matrix job, so no required check name changes.
 5. `macos-arm64.yml` is deleted. Its job is now a gating leg.
 6. Release builds are unchanged. `dist-workspace.toml` builds both macOS targets on `macos-15-intel`.
-   Release is not the PR gate.
+   Release is not the PR gate. Moving the release's aarch64 build to `macos-15` is follow-up work (a
+   ticket in correction 58).
 
 ## Risk
 
