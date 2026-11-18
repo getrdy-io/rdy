@@ -251,7 +251,7 @@ of each release:
 
 ```sh
 TAG=v0.1.0-alpha.3   # use the newest tag on the releases page
-curl --proto '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
 ```
 
 The script puts one binary in `~/.local/bin` (or `RDY_INSTALL_DIR`). It checks
