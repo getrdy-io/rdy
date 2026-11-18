@@ -485,11 +485,16 @@ tests policy.
   A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
   refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
   `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
-- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
-  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
-  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
-  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
-  to query such a nameserver reports Skipped, "nameserver in a refused range".
+- One narrow door in the table (built in M1-155, ADR 0051): `Probe::nameserver_exchange(index, payload,
+  transport)` serves the `SystemResolver` peer class. The facade reads the OS nameserver list itself
+  (`/etc/resolv.conf`, Linux, three entries at most, through its own read policy), and the check passes an
+  index and never an address. The port is 53, the transport is UDP or TCP, and the payload must be one
+  plain DNS query. An address that `is_unusable_peer` refuses is refused with the rule "nameserver in a
+  refused range", which the check reports as Skipped. The one exception is the exact IPv4 address
+  168.63.129.16, the nameserver on every Azure VM, and only because the OS list gave it. A spec host at
+  that address, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay
+  refused. Replies are capped (4 KiB UDP, 16 KiB TCP), the call times out at 3 s, and the `dns` log entry
+  has `server`, `name` and `rtype`, never the payload. `Probe::nameserver_count()` gives the count.
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
@@ -801,7 +806,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 
 | Hook | Answer |
 | --- | --- |
-| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers (`dns` entries) stay M2. Gates `host.time_sync`; direct `net.dns` waits for the nameserver class. |
+| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers are `nameserver_exchange` (M1-155, `dns` entries, see "Network"). Gates `host.time_sync`; direct `net.dns` uses the nameserver call. |
 | 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` built in M1-144 (declared as `PeerClass::UnixSocket`); named pipes M2. |
 | 3 Nonblocking record read | Accepted for M2: `read_records(path, max_records, max_bytes)` with `O_NONBLOCK` until `EAGAIN`, `/dev/kmsg` as the only allowed device. No M1-tier check needs it. |
 | 4 Exec | Accepted for M1: `Hung { pid }` without waiting, per-command stdout cap, declared extra search directories. |

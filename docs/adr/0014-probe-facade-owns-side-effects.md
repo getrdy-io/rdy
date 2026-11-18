@@ -30,7 +30,7 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
    `168.63.129.16/32`, the Azure host-services address. The Azure address serves the VM agent's settings
    and certificates, so no spec host may be it. It is also the Azure VM's `resolv.conf` nameserver, so
    the `SystemResolver` peer class may reach it on port 53, UDP and TCP, and only when the address came
-   from the OS nameserver list; ports 80 and 32526 stay refused. That class is not built yet (M1-155).
+   from the OS nameserver list; ports 80 and 32526 stay refused. Built in M1-155 as `Probe::nameserver_exchange` (ADR 0051).
    Name lookups through the OS resolver are unaffected, because the OS makes that connection. The
    decision and its residual are in 05.)
 3. **TLS verifier.** Net checks verify against the system root store loaded by the facade (PEM bundles

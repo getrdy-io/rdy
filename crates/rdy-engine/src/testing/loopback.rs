@@ -10,6 +10,7 @@
 //! | [`closed_port`] | connection refused |
 //! | [`NeverAccepts`] | a connect that succeeds and a read that never returns |
 //! | [`ResetAfterClientHello`] | a TCP reset right after the ClientHello (SNI filtering, legacy servers) |
+//! | [`DnsServer`] | a scripted DNS server on one loopback port, over UDP and TCP (M1-155) |
 //! | [`DualStack`] | a live IPv4 address and a dead IPv6 address on the same port |
 //!
 //! A black hole (a SYN with no answer) cannot exist on loopback, because the kernel completes the
@@ -30,11 +31,13 @@
 //!   not show it (ADR 0035).
 
 mod ca;
+mod dns;
 mod http;
 mod proxy;
 mod raw;
 
 pub use ca::{Leaf, TestCa, Validity};
+pub use dns::DnsServer;
 pub use http::{HttpOptions, HttpServer, Reply, Request, TlsVersion};
 pub use proxy::{ConnectProxy, ConnectRequest, ProxyMode};
 pub use raw::{

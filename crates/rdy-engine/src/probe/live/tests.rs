@@ -1489,3 +1489,86 @@ mod proc_links {
         drop(file);
     }
 }
+
+/// The live DNS socket code (M1-155), against a scripted server on loopback.
+mod dns_live {
+    use std::time::Duration;
+
+    use super::netio;
+    use crate::probe::ProbeError;
+    use crate::probe::sock::DnsTransport;
+    use crate::testing::loopback::DnsServer;
+
+    const LIMIT: Duration = Duration::from_millis(500);
+
+    fn echo_upper(query: &[u8], _: DnsTransport) -> Option<Vec<u8>> {
+        Some(query.iter().map(u8::to_ascii_uppercase).collect())
+    }
+
+    #[tokio::test]
+    async fn udp_and_tcp_both_exchange_one_message() {
+        let server = DnsServer::start(echo_upper).await.expect("server");
+        for transport in [DnsTransport::Udp, DnsTransport::Tcp] {
+            let reply = netio::dns(server.addr(), b"hello dns", transport, 4096, LIMIT)
+                .await
+                .expect("a reply");
+            assert_eq!(reply.bytes, b"HELLO DNS", "{transport:?}");
+            assert!(!reply.truncated);
+            assert_eq!(reply.addr, server.addr().ip());
+        }
+        assert_eq!(server.queries(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_tcp_reply_is_cut_at_the_cap_and_flagged() {
+        let server = DnsServer::start(|_, _| Some(vec![9; 3000]))
+            .await
+            .expect("server");
+        let reply = netio::dns(server.addr(), b"q", DnsTransport::Tcp, 1000, LIMIT)
+            .await
+            .expect("a reply");
+        assert_eq!(reply.bytes.len(), 1000);
+        assert!(reply.truncated);
+        let udp = netio::dns(server.addr(), b"q", DnsTransport::Udp, 1000, LIMIT)
+            .await
+            .expect("a reply");
+        assert_eq!(udp.bytes.len(), 1000);
+        assert!(udp.truncated);
+    }
+
+    #[tokio::test]
+    async fn a_silent_server_times_out_over_both_transports() {
+        let server = DnsServer::start(|_, _| None).await.expect("server");
+        for transport in [DnsTransport::Udp, DnsTransport::Tcp] {
+            let error = netio::dns(
+                server.addr(),
+                b"q",
+                transport,
+                4096,
+                Duration::from_millis(150),
+            )
+            .await
+            .expect_err("silence");
+            assert!(
+                matches!(error, ProbeError::Timeout),
+                "{transport:?}: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_closed_tcp_port_is_refused_and_an_empty_message_is_an_error() {
+        let closed = crate::testing::loopback::closed_port().await.expect("port");
+        let error = netio::dns(closed, b"q", DnsTransport::Tcp, 4096, LIMIT)
+            .await
+            .expect_err("refused");
+        assert!(matches!(error, ProbeError::ConnectionRefused), "{error:?}");
+        let server = DnsServer::start(|_, _| Some(Vec::new()))
+            .await
+            .expect("server");
+        let error = netio::dns(server.addr(), b"q", DnsTransport::Tcp, 4096, LIMIT)
+            .await
+            .expect_err("empty");
+        assert!(matches!(error, ProbeError::Io(_)), "{error:?}");
+    }
+}

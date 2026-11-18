@@ -7,6 +7,9 @@
 //! - [`Probe::unix_get`] sends one `GET` over a unix socket and returns the status and the body. It
 //!   serves the Docker and Podman Engine API of `host.container_runtime`.
 //!
+//! A third family, [`Probe::nameserver_exchange`] (M1-155), sends one DNS query to a nameserver the
+//! facade reads from the OS itself. Its rules are in [`nameserver`].
+//!
 //! Both go in the order the rest of the facade does: the handle is checked, the policy is applied, the
 //! backend runs, and the entry is closed. A refused call never reaches the backend. There is one
 //! action-log entry per call.
@@ -63,10 +66,17 @@ use super::{Probe, ProbeError, RULE_NO_NETWORK, refuse, settle};
 use crate::check::{Os, PeerClass};
 use crate::family::HostSet;
 
+pub mod nameserver;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
+
+pub use nameserver::{
+    DnsTransport, MAX_DNS_QUERY, MAX_NAMESERVER_TCP_REPLY, MAX_NAMESERVER_UDP_REPLY,
+    MAX_NAMESERVERS, NAMESERVER_FILES, NAMESERVER_PORT, NAMESERVER_TIMEOUT, RULE_NS_ADDRESS,
+    RULE_NS_INDEX, RULE_NS_PAYLOAD, RULE_NS_UNDECLARED,
+};
 
 /// The most time one UDP exchange may take, name lookup included.
 pub const UDP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -166,6 +176,8 @@ impl UnixResponse {
 #[derive(Debug, Default)]
 pub(super) struct Peers {
     hosts: OnceLock<HostSet>,
+    /// The OS nameserver list, read once by `nameserver_exchange` (M1-155).
+    pub(super) nameservers: OnceLock<Vec<IpAddr>>,
     #[cfg(test)]
     pub(super) timeout: OnceLock<Duration>,
 }

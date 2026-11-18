@@ -27,8 +27,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use crate::probe::replay::{
-    ApiRecord, Caps, DnsAnswer, Expect, Fixture, FixtureError, Manifest, NetScript, Origin, Replay,
-    RunPins, TcpScript,
+    ApiRecord, Caps, DnsAnswer, DnsScript, Expect, Fixture, FixtureError, Manifest, NetScript,
+    Origin, Replay, RunPins, TcpScript,
 };
 
 #[cfg(feature = "runtime")]
