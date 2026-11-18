@@ -2,9 +2,13 @@
 //! requests.
 //!
 //! The Pod list is read with `status.phase!=Succeeded,status.phase!=Failed`, because the read-only guard
-//! refuses a Pod list without a `status.phase` term. Of each pod only the node name, the phase and the
-//! requests are kept: a pod spec can hold literal environment values, and none of it is read.
+//! refuses a Pod list without a `status.phase` term. Each pod is read into [`PodRequests`], a type that
+//! names the node, the phase and the requests and nothing else: a pod spec can hold literal environment
+//! values, and serde drops them while parsing, so no full `Pod` is ever held (05 I4).
 //!
+//! A pod with pod-level `spec.resources.requests` (beta in Kubernetes 1.34) is charged that request for
+//! each resource it names, plus overhead, as the scheduler does; the container rule below covers the
+//! resources it does not name (ephemeral storage, always).
 //! The effective request of a pod is the larger of the init phase and the run phase, plus `spec.overhead`.
 //! The run phase is the sum of the app containers and the restartable init containers (sidecars). A
 //! regular init container runs with the sidecars that started before it, and a sidecar keeps its request
@@ -21,12 +25,12 @@
 
 use std::collections::BTreeMap;
 
-use k8s_openapi::api::core::v1::{Container, Pod, PodSpec};
 use rdy_spec::check::K8sResources;
 use serde_json::{Value, json};
 
 use super::facts::{NodeFacts, RESOURCES, Resource};
 use super::judge::human;
+use super::pod::{ContainerRequests, PodRequests, Quantities};
 use crate::namespace::amount::{Amount, show};
 
 /// The field selector every Pod list carries (the guard requires a `status.phase` term).
@@ -78,16 +82,10 @@ pub(super) struct PodsRead {
 
 impl PodsRead {
     /// Adds the pods of one list.
-    pub(super) fn add(&mut self, pods: &[Pod]) {
+    pub(super) fn add(&mut self, pods: &[PodRequests]) {
         for pod in pods {
-            let Some(spec) = pod.spec.as_ref() else {
-                continue;
-            };
-            let node = spec.node_name.as_deref().unwrap_or_default();
-            let phase = pod
-                .status
-                .as_ref()
-                .and_then(|status| status.phase.as_deref());
+            let node = pod.node_name.as_str();
+            let phase = pod.phase.as_deref();
             // The server already left these out. A fixture or a server that did not is judged the same.
             if node.is_empty() || matches!(phase, Some("Succeeded" | "Failed")) {
                 continue;
@@ -98,11 +96,11 @@ impl PodsRead {
                 .entry(node.to_owned())
                 .or_insert_with(Usage::new);
             usage.pods += 1;
-            usage.cpu = usage.cpu.plus(effective(spec, "cpu", &mut bad));
-            usage.memory = usage.memory.plus(effective(spec, "memory", &mut bad));
+            usage.cpu = usage.cpu.plus(effective(pod, "cpu", &mut bad));
+            usage.memory = usage.memory.plus(effective(pod, "memory", &mut bad));
             usage.ephemeral = usage
                 .ephemeral
-                .plus(effective(spec, "ephemeral-storage", &mut bad));
+                .plus(effective(pod, "ephemeral-storage", &mut bad));
             self.seen += 1;
             self.unreadable += usize::from(bad);
         }
@@ -127,46 +125,41 @@ pub(super) enum FreeRead {
     NotEvaluated { why: String, grants: Vec<String> },
 }
 
-/// One request of a container. Text that is not a quantity counts as zero and sets `bad`.
-fn request(container: &Container, key: &str, bad: &mut bool) -> Amount {
-    let Some(quantity) = container
-        .resources
-        .as_ref()
-        .and_then(|resources| resources.requests.as_ref())
-        .and_then(|requests| requests.get(key))
-    else {
-        return Amount::zero();
-    };
-    Amount::parse(&quantity.0).unwrap_or_else(|| {
+/// A quantity of `key` in `map`. Text that is not a quantity counts as zero and sets `bad`.
+fn quantity(map: &Quantities, key: &str, bad: &mut bool) -> Option<Amount> {
+    let text = &map.get(key)?.0;
+    Some(Amount::parse(text).unwrap_or_else(|| {
         *bad = true;
         Amount::zero()
-    })
+    }))
+}
+
+/// One request of a container.
+fn request(container: &ContainerRequests, key: &str, bad: &mut bool) -> Amount {
+    quantity(&container.requests, key, bad).unwrap_or_else(Amount::zero)
 }
 
 /// The effective request of a pod for one resource.
-fn effective(spec: &PodSpec, key: &str, bad: &mut bool) -> Amount {
-    let apps = spec
+fn effective(pod: &PodRequests, key: &str, bad: &mut bool) -> Amount {
+    let overhead = quantity(&pod.overhead, key, bad).unwrap_or_else(Amount::zero);
+    if let Some(whole) = quantity(&pod.pod_level, key, bad) {
+        return whole.plus(overhead);
+    }
+    let apps = pod
         .containers
         .iter()
         .fold(Amount::zero(), |sum, c| sum.plus(request(c, key, bad)));
     let mut sidecars = Amount::zero();
     let mut peak = Amount::zero();
-    for init in spec.init_containers.iter().flatten() {
+    for init in &pod.init_containers {
         let asked = request(init, key, bad);
-        if init.restart_policy.as_deref() == Some("Always") {
+        if init.sidecar {
             sidecars = sidecars.plus(asked);
             peak = peak.max(sidecars);
         } else {
             peak = peak.max(sidecars.plus(asked));
         }
     }
-    let overhead = match spec.overhead.as_ref().and_then(|map| map.get(key)) {
-        Some(quantity) => Amount::parse(&quantity.0).unwrap_or_else(|| {
-            *bad = true;
-            Amount::zero()
-        }),
-        None => Amount::zero(),
-    };
     peak.max(apps.plus(sidecars)).plus(overhead)
 }
 

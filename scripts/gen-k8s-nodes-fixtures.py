@@ -188,7 +188,7 @@ PODS_PATH = "/api/v1/pods"
 PHASE = "status.phase!=Succeeded,status.phase!=Failed"
 
 
-def container(name, cpu=None, memory=None, ephemeral=None, sidecar=False):
+def container(name, cpu=None, memory=None, ephemeral=None, sidecar=False, env=None):
     requests = {}
     if cpu:
         requests["cpu"] = cpu
@@ -199,10 +199,12 @@ def container(name, cpu=None, memory=None, ephemeral=None, sidecar=False):
     out = {"name": name, "image": "registry.acme.example/acme/app:1", "resources": {"requests": requests}}
     if sidecar:
         out["restartPolicy"] = "Always"
+    if env:
+        out["env"] = env
     return out
 
 
-def pod(name, node_name, containers, init=None, phase="Running", overhead=None):
+def pod(name, node_name, containers, init=None, phase="Running", overhead=None, pod_level=None):
     spec = {"containers": containers}
     if node_name:
         spec["nodeName"] = node_name
@@ -210,6 +212,8 @@ def pod(name, node_name, containers, init=None, phase="Running", overhead=None):
         spec["initContainers"] = init
     if overhead:
         spec["overhead"] = overhead
+    if pod_level:
+        spec["resources"] = {"requests": pod_level}
     return {"metadata": {"name": name, "namespace": "app"}, "spec": spec, "status": {"phase": phase}}
 
 
@@ -495,6 +499,32 @@ pods("free-bad-request", [
     pod("web-1", "acme-node-1", [container("main", "500m", "512Mi")]),
     pod("odd-1", "acme-node-2", [container("main", "lots", "512Mi")]),
 ])
+
+case("free-pod-level", "One 4 CPU node and a pod whose pod-level request (3 CPU) is above its containers' (500m)")
+nodes("free-pod-level", [node("acme-node-1", cpu="4", memory="8Gi", ephemeral="100Gi", pods="110", cap_cpu="4",
+                              cap_memory="8Gi", zone="us-east-1a")])
+pods("free-pod-level", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "256Mi", ephemeral="1Gi")],
+        overhead={"cpu": "250m"}, pod_level={"cpu": "3", "memory": "1Gi"}),
+])
+
+CANARY = "canary-env-value-0a1b2c3d4e5f"
+case("free-canary", "A pod whose environment holds a credential-looking value that must never be held or shown")
+nodes("free-canary", healthy())
+pods("free-canary", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "512Mi", env=[
+        {"name": "DB_PASSWORD", "value": CANARY},
+        {"name": "TOKEN", "valueFrom": {"secretKeyRef": {"name": "acme-secret", "key": "token"}}},
+    ])]),
+])
+
+case("free-many-nodes", "Twenty-six healthy nodes and a cut pod list: more nodes than are listed one by one")
+nodes("free-many-nodes", [node(f"acme-node-{i + 1}", zone=ZONES[i % 3]) for i in range(26)])
+pods("free-many-nodes", [pod("web-1", "acme-node-1", [container("main", "500m", "512Mi")])], cont="tok-more")
+
+case("free-odd-name", "One node whose name is not a DNS name and a cut pod list")
+nodes("free-odd-name", [node("Acme_Node_1", zone="us-east-1a")])
+pods("free-odd-name", [pod("web-1", "Acme_Node_1", [container("main", "500m", "512Mi")])], cont="tok-more")
 
 # ---- hostile text -----------------------------------------------------------------------------------------------------------
 case("hostile", "Node names, labels and quantities that try to reach the terminal or a command")

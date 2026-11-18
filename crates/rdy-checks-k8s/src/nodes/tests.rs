@@ -706,6 +706,84 @@ async fn a_request_that_is_not_a_quantity_makes_a_pass_partial() {
 }
 
 #[tokio::test]
+async fn a_pod_level_request_is_charged_for_the_resources_it_names() {
+    let rig = rig("free-pod-level");
+    // CPU: pod level 3 plus 250m overhead, not the container's 500m. Ephemeral storage is not a pod level
+    // resource, so the container's 1Gi stands.
+    let finding = rig
+        .finding(json!({"free": {"cpu": 1, "ephemeral": "10Gi"}}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.observed["free"]["cpu"]["requested"], "3250m");
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "750m");
+    assert_eq!(finding.observed["free"]["ephemeral"]["requested"], "1Gi");
+    rig.audit();
+}
+
+#[tokio::test]
+async fn an_environment_value_is_never_held_or_shown() {
+    let rig = rig("free-canary");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.observed["free"]["pods_read"], 1);
+    let result = serde_json::to_string(&engine(&rig, finding.clone(), None)).expect("a result");
+    let shown = format!("{finding:?} {result}");
+    assert!(!shown.contains("canary-env-value"), "{shown}");
+    assert!(!shown.contains("DB_PASSWORD"), "{shown}");
+    rig.audit();
+    // The type that holds a pod cannot hold it either, whatever the server sends.
+    let pod: PodRequests = serde_json::from_value(json!({
+        "metadata": {"name": "web-1", "annotations": {"note": "canary-env-value"}},
+        "spec": {
+            "nodeName": "n1",
+            "containers": [{"name": "c", "env": [{"name": "X", "value": "canary-env-value"}],
+                "resources": {"requests": {"cpu": "1"}}}],
+            "volumes": [{"name": "v", "secret": {"secretName": "canary-env-value"}}]
+        }
+    }))
+    .expect("a pod");
+    assert!(!format!("{pod:?}").contains("canary-env-value"), "{pod:?}");
+    assert_eq!(pod.containers.len(), 1);
+}
+
+#[tokio::test]
+async fn more_counted_nodes_than_are_listed_one_by_one_is_not_evaluated() {
+    let rig = rig("free-many-nodes");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("26 counted nodes are more than the 25"),
+        "{}",
+        partial_note(&finding)
+    );
+    assert_eq!(finding.observed["free"], "not evaluated");
+    // The nodes, the cut cluster-wide list (two pages), and no list per node.
+    assert_eq!(rig.paths(), [NODES, PODS, PODS]);
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_node_name_that_is_not_a_dns_name_is_never_put_in_a_selector() {
+    let rig = rig("free-odd-name");
+    let finding = rig
+        .finding(json!({"min_ready": 1, "free": {"cpu": 1}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("cannot go into a field selector"),
+        "{}",
+        partial_note(&finding)
+    );
+    assert_eq!(finding.observed["free"], "not evaluated");
+    assert_eq!(rig.paths(), [NODES, PODS, PODS]);
+    rig.audit();
+}
+
+#[tokio::test]
 async fn a_spec_without_free_never_lists_pods() {
     let rig = rig("healthy");
     let finding = rig.finding(json!({"min_ready": 3})).await;

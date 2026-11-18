@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::{Node, Pod};
+use k8s_openapi::api::core::v1::Node;
 use kube::api::ListParams;
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
@@ -51,6 +51,7 @@ mod facts;
 mod fix;
 mod free;
 mod judge;
+mod pod;
 
 #[cfg(test)]
 mod tests;
@@ -60,6 +61,7 @@ mod unit_tests;
 use facts::NodeFacts;
 use free::{FreeRead, PHASE_SELECTOR, PodsRead};
 use judge::{Assessment, Scaler};
+use pod::PodRequests;
 
 /// Below this much time left, the optional reads are skipped.
 const MIN_LEFT: Duration = Duration::from_millis(500);
@@ -248,7 +250,11 @@ impl NodesCheck {
             return not_evaluated("the check ran out of time".to_owned(), Vec::new());
         }
         let params = ListParams::default().fields(PHASE_SELECTOR);
-        let all = sort(mapper, list_all(&client.all::<Pod>(), &params).await, |l| l)?;
+        let all = sort(
+            mapper,
+            list_all(&client.all::<PodRequests>(), &params).await,
+            |l| l,
+        )?;
         let listed = match all {
             Read::Ok(listed) => listed,
             Read::Forbidden => {
@@ -289,7 +295,11 @@ impl NodesCheck {
             }
             let params =
                 ListParams::default().fields(&format!("spec.nodeName={name},{PHASE_SELECTOR}"));
-            match sort(mapper, list_all(&client.all::<Pod>(), &params).await, |l| l)? {
+            match sort(
+                mapper,
+                list_all(&client.all::<PodRequests>(), &params).await,
+                |l| l,
+            )? {
                 Read::Ok(one) if !one.partial => read.add(&one.items),
                 Read::Ok(_) => {
                     return not_evaluated(
