@@ -14,7 +14,12 @@ use crate::tls_intercept::{self, TlsInterceptCheck};
 mod tests;
 
 /// Every net check this build lists, in catalog order (03 section 3).
-static CHECKS: [&CheckInfo; 4] = [&egress::INFO, &proxy::INFO, &mtu::INFO, &tls_intercept::INFO];
+static CHECKS: [&CheckInfo; 4] = [
+    &egress::INFO,
+    &proxy::INFO,
+    &mtu::INFO,
+    &tls_intercept::INFO,
+];
 
 /// The `net` family.
 ///
