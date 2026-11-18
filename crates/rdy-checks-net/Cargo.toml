@@ -13,6 +13,8 @@ include = ["src/**", "Cargo.toml", "LICENSE", "NOTICE", "clippy.toml"]
 # Probes the endpoints of one check at once on the check's own task: `buffered` polls them in place, so a
 # check starts no task or thread of its own (02 lint wall). In the allowlist of ci/check-crate-deps.toml.
 futures-util = { workspace = true, features = ["alloc"] }
+# Builds the queries and reads the replies of the per-nameserver lookups (M1-155). A codec: no `std`, no resolver, no socket.
+hickory-proto = { workspace = true }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }

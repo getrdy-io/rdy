@@ -19,31 +19,32 @@ use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
 use super::judge::{Answer, Looked, Problem, Rule, Source};
+use super::split;
 use super::*;
 
 // ---- the harness --------------------------------------------------------------------------------
 
-struct Ran {
-    outcome: CheckOutcome,
-    ctx: CheckContext,
-    entry: CheckSpec,
-    run: TestRun,
+pub(super) struct Ran {
+    pub(super) outcome: CheckOutcome,
+    pub(super) ctx: CheckContext,
+    pub(super) entry: CheckSpec,
+    pub(super) run: TestRun,
 }
 
 impl Ran {
-    fn finding(&self) -> &Finding {
+    pub(super) fn finding(&self) -> &Finding {
         self.outcome.as_ref().expect("a finding")
     }
 
-    fn name(&self, at: usize) -> &Value {
+    pub(super) fn name(&self, at: usize) -> &Value {
         &self.finding().observed["names"][at]
     }
 
-    fn result(&self) -> CheckResult {
+    pub(super) fn result(&self) -> CheckResult {
         map_outcome(&INFO, &self.entry, &self.ctx, self.outcome.clone(), 0, 0)
     }
 
-    fn everything_text(&self) -> String {
+    pub(super) fn everything_text(&self) -> String {
         let finding = self.finding();
         format!(
             "{} {} {:?} {:?} {:?}",
@@ -80,7 +81,7 @@ fn check_of(entry: &CheckSpec) -> DnsCheck {
     }
 }
 
-async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Need]) -> Ran {
+pub(super) async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Need]) -> Ran {
     let entry = entry(&names, &extra);
     let check = check_of(&entry);
     let ctx = run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts());
@@ -94,18 +95,18 @@ async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Nee
     }
 }
 
-async fn run_on(replay: Replay, names: Value, extra: Value) -> Ran {
+pub(super) async fn run_on(replay: Replay, names: Value, extra: Value) -> Ran {
     run_with(TestRun::new(replay), names, extra, Os::Linux, NET).await
 }
 
 /// The machine of a fixture case.
-fn case(name: &str) -> Replay {
+pub(super) fn case(name: &str) -> Replay {
     Fixture::load(&fixtures_dir(), &format!("checks/net.dns/{name}"))
         .expect("the fixture loads")
         .into_replay()
 }
 
-const NET: &[Need] = &[Need::Network];
+pub(super) const NET: &[Need] = &[Need::Network];
 
 // ---- found --------------------------------------------------------------------------------------
 
@@ -293,7 +294,7 @@ async fn a_name_that_reads_as_an_option_is_rejected_before_any_command_runs() {
             [Need::Network],
             HostSet::empty(),
         );
-        let looked = look_up(&ctx, bad).await.expect("a result, not an error");
+        let looked = look_up(&ctx, bad, 0).await.expect("a result, not an error");
         assert!(
             matches!(looked.answer, Answer::Rejected(_)),
             "{bad:?}: {:?}",
@@ -318,7 +319,14 @@ async fn a_rejected_name_blocks_with_its_own_text_and_is_never_sent() {
         ),
         ..Looked::new("-x")
     }];
-    let finding = judge::judge(Os::Linux, &rules, &looked, Duration::from_millis(500), None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &looked,
+        Duration::from_millis(500),
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
     assert!(
         finding.message.contains("not a valid name"),
@@ -485,16 +493,37 @@ fn a_slow_lookup_warns_and_the_boundary_passes() {
         found("a.acme.test", &["192.0.2.1"], 500),
         found("b.acme.test", &["192.0.2.2"], 501),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Warn);
     assert_eq!(
         finding.message,
         "`b.acme.test` took 501 ms to resolve, above 500 ms"
     );
-    let ok = judge::judge(Os::Linux, &rules[..1], &at[..1], MAX, None);
+    let ok = judge::judge(
+        Os::Linux,
+        &rules[..1],
+        &at[..1],
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(ok.level, Level::Pass);
     // The spec's own limit replaces the default.
-    let loose = judge::judge(Os::Linux, &rules, &at, Duration::from_secs(2), None);
+    let loose = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        Duration::from_secs(2),
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(loose.level, Level::Pass);
 }
 
@@ -508,7 +537,14 @@ fn a_failure_outranks_a_slow_answer() {
         found("a.acme.test", &["192.0.2.1"], 900),
         with("b.acme.test", Answer::NotFound),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
     assert!(finding.notes.iter().any(|n| n.contains("took 900 ms")));
 }
@@ -518,7 +554,14 @@ fn many_failures_are_named_five_at_a_time() {
     let names: Vec<String> = (0..8).map(|n| format!("n{n}.acme.test")).collect();
     let rules: Vec<Rule> = names.iter().map(|n| rule(n, &[], None)).collect();
     let at: Vec<Looked> = names.iter().map(|n| with(n, Answer::NotFound)).collect();
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert!(finding.message.starts_with("8 of 8 names do not resolve: "));
     assert!(
         finding.message.ends_with("and 3 more"),
@@ -540,7 +583,14 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
         found("a.acme.test", &["192.0.2.1"], 10),
         with("b.acme.test", Answer::NotTried),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Pass);
     assert_eq!(finding.message, "1 of 2 names resolve");
     let partial = finding.partial.expect("partial");
@@ -551,6 +601,7 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
         &[with("b.acme.test", Answer::NotTried)],
         MAX,
         None,
+        &split::Machine::default(),
     );
     assert_eq!(none.message, "no name was looked up");
 }
@@ -559,7 +610,14 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
 fn a_range_of_the_other_family_never_matches() {
     let rules = [rule("a.acme.test", &["10.0.0.0/8"], None)];
     let at = [found("a.acme.test", &["2001:db8::1"], 1)];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
 }
 
@@ -596,7 +654,14 @@ fn text_from_the_machine_in_a_note_is_escaped() {
         "a.acme.test",
         Answer::Failed("bad\u{1b}[2Jtext".to_owned()),
     )];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     let all = format!("{:?}", finding.notes);
     assert!(!all.contains('\u{1b}'), "{all}");
 }
@@ -616,6 +681,7 @@ fn sources_have_stable_ids() {
         }],
         MAX,
         None,
+        &split::Machine::default(),
     );
     assert_eq!(v.observed["names"][0]["source"], "rdy_resolver");
     assert_eq!(
@@ -809,7 +875,14 @@ fn a_timeout_note_names_the_name_and_matches_the_source() {
             answer: Answer::Timeout,
             ..Looked::new("a.acme.test")
         }];
-        let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+        let finding = judge::judge(
+            Os::Linux,
+            &rules,
+            &at,
+            MAX,
+            None,
+            &split::Machine::default(),
+        );
         let note = &finding.notes[0];
         assert!(note.starts_with("`a.acme.test` timed out: "), "{note}");
         assert!(!note.contains("getent"), "{note}");

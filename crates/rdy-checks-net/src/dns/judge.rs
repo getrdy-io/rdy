@@ -9,7 +9,9 @@ use serde_json::{Value, json};
 
 use rdy_engine::probe::is_unusable_peer;
 
+use super::direct::NsResult;
 use super::parse::{self, Resolver};
+use super::split::{self, Machine};
 use super::{NOT_INSTALLED, PER_NAME};
 use crate::text::code;
 
@@ -82,6 +84,8 @@ pub(super) struct Looked {
     pub(super) took: Duration,
     /// Why the fallback was used, on Linux.
     pub(super) fallback: Option<String>,
+    /// What each nameserver of the OS list said, in list order. Empty when none was asked.
+    pub(super) direct: Vec<NsResult>,
 }
 
 impl Looked {
@@ -92,6 +96,7 @@ impl Looked {
             answer: Answer::NotTried,
             took: Duration::ZERO,
             fallback: None,
+            direct: Vec::new(),
         }
     }
 }
@@ -183,6 +188,28 @@ pub(super) fn fix_for(os: Os, problem: Problem, name: &str, resolver: Option<Res
     }
 }
 
+/// The fix for a name that was not found: the generic one, with the nameservers that said NXDOMAIN named
+/// by position when direct answers exist ("nameserver 2 answered NXDOMAIN").
+fn not_found_fix(os: Os, l: &Looked, resolver: Option<Resolver>) -> String {
+    let generic = fix_for(os, Problem::NotFound, &l.name, resolver);
+    let nx = split::nxdomain_positions(l);
+    if nx.is_empty() {
+        return generic;
+    }
+    let who: Vec<String> = nx.iter().map(ToString::to_string).collect();
+    let plural = if nx.len() == 1 {
+        "nameserver"
+    } else {
+        "nameservers"
+    };
+    format!(
+        "{} does not resolve: {plural} {} answered NXDOMAIN. Ask the DNS team for a conditional forwarder for {}, or add a temporary line to `/etc/hosts`.",
+        code(&l.name),
+        who.join(", "),
+        code(zone_of(&l.name))
+    )
+}
+
 /// The ranges an answer must be in, written for a message.
 fn ranges(list: &[Cidr]) -> String {
     list.iter()
@@ -229,6 +256,7 @@ pub(super) fn judge(
     looked: &[Looked],
     max_latency: Duration,
     resolver: Option<Resolver>,
+    machine: &Machine,
 ) -> Finding {
     let mut broken: Vec<(&Looked, Problem)> = Vec::new();
     let mut misplaced: Vec<(&Looked, String)> = Vec::new();
@@ -282,6 +310,10 @@ pub(super) fn judge(
         }
     }
 
+    let found = split::assess(rules, looked, machine, max_latency);
+    slow.extend(found.warns.iter().cloned());
+    notes.extend(found.notes.iter().cloned());
+
     let total = looked.len();
     let tried = total - not_tried;
     let mut finding = if broken.is_empty() && misplaced.is_empty() && slow.is_empty() {
@@ -320,7 +352,7 @@ pub(super) fn judge(
     };
 
     finding = finding
-        .with_observed(observed(looked, resolver))
+        .with_observed(observed(looked, resolver, machine))
         .with_expected(expected(rules, max_latency));
 
     let mut fixes: Vec<String> = Vec::new();
@@ -330,7 +362,10 @@ pub(super) fn judge(
             continue;
         }
         seen.push(*problem);
-        fixes.push(fix_for(os, *problem, &l.name, resolver));
+        fixes.push(match problem {
+            Problem::NotFound => not_found_fix(os, l, resolver),
+            _ => fix_for(os, *problem, &l.name, resolver),
+        });
     }
     if let Some((l, why)) = misplaced.first() {
         fixes.push(format!(
@@ -338,6 +373,11 @@ pub(super) fn judge(
             code(&l.name),
             code(zone_of(&l.name))
         ));
+    }
+    for fix in &found.fixes {
+        if !fixes.contains(fix) {
+            fixes.push(fix.clone());
+        }
     }
     if !fixes.is_empty() {
         finding = finding.with_fix(fixes.join(" "));
@@ -351,13 +391,19 @@ pub(super) fn judge(
     for note in notes {
         finding = finding.with_note(note);
     }
+    let mut partial: Vec<String> = Vec::new();
     if not_tried > 0 {
-        finding = finding.with_partial(Partial::new(
-            Vec::new(),
-            format!(
-                "{not_tried} of {total} names were not looked up: the check ran out of time before it reached them"
-            ),
+        partial.push(format!(
+            "{not_tried} of {total} names were not looked up: the check ran out of time before it reached them"
         ));
+    }
+    for pos in &found.skipped {
+        partial.push(format!(
+            "nameserver {pos} was not queried directly: nameserver in a refused range"
+        ));
+    }
+    if !partial.is_empty() {
+        finding = finding.with_partial(Partial::new(Vec::new(), partial.join("; ")));
     }
     finding
 }
@@ -415,9 +461,12 @@ fn fallback_note(why: &str) -> String {
     )
 }
 
-fn observed(looked: &[Looked], resolver: Option<Resolver>) -> Value {
+fn observed(looked: &[Looked], resolver: Option<Resolver>, machine: &Machine) -> Value {
     let names: Vec<Value> = looked.iter().map(name_json).collect();
     let mut out = json!({ "names": names });
+    if let Some(direct) = split::machine_json(machine) {
+        out["direct"] = direct;
+    }
     if let Some(r) = resolver {
         out["resolver"] = json!({
             "timeout_s": r.timeout,
@@ -459,6 +508,9 @@ fn name_json(l: &Looked) -> Value {
     }
     if let Some(why) = &l.fallback {
         out["fallback"] = json!(why);
+    }
+    if !l.direct.is_empty() {
+        out["nameservers"] = split::ns_json(&l.direct);
     }
     out
 }

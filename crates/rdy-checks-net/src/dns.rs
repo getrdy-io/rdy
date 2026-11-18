@@ -1,8 +1,13 @@
 //! `net.dns`: do the required names resolve the way this machine's own software would resolve them
 //! (03 section 3, M1-153).
 //!
-//! This version has the **system answer** only. The per-nameserver lookups, the `resolv.conf` and
-//! `nsswitch.conf` analysis and the split-horizon comparison are M1-155.
+//! The **system answer** is M1-153. The **direct lookups** are M1-155: on Linux each name is also asked of
+//! each nameserver of the OS list (`direct`, `wire`), the answers are compared with the system answer
+//! (`split`: split horizon, a slow or dead first nameserver, NXDOMAIN), and `/etc/nsswitch.conf` and
+//! `/etc/resolv.conf` are read for the `sss`, mDNS, stub and missing-`dns` findings. A nameserver is named by
+//! its position in the list and never by address (INV-11, ADR 0051). A nameserver in a refused range (the
+//! GCE metadata address) is skipped with the facade's words, "nameserver in a refused range", and the
+//! system answer is still reported. macOS and Windows have no nameserver source yet (M2-010).
 //!
 //! **Source.** On Linux the answer is `/usr/bin/getent ahosts -- <name>` through the probe facade's
 //! `exec`, because glibc-linked products resolve through `nsswitch.conf` (mDNS, sssd, `/etc/hosts`
@@ -54,10 +59,15 @@ use rdy_spec::check::{Cidr, NetDns};
 use self::judge::Rule;
 use crate::text::{short, soft};
 
+mod direct;
 mod judge;
 mod parse;
+mod split;
+#[cfg(test)]
+mod direct_tests;
 #[cfg(test)]
 mod tests;
+mod wire;
 
 /// How many names are looked up at once.
 const PARALLEL: usize = 8;
@@ -78,11 +88,15 @@ const MIN_TO_START: Duration = Duration::from_secs(1);
 /// check never connects, so the number carries no meaning.
 const HOST_SET_PORT: u16 = 443;
 
+/// The most time the direct lookups of one name take (three nameservers at 3 s, and a second question).
+const DIRECT_PER_NAME: Duration = Duration::from_secs(10);
+
 const RESOLV_CONF: &str = "/etc/resolv.conf";
+const NSSWITCH_CONF: &str = "/etc/nsswitch.conf";
 
 /// The static facts about `net.dns` (03 section 3).
 ///
-/// The `resolv.conf` reads are only for the evidence of a timeout. `/etc/resolv.conf` is often a link to
+/// The `resolv.conf` read is for the evidence of a timeout and the stub and count notes; `nsswitch.conf` is for the `hosts:` findings. `/etc/resolv.conf` is often a link to
 /// one of the two `systemd-resolved` files, and the read policy judges the real path too.
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "net.dns",
@@ -104,6 +118,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         RESOLV_CONF,
         "/run/systemd/resolve/resolv.conf",
         "/run/systemd/resolve/stub-resolv.conf",
+        NSSWITCH_CONF,
     ],
     statfs: &[],
     env: &[],
@@ -113,7 +128,9 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         max_stdout: 64 * 1024,
         env: &[],
     }],
-    peers: &[PeerClass::SpecHosts],
+    // `SpecHosts`: the names the check looks up and asks of each nameserver are its own. `SystemResolver`:
+    // the nameserver list is the facade's, read by index (M1-155, ADR 0051).
+    peers: &[PeerClass::SpecHosts, PeerClass::SystemResolver],
 };
 
 /// `net.dns`, built from its spec entry.
@@ -177,21 +194,41 @@ impl Check for DnsCheck {
             if !ctx.has(&Need::Network) {
                 return Err(CheckError::MissingNeed(Need::Network));
             }
+            let linux = ctx.os() == Os::Linux;
+            let resolv = if linux {
+                read_text(ctx, RESOLV_CONF).await?
+            } else {
+                None
+            };
+            let mut machine = split::Machine::default();
+            if linux {
+                machine.hosts = read_text(ctx, NSSWITCH_CONF)
+                    .await?
+                    .and_then(|t| parse::nsswitch_hosts(&t));
+                machine.facts = resolv.as_deref().map(parse::resolv_facts);
+                match nameserver_count(ctx).await? {
+                    Ok(n) => machine.asked = n,
+                    Err(why) => machine.list_problem = Some(why),
+                }
+                if machine.asked == 0 && machine.list_problem.is_none() && resolv.is_some() {
+                    machine.list_problem =
+                        Some("/etc/resolv.conf has no nameserver line".to_owned());
+                }
+            }
+            let asked = machine.asked;
             // Built first and boxed, so the stream does not borrow through a closure (as in net.egress).
             let pending: Vec<BoxFuture<'a, Result<judge::Looked, CheckError>>> = self
                 .rules
                 .iter()
                 .map(|rule| -> BoxFuture<'a, Result<judge::Looked, CheckError>> {
-                    Box::pin(look_up(ctx, &rule.name))
+                    Box::pin(look_up(ctx, &rule.name, asked))
                 })
                 .collect();
             let looked: Vec<Result<judge::Looked, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let looked: Vec<judge::Looked> = looked.into_iter().collect::<Result<_, _>>()?;
-            let resolver = if ctx.os() == Os::Linux
-                && looked.iter().any(|l| l.answer == judge::Answer::Timeout)
-            {
-                resolver_of(ctx).await?
+            let resolver = if linux && looked.iter().any(|l| l.answer == judge::Answer::Timeout) {
+                resolv.as_deref().map(parse::resolver)
             } else {
                 None
             };
@@ -201,16 +238,17 @@ impl Check for DnsCheck {
                 &looked,
                 self.max_latency,
                 resolver,
+                &machine,
             ))
         })
     }
 }
 
-/// The resolver settings of this machine, for the evidence of a timeout. A file that is missing or
-/// that the read policy refuses (a link to somewhere not declared) gives `None`.
-async fn resolver_of(ctx: &CheckContext) -> Result<Option<parse::Resolver>, CheckError> {
-    match ctx.probe().read(Path::new(RESOLV_CONF)).await {
-        Ok(file) => Ok(Some(parse::resolver(&String::from_utf8_lossy(&file.bytes)))),
+/// A text file of the resolver setup, or `None` when it is missing or the read policy refuses it (a link to
+/// somewhere not declared). The bytes are read lossily and only the first 64 KiB.
+async fn read_text(ctx: &CheckContext, path: &str) -> Result<Option<String>, CheckError> {
+    match ctx.probe().read(Path::new(path)).await {
+        Ok(file) => Ok(Some(String::from_utf8_lossy(&file.bytes).into_owned())),
         Err(ProbeError::Denied { .. } | ProbeError::NotFound | ProbeError::PermissionDenied) => {
             Ok(None)
         }
@@ -218,8 +256,30 @@ async fn resolver_of(ctx: &CheckContext) -> Result<Option<parse::Resolver>, Chec
     }
 }
 
+/// How many nameservers the facade lists. The inner `Err` is why there is no list, for a note.
+async fn nameserver_count(ctx: &CheckContext) -> Result<Result<usize, String>, CheckError> {
+    match ctx.probe().nameserver_count().await {
+        Ok(n) => Ok(Ok(n)),
+        Err(error) if error.is_no_network() => Err(CheckError::MissingNeed(Need::Network)),
+        // The list file is missing, is a link to a place rdy may not read, or this OS has no source yet.
+        Err(
+            ProbeError::NotFound
+            | ProbeError::PermissionDenied
+            | ProbeError::Denied { .. }
+            | ProbeError::Unsupported(_),
+        ) => Ok(Err(
+            "rdy cannot read the nameserver list on this machine".to_owned()
+        )),
+        Err(error) => soft(error).map(|e| Err(short(&e))),
+    }
+}
+
 /// One name, by the source this OS has, inside its own time budget.
-async fn look_up(ctx: &CheckContext, name: &str) -> Result<judge::Looked, CheckError> {
+async fn look_up(
+    ctx: &CheckContext,
+    name: &str,
+    asked: usize,
+) -> Result<judge::Looked, CheckError> {
     let mut out = judge::Looked::new(name);
     if let Err(why) = parse::validate(name) {
         out.answer = judge::Answer::Rejected(why);
@@ -238,6 +298,12 @@ async fn look_up(ctx: &CheckContext, name: &str) -> Result<judge::Looked, CheckE
         None => out.answer = judge::Answer::Timeout,
     }
     out.took = before.saturating_sub(ctx.remaining());
+    if asked > 0 {
+        let left = ctx.remaining().saturating_sub(RESERVE);
+        let want_v6 =
+            matches!(&out.answer, judge::Answer::Found(a) if a.iter().any(IpAddr::is_ipv6));
+        out.direct = direct::ask_all(ctx, name, asked, want_v6, DIRECT_PER_NAME.min(left)).await?;
+    }
     Ok(out)
 }
 
