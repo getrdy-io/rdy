@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "meta.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`meta.acme.test` resolves to a link-local, metadata, unspecified, multicast or broadcast address, which rdy will not contact. Ask the DNS team to point it at the real address, or add a line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 1 names do not resolve: `meta.acme.test` (answer in a refused range)",
+    "notes": [
+      "getent is not installed on this machine, so rdy asked its own resolver. That resolver does not follow nsswitch.conf (mDNS, sssd), so a name served that way can differ from what the product sees."
+    ],
+    "observed": {
+      "names": [
+        {
+          "fallback": "getent is not installed",
+          "ms": 0,
+          "name": "meta.acme.test",
+          "result": "refused_by_policy",
+          "source": "rdy_resolver"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
