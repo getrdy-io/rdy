@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-53: M1 183 tickets, 405 h, 340.5 h core; M2 137 tickets, 478.25 h; all milestones 420 tickets,
-1396.75 h, 1332.25 h core.
+correction-57: M1 184 tickets, 408.5 h, 342 h core; M2 145 tickets, 492.75 h; all milestones 429 tickets,
+1414.75 h, 1348.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -262,6 +262,25 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   `/dev/zero` exits 64 within 1 s, and `spec sign` refuses an expired spec before any prompt; M1-138
   depends on it. The future `signed_at` warning moves to M2-032. M1-134 says to compare the full
   fingerprint. New M2-137: the container runtime proxy password joins the known-secret set.
+- 54: no new M1 ticket. M1-107 registers the plugin token before the first request leaves. The second of
+  #80 and M1-107 to merge adds k8s.version and `api/` to `all-pass`. 07 D.7's `nothing_verified` sentence
+  covers optional checks not run. New M2-138 to M2-141: the `delegated` outcome, `O_PATH` spec reads, the
+  Windows `spec sign` pipe opens, the kind `rdy run` step and paging variant.
+- 55: new core M1-184: a test that the recording handshake refuses a server without the leaf's key, the
+  unknown-CA zero-bytes case, and the "no revocation check" note on net.tls_intercept and net.egress
+  results; M1-138 depends on it. 03 names the real OS roots source and says to pin the leaf or set
+  `forbid_interception` until M2-135. M1-073 moves back to week 14. The real-run proof of a spec `as:`
+  and the OpenShift grant text moves from M1-113 to M1-175.
+- 56: no new M1 ticket. `rdy run` has no family namespace in M1: 03 says what each k8s check does without
+  one, and 07 says `rdy run` has no `--namespace`. ADR 0049 (Proposed) picks a spec `k8s:` block with
+  `namespace` for M2 and no run flag. M1-162 to M1-165 register their check in the family if M1-175
+  merges first. New M2-142 (the `k8s:` block) and M2-143 (the `cluster-autoscaler-status` ConfigMap).
+- 57: no new M1 ticket. M1-159 adds back the k8s.nodes `pods` `ALLOWED` entry, its role rule, the
+  `live_cluster.rs` read and 03's "wants list on nodes and pods", which M1-115 removes as unused, with a
+  fixture that reads the pair, and depends on M1-115. M1-116's Kubernetes page lists each check's API
+  reads from `ALLOWED`. M1-162 to M1-165 fold their duplicate `ALLOWED` entries and `Access::GetIn` so
+  M1-115's one-entry guard test passes, and copy its pair test (+0.5 h each). New M2-144 (k8s.version
+  `v1beta1` rows by kind) and M2-145 (AKS and vSphere or Longhorn storage class fixtures).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -272,10 +291,11 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+- The next free ADR is 0050. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
-  in #78 (M1-165).
-- The next ticket ids are M1-184 and M2-138, and the next correction is 54 (49 is in #85).
+  in #78 (M1-165). ADR 0047 is on the M1-133 branch. ADR 0048 is reserved for M1-136's docs-test ADR
+  (its branch numbers it 0046). ADR 0049 is correction-56's (Proposed).
+- The next ticket ids are M1-185 and M2-146, and the next correction is 58 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -431,10 +451,83 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     fingerprint from `rdy verify --key`, never the short form in the banner (#96 SF-02).
   - M2-107 (correction-53, +0.25 h): `check_note` also refuses the code points `is_invisible` flags in
     trust-store notes (#96 N-01).
+  - Follow-ups that correction-54 gave ids:
+    - M2-138: the action-log outcome `delegated` for the kube credential plugin, replacing M1-107's
+      `form: delegated` field (02, M1-107 reviews).
+    - M2-139: Linux spec reads open with `O_PATH`, then `fstat`, then reopen `/proc/self/fd/N` (#98
+      security).
+    - M2-140: `rdy spec sign` opens `--sig` and `--secret-key`, and `rdy spec keygen` checks its key paths,
+      at identification level on Windows, not through `canonicalize` and `symlink_metadata` (#98 security).
+    - M2-141: the kind job runs `rdy run` on a k8s.version spec, and a three-node variant pages the node
+      list with `continue` tokens (M1-107 reviews).
+  - M1-107 (correction-54): its row says the plugin token is registered before the first request leaves.
+    Its PR adds "backlog corrected 2026-11-17 (correction-54)" to its progress line.
+  - #100 (M1-140): use the new 07 D.7 `nothing_verified` sentence (correction-54) in `view.rs`,
+    `html_print.rs` and the golden.
+  - Follow-ups that correction-55 gave ids:
+    - M1-184: the handshake signature test on TLS 1.2 and 1.3, the unknown-CA zero-bytes case, and
+      `REVOCATION_NOTE` once per net.tls_intercept and net.egress result (M1-101 review SF-01, SF-02). A
+      0.1.0 gate. Build it after #74 (M1-096) and #91 (M1-100) merge.
+  - M1-101's PR (correction-55): SF-01's owner is M1-184, not M1-096, and SF-02 is an M1-138 dependency.
+    In the review, its progress line and 05 "TLS", write "from M1-184" for "from M1-096", and drop the
+    facade zero-bytes test from SF-02's fix (it exists:
+    `the_live_backend_handshakes_on_loopback_and_reads_the_real_store`, `probe/net/tls/tests.rs` ~764).
+  - #91 (M1-100) and correction-55 both edit 03's net.tls_intercept Thresholds line. The second to merge
+    keeps #91's pin text and appends correction-55's "Until M2-135" sentence.
+  - M1-113 and M1-175 (correction-55): M1-113 implements `Cluster::read_only_as` and
+    `Cluster::is_openshift` with tests through the family holder; M1-175 proves in a run on the kube mock
+    that a spec `as:` reaches k8s.rbac and an OpenShift mock shows the grant text (M1-113 code review).
+  - M1-116 (correction-55): the network page says to pin the leaf or set `forbid_interception` to block
+    until M2-135 (M1-101 review AR-01).
+  - Follow-ups that correction-56 gave ids:
+    - M2-142: the spec `k8s:` block with `namespace`, handed to `K8sFamily::with_namespace` by `rdy run`;
+      no `rdy run --namespace` (ADR 0049, M1-175 review). cli-ux and security-reviewer review ADR 0049
+      in it.
+    - M2-143: k8s.nodes reads `kube-system/cluster-autoscaler-status` by name for GKE Standard and AKS,
+      with the 03 grant text, a new ADR and a security review (M1-113 k8s review). Build it after #62
+      (M1-162), which brings the `Access::GetIn` guard shape.
+  - #62, #65, #64, #78 (M1-162 to M1-165) and M1-175 (correction-56): the second of M1-175 and each of
+    them to merge registers that check in the family: the `build_check` arm, the registry info and the
+    family test counts. Each PR keeps the correction-56 clause in its progress line.
+  - M1-175's PR (correction-56): in its progress line, "a correction will file it" becomes
+    "correction-56 filed it (M2-142)", and "a correction adds the clause to those rows" becomes
+    "correction-56 added the clause to those rows".
+  - #65 (M1-163, correction-56): its no-namespace fix says "the `k8s` block of the spec", which M1 does
+    not have. If #65 takes another fix round, word it like k8s.cni's (no key named); otherwise M2-142
+    rewrites it.
+  - docs/adr/README.md (correction-56): the rows of ADR 0043 to 0048 go above the 0049 row as their PRs
+    merge.
+  - Follow-ups that correction-57 gave ids:
+    - M2-144: k8s.version's `networking.k8s.io`, `storage.k8s.io` and `admissionregistration.k8s.io`
+      `v1beta1` removed-API rows become per-kind rows for the kinds removed in 1.22 (M1-115 review SF-03).
+    - M2-145: k8s.storageclass fixtures for AKS `managed-csi` (registered and not) and a vSphere or
+      Longhorn class (M1-115 review SF-04).
+  - M1-159 (correction-57): add back what M1-115 removes: the `pods` `ALLOWED` entry with the
+    `status.phase` selector (or, if M1-162 merged first, only k8s.nodes in that entry), its guard tests
+    and call table lines, the `rules.rs` module doc line on `pods` and `events` selectors,
+    `_kube/cluster/api/pods-active.json`, `pods` in the `rdy-readonly.yaml` list rule and its header text,
+    the `live_cluster.rs` pods read, 02 Appendix B's `pods` row and rule 1 sentence, and 03's "wants list
+    on nodes and pods". Read the M1-115 diff (`e6183499`, `f68ec65a`) for the exact lines. A
+    k8s.nodes fixture with a Pod list must hit the pair in
+    `every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run`.
+  - M1-115's PR (correction-57): SF-01's "M1-159 adds the entry, the grant, a fixture and the pair test
+    back" is now in M1-159's row. SF-03 and SF-04 are M2-144 and M2-145; SF-05 and SF-06 stay with M2-126
+    and M2-125. The SF-02 fold is in the rows of M1-162 to M1-165 (+0.5 h each).
+  - #62, #64, #65 and #78 (M1-162 to M1-165, correction-57), if M1-115 merged first: fold the duplicate
+    `services`, `configmaps` and `apps/v1` `daemonsets` entries into one entry each, add `Access::GetIn`
+    only in the first of #62 and #78 to merge, and copy M1-115's pair test into the module, so
+    `allowed_has_one_entry_per_group_version_and_resource` passes. `pods`: M1-115 removes the entry #62
+    extends, so the first of #62 and M1-159 to merge adds the `pods` entry, the role rule and the
+    `live_cluster.rs` read citing only its own check, and the second adds its id. #62 drops k8s.nodes from
+    the entry unless M1-159 merged first. Each PR adds "backlog corrected 2026-11-17 (correction-57)" to
+    its progress line.
+  - M1-116's PR (correction-57): add "backlog corrected 2026-11-17 (correction-57)" to its progress line
+    for the Kubernetes page API reads line.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
-  - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,
-    set `kube = true` and regenerate its three goldens.
+  - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
+    k8s.version and the `api/` tree to `all-pass`, sets `kube = true` and regenerates its three goldens.
+    #80 adds "backlog corrected 2026-11-17 (correction-54)" to M1-117's progress line.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel
     and the AWS VPC CNI): their names come from memory of the projects' manifests. Read each entry's
     `source` page. Where the page shows the names, set `verified = true` and `checked_on`. Leave the rest

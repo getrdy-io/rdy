@@ -19,12 +19,19 @@ trybuild = { max-threads = 1 }
 real-kdf = { max-threads = 1 }
 etc-rdy = { max-threads = 1 }
 pty-probe = { max-threads = 1 }
+spec-read = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | binary(sign_verify_page) | test(a_key_made_at_the_standard_cost)'
 test-group = 'real-kdf'
 # One key derivation takes a few seconds on a busy runner. This is the slack for a slow one.
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# The spec-read tests time each exit at one second (M1-183). One at a time, so a busy runner does not
+# make a correct exit look slow.
+[[profile.default.overrides]]
+filter = 'binary(spec_read_special) | binary(spec_read_special_windows)'
+test-group = 'spec-read'
 
 # The prompt_pty tests run the `prompt_probe` example, and each test process runs its own nested
 # `cargo build` of it first (the Once and the mutex in the test file only cover one process). Twelve

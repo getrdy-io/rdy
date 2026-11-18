@@ -1,0 +1,31 @@
+{
+  "entry": {
+    "endpoints": [
+      "gone.acme.test:8080"
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": "gone.acme.test does not resolve from this machine. Check the spelling in the spec. Ask the DNS team for a record or a conditional forwarder for it, or add a temporary line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 1 endpoints unreachable: gone.acme.test:8080 (dns)",
+    "notes": [],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [],
+          "class": "dns",
+          "endpoint": "gone.acme.test:8080",
+          "optional": false,
+          "result": "failed",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

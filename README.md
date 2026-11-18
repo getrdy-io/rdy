@@ -222,26 +222,25 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
   macOS and Windows they report not run.
 - Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
-  and ALPN, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
+  and ALPN, and the HTTP status of a URL endpoint, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
   local data and runs offline.
 - The `net.tls_intercept` check, registered in `rdy run`. It does one TLS handshake per host, sends no
   data, and says whether the chain is public, trusted by this machine only (warn), from an unknown CA
   (block), or a clock or expiry problem (block, never called interception). `--no-network` skips it and
-  says so. The issuer name, root hash and per-distro fix text are not in yet.
+  says so.
 - The spec format, the schema and a spec linter (`rdy spec lint`).
 - Signing: key generation, `rdy spec sign` and `rdy trust add|list|remove`. `rdy run` checks the
   signature and refuses a bad one.
 - The check engine: scheduler, timeouts, privilege negotiation, the probe layer that all side effects go
   through, and redaction of secrets in reports.
-- The JSON report, the verdict logic and the HTML report renderer.
+- The JSON report, the verdict logic and the HTML report, which `rdy run` writes next to the JSON.
 - Kubernetes version, storage class, access, RBAC and Pod Security checks. These are tested against
   recorded fixtures. They are not registered in `rdy run` yet.
 
 **Next**
 
 - Registering the Kubernetes checks in `rdy run`.
-- The HTML report from `rdy run`.
-- The egress HTTP request and proxy path, the proxy check, TLS interception evidence, and Kubernetes nodes.
+- The egress proxy path, the proxy check, and Kubernetes nodes.
 
 **Before 0.1.0**
 

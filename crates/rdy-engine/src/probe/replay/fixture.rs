@@ -27,7 +27,8 @@
 //! indexed, so two files that record the same argv are still a duplicate.
 //!
 //! **What is not read.** `golden/`, `expect.json`, the `expect.json.actual` that a failed golden compare
-//! leaves, the spec file and `README.md` belong to the harness and the docs. The needs a fixture offers are the `[caps]` table of the manifest; a `caps.json` is
+//! leaves, `chain.json` (the certificate chain a case asks the env harness to generate, M1-100), the spec
+//! file and `README.md` belong to the harness and the docs. The needs a fixture offers are the `[caps]` table of the manifest; a `caps.json` is
 //! refused.
 
 use std::collections::{BTreeMap, HashMap};
@@ -492,9 +493,8 @@ fn classify(manifest: &Manifest, rel: &str) -> Entry {
     let top = rel.split('/').next().unwrap_or_default();
     let spec = manifest.spec.as_deref().unwrap_or("spec.yaml");
     match top {
-        "fixture.toml" | "golden" | "expect.json" | "expect.json.actual" | "README.md" => {
-            Entry::Skip
-        }
+        "fixture.toml" | "golden" | "expect.json" | "expect.json.actual" | "chain.json"
+        | "README.md" => Entry::Skip,
         _ if top == spec => Entry::Skip,
         "root" | "root.manifest.json" | "commands" | "native" | "api" | "net.json" | "env.json" => {
             Entry::Take

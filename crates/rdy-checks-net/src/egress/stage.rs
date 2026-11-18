@@ -27,10 +27,11 @@ use std::time::Duration;
 
 use rdy_engine::check::{CheckContext, CheckError};
 use rdy_engine::probe::net::{
-    Roots, Route, STAGGER, TcpAttempt, TcpReport, TlsChain, TrustVerdict,
+    HttpMethod, HttpOutcome, HttpProbe, Roots, Route, STAGGER, TcpAttempt, TcpReport, TlsChain,
+    TrustVerdict,
 };
 use rdy_engine::probe::{AttemptOutcome, NetFailure, NoRoots, ProbeError};
-use rdy_spec::check::{Endpoint, Trust};
+use rdy_spec::check::{Endpoint, HttpMethod as SpecMethod, Trust};
 use rdy_spec::scalar::Host;
 use serde_json::{Value, json};
 
@@ -45,6 +46,10 @@ pub(super) const RESERVE: Duration = Duration::from_secs(2);
 /// The worst case of the second `tcp` call that names the attempts: four addresses, a stagger each and
 /// the attempt limit of the last (3 s + 3 x 250 ms, rounded up).
 const SECOND_CONNECT: Duration = Duration::from_secs(4);
+
+/// The most time the HTTP request of one endpoint takes (03 "Needs": 15 s for HTTP). The facade's own
+/// limits (10 s for the head, 5 s for the body) sit inside it.
+pub(super) const HTTP_BUDGET: Duration = Duration::from_secs(15);
 
 /// Below this much time left an endpoint that has not started is not tried.
 pub(super) const MIN_TO_START: Duration = Duration::from_secs(1);
@@ -121,6 +126,55 @@ pub(super) struct TlsView {
     pub(super) overridden: bool,
 }
 
+/// What the HTTP stage found. It holds no URL, no header and no body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct HttpView {
+    pub(super) method: &'static str,
+    pub(super) status: u16,
+    /// From the request written to the end of the reply head.
+    pub(super) first_byte: Duration,
+    /// The whole call, to the end of the discard.
+    pub(super) total: Duration,
+    /// The statuses the spec accepts, or empty for the default (see [`HttpView::accepted`]).
+    pub(super) expected: Vec<u16>,
+}
+
+impl HttpView {
+    /// Whether `status` counts as reachable: one of the listed statuses, or with none listed, 2xx, 3xx
+    /// and 4xx except 407. A 4xx proves the path works. A 407 is an intercepting proxy that answered on
+    /// the direct route, and a 5xx says the server or a proxy in front is failing, so both fail.
+    pub(super) fn accepted(&self) -> bool {
+        if self.expected.is_empty() {
+            (200..500).contains(&self.status) && self.status != 407
+        } else {
+            self.expected.contains(&self.status)
+        }
+    }
+
+    /// For a status that counts only because the spec lists none: the note, and whether it is a warning
+    /// (a 403 may be the deny page of a transparent proxy, so it warns).
+    pub(super) fn default_judgement(&self) -> Option<(&'static str, bool)> {
+        if !self.expected.is_empty() || !self.accepted() {
+            return None;
+        }
+        match self.status {
+            300..=399 => Some((
+                "the redirect was not followed, and with no expect_status a 3xx counts as reachable",
+                false,
+            )),
+            403 => Some((
+                "a deny page may come from a proxy or firewall on the path and not from the server; list 403 in expect_status if the server really answers it",
+                true,
+            )),
+            400..=499 => Some((
+                "the spec lists no expect_status, so it counts as reachable",
+                false,
+            )),
+            _ => None,
+        }
+    }
+}
+
 /// Everything one endpoint showed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Probed {
@@ -134,6 +188,8 @@ pub(super) struct Probed {
     /// From the start of the connect stage to the moment the winning address connected.
     pub(super) connect: Option<Duration>,
     pub(super) tls: Option<TlsView>,
+    /// The HTTP stage, for a URL endpoint that got that far.
+    pub(super) http: Option<HttpView>,
     pub(super) ending: Ending,
 }
 
@@ -148,6 +204,7 @@ impl Probed {
             attempts: Vec::new(),
             connect: None,
             tls: None,
+            http: None,
             ending: Ending::NotTried("not started"),
         }
     }
@@ -238,6 +295,15 @@ impl Probed {
                 "fallback": tls.fallback,
             });
         }
+        if let Some(http) = &self.http {
+            out["http_stage"] = json!({
+                "method": http.method,
+                "status": http.status,
+                "first_byte_ms": ms(http.first_byte),
+                "total_ms": ms(http.total),
+                "expect_status": http.expected,
+            });
+        }
         match &self.ending {
             Ending::Reached => out["result"] = json!("reached"),
             Ending::Failed(class, _) => {
@@ -291,7 +357,72 @@ pub(super) async fn probe(
         // The stages it finished stay in `out`; the stage that was running is the one that ran out.
         None => out.ending = Ending::Failed(Class::Timeout, None),
     }
+    // Stage 4, for a URL that connected and, for https, that the roots accepted. It has its own budget,
+    // cut short in the same way so the result can still be written.
+    if out.ending == Ending::Reached && spec.target.is_url() {
+        let budget = HTTP_BUDGET.min(ctx.remaining().saturating_sub(RESERVE));
+        if budget < MIN_TO_START {
+            // The connect worked and the request could not start in the time left: not tried.
+            out.ending = Ending::NotTried(OUT_OF_TIME);
+        } else {
+            match ctx.within(budget, http_stage(ctx, spec, &mut out)).await {
+                Some(done) => done?,
+                None => out.ending = Ending::Failed(Class::Timeout, None),
+            }
+        }
+    }
     Ok(out)
+}
+
+/// Sends the request of a URL endpoint and judges the status against `expect_status`. A redirect is
+/// not followed: its status is the answer.
+async fn http_stage(
+    ctx: &CheckContext,
+    spec: &Endpoint,
+    out: &mut Probed,
+) -> Result<(), CheckError> {
+    let method = match spec.method {
+        SpecMethod::Head => HttpMethod::Head,
+        SpecMethod::Get => HttpMethod::Get,
+        // The spec enum may grow; a method this build does not know is not guessed.
+        _ => {
+            return Err(CheckError::Unsupported(
+                "an HTTP method this rdy does not know",
+            ));
+        }
+    };
+    // The roots that judged the chain are the roots the request is verified against.
+    let roots = match out.tls.as_ref().map(|t| t.roots) {
+        Some("bundled") => Roots::Bundled,
+        _ => Roots::System,
+    };
+    let request = HttpProbe::new(spec.target.clone(), method).roots(roots);
+    match ctx.probe().http(request).await {
+        Ok(reply) => finish_http(out, spec, method, &reply),
+        Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
+    }
+    Ok(())
+}
+
+/// Records the answer and sets the ending from the status.
+fn finish_http(out: &mut Probed, spec: &Endpoint, method: HttpMethod, reply: &HttpOutcome) {
+    let view = HttpView {
+        method: method.as_str(),
+        status: reply.status,
+        first_byte: reply.timing.first_byte,
+        total: reply.timing.total,
+        expected: spec
+            .expect_status
+            .as_ref()
+            .map(|list| list.iter().map(|s| s.get()).collect())
+            .unwrap_or_default(),
+    };
+    out.ending = if view.accepted() {
+        Ending::Reached
+    } else {
+        Ending::Failed(Class::HttpStatus, Some(view.status.to_string()))
+    };
+    out.http = Some(view);
 }
 
 /// Why an endpoint that never started was not tried.
