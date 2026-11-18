@@ -458,6 +458,17 @@ fn an_unreadable_cgroup_file_is_a_note_and_the_readable_limit_still_binds() {
         f.message
     );
     assert!(has_note(f, "could not be read"), "{:?}", f.notes);
+    let partial = f
+        .partial
+        .as_ref()
+        .expect("an unreadable file makes it partial");
+    assert!(partial.note.contains("may have been missed"), "{partial:?}");
+}
+
+#[test]
+fn a_clean_cgroup_read_is_not_partial() {
+    let ran = run("cgroup-v2-nested", &json!({"min": "8Gi"}));
+    assert!(ran.finding().partial.is_none());
 }
 
 #[test]

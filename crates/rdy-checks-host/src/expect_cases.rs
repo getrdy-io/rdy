@@ -49,7 +49,7 @@ fn check(id: &str, count: usize) {
 
 #[test]
 fn host_cpu_cases_match_their_expect_json() {
-    check("host.cpu", 12);
+    check("host.cpu", 15);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn host_firewall_cases_match_their_expect_json() {
 
 #[test]
 fn host_lsm_cases_match_their_expect_json() {
-    check("host.lsm", 16);
+    check("host.lsm", 18);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn host_memory_cases_match_their_expect_json() {
 
 #[test]
 fn host_os_cases_match_their_expect_json() {
-    check("host.os", 12);
+    check("host.os", 15);
 }
 
 #[test]
