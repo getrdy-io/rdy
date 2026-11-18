@@ -383,7 +383,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-183 | [#98](https://github.com/getrdy-io/rdy/pull/98) | 2026-11-17 | Every spec read refuses a FIFO or a device, and `spec sign` refuses an expired spec | added 2026-11-17 (correction-53, signing review MF-01, PR #97); added 2026-11-17 (correction-53, M1-132 signing review MF-01)
 
 
-- M1-184 | todo | | The recording handshake refuses a server without the leaf's key, and TLS results say "no revocation check" | added 2026-11-17 (correction-55, M1-101 TLS review SF-01 and SF-02)
+- M1-184 | todo | | The recording handshake refuses a server without the leaf's key, and TLS results say "no revocation check" | added 2026-11-17 (correction-55, M1-101 TLS review SF-01 and SF-02); built on a stack of PR #91 (M1-100) and PR #74 (M1-096), both unmerged; deferrals: none; `net.egress` carries the note when an endpoint's handshake finished (a failed handshake has no chain); the loopback rig gained `HttpOptions::tls_signing_with_another_key` and `TlsVersion`
 
 ## Summary
 
