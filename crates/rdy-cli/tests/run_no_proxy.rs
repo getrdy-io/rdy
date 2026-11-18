@@ -141,6 +141,12 @@ fn check<'a>(doc: &'a Value, id: &str) -> &'a Value {
 #[test]
 fn a_no_proxy_host_connects_direct_and_the_other_host_uses_the_proxy() {
     for name in ["NO_PROXY", "no_proxy"] {
+        // Windows names are not case sensitive, so a machine there has no `no_proxy` apart from
+        // `NO_PROXY`, and `net.proxy` reads the upper-case spelling only. The replay's environment is a
+        // plain map, so it could hold the lower-case name alone, which no Windows machine can.
+        if cfg!(windows) && name == "no_proxy" {
+            continue;
+        }
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
         let spec = spec(dir.path());
         let out = dir.path().join("out");

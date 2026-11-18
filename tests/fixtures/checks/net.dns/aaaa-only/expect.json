@@ -1,0 +1,37 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "v6.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 names resolve",
+    "notes": [
+      "`v6.acme.test` has only IPv6 (AAAA) answers. A client without IPv6 cannot reach it."
+    ],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "2001:db8::20"
+          ],
+          "addresses_total": 1,
+          "ipv4": 0,
+          "ipv6": 1,
+          "ms": 0,
+          "name": "v6.acme.test",
+          "result": "found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

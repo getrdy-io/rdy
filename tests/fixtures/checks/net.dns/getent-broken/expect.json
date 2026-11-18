@@ -1,0 +1,38 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "web.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 names resolve",
+    "notes": [
+      "getent exited with code 1, so rdy asked its own resolver. That resolver does not follow nsswitch.conf (mDNS, sssd), so a name served that way can differ from what the product sees."
+    ],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "addresses_total": 1,
+          "fallback": "getent exited with code 1",
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "web.acme.test",
+          "result": "found",
+          "source": "rdy_resolver"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
