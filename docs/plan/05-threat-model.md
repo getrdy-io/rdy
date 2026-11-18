@@ -118,7 +118,12 @@ ADR 0010 stays as a second line.
   port, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay refused, each
   with a test. Any other nameserver in a refused range (the GCE metadata address 169.254.169.254, for
   one) is refused with "nameserver in a refused range" and the check reports Skipped. The payload must be
-  one plain DNS query, so the door cannot carry other bytes to port 53. Name
+  one plain DNS query of type A, AAAA, CNAME or SOA and class IN, ending right after the question (or a
+  bare OPT record), and its name must be one of the check's spec hosts or the configured proxy's name,
+  made of letters, digits, `-` and `_` only. So the door cannot carry other bytes to port 53 (SEC-155-1).
+  The facade's read guard names `/etc/resolv.conf` and the exact files it may link to, in
+  `/run/systemd/resolve`, `/run/resolvconf` and `/run/NetworkManager`, and no other file (SEC-155-2,
+  SEC-155-3). Name
   lookups through the system resolver (`lookup`, `getaddrinfo`, `getent`) work on an Azure VM today,
   because the OS makes that connection, not the facade. Cost today: a spec that names that address as an
   endpoint or NTP server is refused with the address rule's text. Residual: a name server on the

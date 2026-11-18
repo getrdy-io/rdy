@@ -17,11 +17,18 @@ HTTP side serves the VM agent's settings. It must be reachable as a nameserver a
    `transport` is UDP or TCP. The backend frames TCP with the two byte length. It is a new `Backend`
    method, `dns_exchange`, with a refusing default.
 2. The facade reads the list. It reads `/etc/resolv.conf` through a read guard of its own (that file and
-   the two `systemd-resolved` files it may link to), takes the first three `nameserver` lines, and keeps
+   the `systemd-resolved`, Debian `resolvconf` and NetworkManager files it may link to, named one by
+   one, no directory), takes the first three `nameserver` lines, and keeps
    the list for the check. A check passes an index. Other OSes report `Unsupported` until M2-010.
 3. Admission: the check declares `PeerClass::SystemResolver`; the port is 53 and is not a parameter; the
-   payload is one plain DNS query (opcode 0, one question, no compression, no answer or authority records),
-   so the call cannot carry other bytes to port 53; `--no-network` refuses.
+   payload is one plain DNS query: opcode 0, one question, no compression, QCLASS IN, QTYPE A, AAAA, CNAME
+   or SOA, every name byte a letter, a digit, `-` or `_` (any other byte refuses the payload, none is
+   mapped), no answer or authority records, and nothing after the question except, when ARCOUNT is 1, a
+   bare OPT record (root name, type 41, RDLEN 0). The decoded QNAME must also be one of the check's spec
+   hosts (the check declares `SpecHosts`) or the configured proxy's name (the check declares `Proxy`),
+   looked up as `lookup` does, else the call is `Denied` with "query name is not a spec host or the
+   configured proxy" (INV-11). The only choices left to a check are which of its own names, one of four
+   types, and the transport, so the call carries no other bytes to port 53. `--no-network` refuses.
 4. Addresses: `is_unusable_peer` refuses. The single exception is the exact IPv4 address 168.63.129.16, and
    only because it came from the OS list on port 53. The IPv4-mapped, IPv4-compatible and NAT64 forms are
    not the exception. `udp_exchange`, `tcp`, `tls_chain`, `http` and `lookup` are unchanged and still

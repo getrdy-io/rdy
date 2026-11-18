@@ -15,9 +15,16 @@
 //! - The port is [`NAMESERVER_PORT`] (53). The check cannot change it.
 //! - The transport is UDP or TCP ([`DnsTransport`]). TCP is framed by the backend with the two byte
 //!   length of RFC 1035.
-//! - The payload is a DNS query: 12 to [`MAX_DNS_QUERY`] bytes, opcode 0, one question with no name
-//!   compression, no answer or authority records, at most one additional record. Anything else is
-//!   refused, so this call cannot carry arbitrary bytes to port 53.
+//! - The payload is one plain DNS query: 12 to [`MAX_DNS_QUERY`] bytes, opcode 0, one question with no
+//!   name compression, QCLASS IN, QTYPE A, AAAA, CNAME or SOA, and nothing after the question. When
+//!   ARCOUNT is 1 the only thing after it is a bare OPT record (root name, type 41, no RDATA). Every
+//!   name byte is a letter, a digit, `-` or `_`; any other byte refuses the payload. Anything else is
+//!   refused.
+//! - **The name is the check's own (INV-11).** The decoded name must be one of the check's spec hosts
+//!   (the check declares [`PeerClass::SpecHosts`]) or the configured proxy's name (the check declares
+//!   [`PeerClass::Proxy`]). Any other name is refused with [`RULE_NS_NAME`]. So the QNAME cannot carry
+//!   data: it is a name the signed spec or the operator already wrote, and the only part of a query
+//!   the check chooses is which of those names, which type of the four, and the transport.
 //! - An address that `is_unusable_peer` rejects is refused: link-local, the cloud metadata addresses,
 //!   unspecified, multicast and broadcast, and the IPv4-mapped, IPv4-compatible and NAT64 forms of
 //!   them. Loopback and private addresses pass (a stub resolver on `127.0.0.53` is normal).
@@ -39,6 +46,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use rdy_spec::result::ActionKind;
+use rdy_spec::scalar::Host;
 use serde_json::Map;
 
 use super::UdpReply;
@@ -66,11 +74,15 @@ pub const MAX_NAMESERVER_UDP_REPLY: usize = 4096;
 pub const MAX_NAMESERVER_TCP_REPLY: usize = 16 * 1024;
 
 /// The files the facade reads the nameserver list from, as its own read policy. The first is the one it
-/// reads. The other two are where it may lead (`systemd-resolved`).
+/// reads. The others are where it may lead: `systemd-resolved`, Debian `resolvconf` and NetworkManager
+/// in symlink mode. These exact files only, never a directory.
 pub const NAMESERVER_FILES: &[&str] = &[
     "/etc/resolv.conf",
     "/run/systemd/resolve/resolv.conf",
     "/run/systemd/resolve/stub-resolv.conf",
+    "/run/resolvconf/resolv.conf",
+    "/run/NetworkManager/resolv.conf",
+    "/run/NetworkManager/no-stub-resolv.conf",
 ];
 
 /// The rule of a nameserver call from a check that did not declare `PeerClass::SystemResolver`.
@@ -83,7 +95,10 @@ pub const RULE_NS_ADDRESS: &str = "nameserver in a refused range";
 pub const RULE_NS_INDEX: &str = "no such nameserver in the OS list";
 
 /// The rule of a payload that is not a single plain DNS query.
-pub const RULE_NS_PAYLOAD: &str = "payload must be one DNS query of 12 to 512 bytes";
+pub const RULE_NS_PAYLOAD: &str = "payload must be one plain DNS query of 12 to 512 bytes";
+
+/// The rule of a query name that is not one of the check's spec hosts or the configured proxy's name.
+pub const RULE_NS_NAME: &str = "query name is not a spec host or the configured proxy";
 
 /// How a query travels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -143,7 +158,7 @@ impl Probe {
         let result = match self.admit_nameserver(payload, &what) {
             Err(error) => Err(error),
             Ok(question) => {
-                entry.set("name", question.name);
+                entry.set("name", question.name.clone());
                 entry.set("rtype", question.rtype);
                 let timeout = self.scope.peers.timeout(NAMESERVER_TIMEOUT);
                 let work = async {
@@ -182,7 +197,31 @@ impl Probe {
             return Err(ProbeError::denied(RULE_NO_NETWORK, what));
         }
         self.require_system_resolver(what)?;
-        parse_query(payload).ok_or_else(|| ProbeError::denied(RULE_NS_PAYLOAD, what))
+        let question =
+            parse_query(payload).ok_or_else(|| ProbeError::denied(RULE_NS_PAYLOAD, what))?;
+        if !self.is_own_name(&question.name) {
+            return Err(ProbeError::denied(RULE_NS_NAME, what));
+        }
+        Ok(question)
+    }
+
+    /// Whether `name` (lowercase, checked bytes) is a spec host of a check that declared
+    /// `SpecHosts`, or the configured proxy's name for a check that declared `Proxy`.
+    fn is_own_name(&self, name: &str) -> bool {
+        let declared = |class| {
+            self.scope
+                .info
+                .is_some_and(|info| info.peers.contains(&class))
+        };
+        let host = Host::Name(name.to_owned());
+        if declared(PeerClass::SpecHosts) && self.scope.peers.spec_host(&host).is_some() {
+            return true;
+        }
+        declared(PeerClass::Proxy)
+            && self
+                .hub
+                .as_ref()
+                .is_some_and(|hub| hub.proxy.get().is_some_and(|proxy| *proxy.host() == host))
     }
 
     fn require_system_resolver(&self, what: &str) -> Result<(), ProbeError> {
@@ -269,14 +308,21 @@ pub(crate) fn parse_nameservers(bytes: &[u8]) -> Vec<IpAddr> {
     list
 }
 
-/// The question of a query, for the log.
+/// The question of a query: the name, lowercase, and the type.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Question {
     pub(crate) name: String,
-    pub(crate) rtype: String,
+    pub(crate) rtype: &'static str,
 }
 
-/// Reads the one question of a plain query, or `None` when the payload is anything else.
+/// The size of a bare OPT record: root name, type 41, class, TTL, and an RDLEN of 0.
+const BARE_OPT: usize = 11;
+
+/// Reads the one question of a plain query, or `None` when the payload is anything else: a response, a
+/// non-query opcode, a count other than one question and no answer or authority records, a compression
+/// pointer or long label, a name byte other than a letter, digit, `-` or `_`, a type other than A, AAAA,
+/// CNAME or SOA, a class other than IN, or any byte after the question but a bare OPT record when
+/// ARCOUNT is 1.
 pub(crate) fn parse_query(payload: &[u8]) -> Option<Question> {
     if payload.len() < 12 || payload.len() > MAX_DNS_QUERY {
         return None;
@@ -288,7 +334,8 @@ pub(crate) fn parse_query(payload: &[u8]) -> Option<Question> {
     if flags & 0x8000 != 0 || (flags >> 11) & 0xf != 0 {
         return None;
     }
-    if count(4) != 1 || count(6) != 0 || count(8) != 0 || count(10) > 1 {
+    let extra = count(10);
+    if count(4) != 1 || count(6) != 0 || count(8) != 0 || extra > 1 {
         return None;
     }
     let mut at = 12;
@@ -308,39 +355,39 @@ pub(crate) fn parse_query(payload: &[u8]) -> Option<Question> {
         if !name.is_empty() {
             name.push('.');
         }
-        name.extend(label.iter().map(|&b| {
-            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
-                char::from(b.to_ascii_lowercase())
-            } else {
-                '?'
+        for &b in label {
+            if !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                return None;
             }
-        }));
+            name.push(char::from(b.to_ascii_lowercase()));
+        }
         if name.len() > 253 {
             return None;
         }
     }
-    let tail = payload.get(at..at + 4)?;
-    let rtype = rtype_text(u16::from_be_bytes([tail[0], tail[1]]));
     if name.is_empty() {
-        name.push('.');
+        return None;
     }
-    Some(Question { name, rtype })
-}
-
-fn rtype_text(code: u16) -> String {
-    match code {
-        1 => "A".to_owned(),
-        2 => "NS".to_owned(),
-        5 => "CNAME".to_owned(),
-        6 => "SOA".to_owned(),
-        12 => "PTR".to_owned(),
-        15 => "MX".to_owned(),
-        16 => "TXT".to_owned(),
-        28 => "AAAA".to_owned(),
-        33 => "SRV".to_owned(),
-        255 => "ANY".to_owned(),
-        other => format!("TYPE{other}"),
+    let tail = payload.get(at..at + 4)?;
+    let rtype = match u16::from_be_bytes([tail[0], tail[1]]) {
+        1 => "A",
+        5 => "CNAME",
+        6 => "SOA",
+        28 => "AAAA",
+        _ => return None,
+    };
+    if u16::from_be_bytes([tail[2], tail[3]]) != 1 {
+        return None;
     }
+    at += 4;
+    let rest = &payload[at..];
+    let ends_here = if extra == 0 {
+        rest.is_empty()
+    } else {
+        // Root name, type 41 (OPT), then class, TTL, and RDLEN 0.
+        rest.len() == BARE_OPT && rest[0] == 0 && rest[1..3] == [0, 41] && rest[9..11] == [0, 0]
+    };
+    ends_here.then_some(Question { name, rtype })
 }
 
 #[cfg(test)]

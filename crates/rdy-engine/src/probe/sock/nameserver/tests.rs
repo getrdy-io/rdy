@@ -54,6 +54,20 @@ macro_rules! info {
 }
 
 fn resolver() -> &'static CheckInfo {
+    info!(&[PeerClass::SystemResolver, PeerClass::SpecHosts])
+}
+
+/// The same check with the proxy class too.
+fn resolver_and_proxy() -> &'static CheckInfo {
+    info!(&[
+        PeerClass::SystemResolver,
+        PeerClass::SpecHosts,
+        PeerClass::Proxy
+    ])
+}
+
+/// A check that may query nameservers and has no right to the spec host names.
+fn resolver_only() -> &'static CheckInfo {
     info!(&[PeerClass::SystemResolver])
 }
 
@@ -67,8 +81,17 @@ fn hub(replay: Replay, network: bool) -> ProbeHub {
     hub
 }
 
-fn probe(hub: &ProbeHub, info: &'static CheckInfo, os: Os) -> Probe {
+/// A probe with no spec hosts.
+fn bare_probe(hub: &ProbeHub, info: &'static CheckInfo, os: Os) -> Probe {
     hub.check_probe(info.id, os, Some(info))
+}
+
+/// A probe whose check has the spec hosts the tests query for.
+fn probe(hub: &ProbeHub, info: &'static CheckInfo, os: Os) -> Probe {
+    let probe = bare_probe(hub, info, os);
+    let hosts = ["a.example:53", "db.corp.example:443"].map(|t| Target::parse(t).expect("target"));
+    assert!(probe.permit_hosts(HostSet::new(hosts)));
+    probe
 }
 
 fn addr(text: &str) -> SocketAddr {
@@ -136,9 +159,94 @@ fn the_query_parser_takes_one_plain_question() {
     let q = parse_query(&query("Db.Corp.Example", 28)).expect("a query");
     assert_eq!(q.name, "db.corp.example");
     assert_eq!(q.rtype, "AAAA");
-    assert_eq!(
-        parse_query(&query("x.example", 4242)).expect("q").rtype,
-        "TYPE4242"
+    for (code, text) in [(1, "A"), (28, "AAAA"), (5, "CNAME"), (6, "SOA")] {
+        let q = parse_query(&query("x_y-1.example", code)).expect("a query");
+        assert_eq!(q.rtype, text);
+        assert_eq!(q.name, "x_y-1.example");
+    }
+}
+
+/// A query with `tail` after the question and ARCOUNT `arcount`.
+fn with_tail(arcount: u8, tail: &[u8]) -> Vec<u8> {
+    let mut q = query("a.example", 1);
+    q[11] = arcount;
+    q.extend_from_slice(tail);
+    q
+}
+
+/// A bare OPT record: root name, type 41, class 1232, TTL 0, RDLEN 0.
+const OPT: [u8; 11] = [0, 0, 41, 0x04, 0xd0, 0, 0, 0, 0, 0, 0];
+
+#[test]
+fn the_query_parser_takes_a_bare_opt_record_and_nothing_else_after_the_question() {
+    assert!(parse_query(&with_tail(0, &[])).is_some());
+    assert!(parse_query(&with_tail(1, &OPT)).is_some(), "a bare OPT");
+    let mut named = OPT;
+    named[0] = 1; // a label start instead of the root
+    let mut other_type = OPT;
+    other_type[2] = 42;
+    let mut rdata = OPT.to_vec();
+    rdata[10] = 4;
+    rdata.extend_from_slice(b"data");
+    let mut rdlen_no_data = OPT;
+    rdlen_no_data[10] = 4;
+    for (name, payload) in [
+        ("one byte after the question", with_tail(0, &[0])),
+        ("text after the question", with_tail(0, b"exfil")),
+        ("an OPT record with ARCOUNT 0", with_tail(0, &OPT)),
+        ("ARCOUNT 1 and no record", with_tail(1, &[])),
+        ("a cut OPT record", with_tail(1, &OPT[..10])),
+        (
+            "a byte after the OPT record",
+            with_tail(1, &[&OPT[..], &[0]].concat()),
+        ),
+        ("an OPT record with a name", with_tail(1, &named)),
+        ("a record that is not OPT", with_tail(1, &other_type)),
+        ("an OPT record with RDATA", with_tail(1, &rdata)),
+        ("an RDLEN with no RDATA", with_tail(1, &rdlen_no_data)),
+    ] {
+        assert!(parse_query(&payload).is_none(), "{name} must be refused");
+    }
+}
+
+#[test]
+fn the_query_parser_takes_only_four_types_and_the_internet_class() {
+    for code in [2_u16, 12, 15, 16, 33, 41, 251, 252, 255, 4242, 0] {
+        assert!(
+            parse_query(&query("a.example", code)).is_none(),
+            "type {code} must be refused"
+        );
+    }
+    for class in [0_u8, 2, 3, 4, 255] {
+        let mut q = query("a.example", 1);
+        let last = q.len() - 1;
+        q[last] = class;
+        assert!(parse_query(&q).is_none(), "class {class} must be refused");
+    }
+    let mut high = query("a.example", 1);
+    let at = high.len() - 2;
+    high[at] = 1; // class 0x0101
+    assert!(parse_query(&high).is_none());
+}
+
+#[test]
+fn the_query_parser_refuses_a_name_byte_that_is_not_a_letter_digit_hyphen_or_underscore() {
+    for byte in [
+        b' ', b'?', b'/', b'\\', b'+', b'=', b'%', 0, 0x7f, 0x80, 0xff, b'*',
+    ] {
+        let mut q = query("aaaa.example", 1);
+        q[13 + 1] = byte;
+        assert!(
+            parse_query(&q).is_none(),
+            "byte {byte:#04x} must be refused"
+        );
+    }
+    // A dot inside a label cannot be written: the dot is the length byte. The root name is refused too.
+    let mut root = query("a.example", 1);
+    root.splice(12..22, [0]);
+    assert!(
+        parse_query(&root).is_none(),
+        "the root name must be refused"
     );
 }
 
@@ -155,6 +263,8 @@ fn the_query_parser_refuses_everything_else() {
     answers[7] = 1;
     let mut extra = good.clone();
     extra[11] = 2;
+    let mut trailing = good.clone();
+    trailing.push(0);
     let mut pointer = good.clone();
     pointer[12] = 0xc0;
     let mut cut = good.clone();
@@ -177,6 +287,7 @@ fn the_query_parser_refuses_everything_else() {
         ("two questions", two),
         ("answer records", answers),
         ("two additional records", extra),
+        ("a byte after the question", trailing),
         ("a compression pointer", pointer),
         ("a cut question", cut),
         ("a label of 64", long_label),
@@ -425,7 +536,7 @@ async fn the_azure_address_stays_refused_to_a_spec_host_on_every_port_and_form()
             };
             let (replay, reached) = counting(Replay::new(), &format!("168.63.129.16:{port}"), b"x");
             let hub = hub(replay, true);
-            let probe = probe(&hub, udp_info, Os::Linux);
+            let probe = bare_probe(&hub, udp_info, Os::Linux);
             assert!(probe.permit_hosts(HostSet::new([target.clone()])));
             let error = probe
                 .udp_exchange(&target, &[0x1b; 48], 48)
@@ -450,9 +561,10 @@ async fn a_spec_host_cannot_make_the_azure_address_a_nameserver() {
     // The list holds a public nameserver. A spec host at the Azure address does not change the list.
     let (replay, azure) = counting(resolv("nameserver 10.0.0.2\n"), "168.63.129.16:53", b"x");
     let hub = hub(replay, true);
-    let probe = probe(&hub, resolver(), Os::Linux);
-    let target = Target::parse("168.63.129.16:53").expect("target");
-    assert!(probe.permit_hosts(HostSet::new([target])));
+    let probe = bare_probe(&hub, resolver(), Os::Linux);
+    let azure_host = Target::parse("168.63.129.16:53").expect("target");
+    let own = Target::parse("a.example:53").expect("target");
+    assert!(probe.permit_hosts(HostSet::new([azure_host, own])));
     let error = probe
         .nameserver_exchange(0, &query("a.example", 1), DnsTransport::Udp)
         .await
@@ -572,5 +684,200 @@ async fn the_check_s_reads_do_not_widen_the_list_policy() {
         .await
         .expect_err("/etc/resolv.conf is missing");
     assert!(matches!(error, ProbeError::NotFound), "{error:?}");
-    assert_eq!(NAMESERVER_FILES.len(), 3);
+    assert_eq!(NAMESERVER_FILES.len(), 6);
+}
+
+/// A server that answers `x` at 10.0.0.2:53, with the list that names it.
+fn one_server() -> (Replay, Arc<AtomicUsize>) {
+    counting(resolv("nameserver 10.0.0.2\n"), "10.0.0.2:53", b"x")
+}
+
+#[tokio::test]
+async fn a_name_that_is_not_a_spec_host_is_refused_and_never_sent() {
+    // The payload is a well formed query for a name the check does not own, as a data carrying name
+    // would be: base32 text under a domain the signed spec never listed.
+    let (replay, reached) = one_server();
+    let hub = hub(replay, true);
+    let probe = probe(&hub, resolver(), Os::Linux);
+    for name in [
+        "mzxw6ytboi.attacker.example",
+        "example",
+        "b.example",
+        "a.example.evil.example",
+        "sub.a.example",
+    ] {
+        for transport in [DnsTransport::Udp, DnsTransport::Tcp] {
+            let error = probe
+                .nameserver_exchange(0, &query(name, 1), transport)
+                .await
+                .expect_err(name);
+            assert_eq!(denied_rule(&error), RULE_NS_NAME, "{name}");
+        }
+    }
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+    // The refusals are logged without the server: the list was not even read.
+    assert!(entries(&hub, ActionKind::Read).is_empty());
+    let dns = entries(&hub, ActionKind::Dns);
+    assert!(dns.iter().all(|a| a.outcome == ActionOutcome::Denied));
+}
+
+#[tokio::test]
+async fn a_name_is_matched_whatever_its_case_and_the_spec_host_is_sent() {
+    let (replay, reached) = one_server();
+    let hub = hub(replay, true);
+    let probe = probe(&hub, resolver(), Os::Linux);
+    probe
+        .nameserver_exchange(0, &query("A.Example", 28), DnsTransport::Udp)
+        .await
+        .expect("a spec host in another case");
+    assert_eq!(reached.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_check_without_the_spec_hosts_class_may_not_ask_for_a_spec_host_name() {
+    let (replay, reached) = one_server();
+    let hub = hub(replay, true);
+    let probe = probe(&hub, resolver_only(), Os::Linux);
+    let error = probe
+        .nameserver_exchange(0, &query("a.example", 1), DnsTransport::Udp)
+        .await
+        .expect_err("SpecHosts not declared");
+    assert_eq!(denied_rule(&error), RULE_NS_NAME);
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn the_configured_proxy_name_may_be_asked_for_and_only_with_the_proxy_class() {
+    for (info, proxy_set, ok) in [
+        (resolver_and_proxy(), true, true),
+        (resolver(), true, false),
+        (resolver_and_proxy(), false, false),
+    ] {
+        let (replay, reached) = one_server();
+        let hub = hub(replay, true);
+        if proxy_set {
+            hub.set_proxy_text("http://gate.corp.example:3128")
+                .expect("a proxy");
+        }
+        let probe = probe(&hub, info, Os::Linux);
+        let result = probe
+            .nameserver_exchange(0, &query("gate.corp.example", 1), DnsTransport::Udp)
+            .await;
+        if ok {
+            result.expect("the proxy's name");
+            assert_eq!(reached.load(Ordering::SeqCst), 1);
+        } else {
+            let error = result.expect_err("not the check's proxy");
+            assert_eq!(denied_rule(&error), RULE_NS_NAME);
+            assert_eq!(reached.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_payload_with_a_foreign_byte_never_reaches_the_server() {
+    let (replay, reached) = one_server();
+    let hub = hub(replay, true);
+    let probe = probe(&hub, resolver(), Os::Linux);
+    let mut spaced = query("aaaaaaaa.example", 1);
+    spaced[13] = b' ';
+    for payload in [
+        with_tail(0, b"smuggled"),
+        with_tail(1, b"smuggled"),
+        query("a.example", 16),
+        query("a.example", 255),
+        spaced,
+    ] {
+        let error = probe
+            .nameserver_exchange(0, &payload, DnsTransport::Udp)
+            .await
+            .expect_err("not a plain query");
+        assert_eq!(denied_rule(&error), RULE_NS_PAYLOAD);
+    }
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_resolv_conf_that_links_to_another_file_is_denied_by_the_read_guard() {
+    // A link in /etc/resolv.conf to a file outside the list is judged on its real path. The replay
+    // follows the link as the live backend does.
+    for target in ["/etc/hostname", "/etc/shadow", "../shadow", "/etc/passwd"] {
+        let (replay, reached) = counting(
+            Replay::new()
+                .symlink("/etc/resolv.conf", target)
+                .file("/etc/hostname", "nameserver 10.0.0.2\n")
+                .file("/etc/shadow", "nameserver 10.0.0.2\n")
+                .file("/etc/passwd", "nameserver 10.0.0.2\n"),
+            "10.0.0.2:53",
+            b"x",
+        );
+        let hub = hub(replay, true);
+        let probe = probe(&hub, resolver(), Os::Linux);
+        let error = probe.nameserver_count().await.expect_err(target);
+        assert!(
+            matches!(error, ProbeError::Denied { .. }),
+            "{target}: {error:?}"
+        );
+        let error = probe
+            .nameserver_exchange(0, &query("a.example", 1), DnsTransport::Udp)
+            .await
+            .expect_err(target);
+        assert!(
+            matches!(error, ProbeError::Denied { .. }),
+            "{target}: {error:?}"
+        );
+        assert_eq!(reached.load(Ordering::SeqCst), 0, "{target}");
+        let reads = entries(&hub, ActionKind::Read);
+        assert!(
+            reads.iter().all(|a| a.outcome == ActionOutcome::Denied),
+            "{target}: {reads:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_resolver_files_of_resolvconf_and_networkmanager_are_read_and_nothing_near_them() {
+    for target in [
+        "/run/systemd/resolve/resolv.conf",
+        "/run/systemd/resolve/stub-resolv.conf",
+        "/run/resolvconf/resolv.conf",
+        "/run/NetworkManager/resolv.conf",
+        "/run/NetworkManager/no-stub-resolv.conf",
+    ] {
+        let hub = hub(
+            Replay::new()
+                .symlink("/etc/resolv.conf", target)
+                .file(target, "nameserver 10.0.0.2\n"),
+            true,
+        );
+        let count = probe(&hub, resolver(), Os::Linux)
+            .nameserver_count()
+            .await
+            .expect(target);
+        assert_eq!(count, 1, "{target}");
+    }
+    // Other files of the same directories, and a file that merely starts the same, are not read.
+    for target in [
+        "/run/NetworkManager/conf.d/secret.conf",
+        "/run/NetworkManager/system-connections/wifi.nmconnection",
+        "/run/NetworkManager/resolv.conf.bak",
+        "/run/resolvconf/interface/eth0.dhcp",
+        "/run/resolvconf/resolv.conf/../../shadow",
+        "/run/systemd/resolve/netif/1",
+    ] {
+        let hub = hub(
+            Replay::new()
+                .symlink("/etc/resolv.conf", target)
+                .file(target, "nameserver 10.0.0.2\n"),
+            true,
+        );
+        let error = probe(&hub, resolver(), Os::Linux)
+            .nameserver_count()
+            .await
+            .expect_err(target);
+        assert!(
+            matches!(error, ProbeError::Denied { .. }),
+            "{target}: {error:?}"
+        );
+    }
 }

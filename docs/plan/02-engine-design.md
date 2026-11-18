@@ -489,7 +489,10 @@ tests policy.
   transport)` serves the `SystemResolver` peer class. The facade reads the OS nameserver list itself
   (`/etc/resolv.conf`, Linux, three entries at most, through its own read policy), and the check passes an
   index and never an address. The port is 53, the transport is UDP or TCP, and the payload must be one
-  plain DNS query. An address that `is_unusable_peer` refuses is refused with the rule "nameserver in a
+  plain DNS query of type A, AAAA, CNAME or SOA and class IN, with nothing after the question but a bare
+  OPT record, whose name (letters, digits, `-` and `_` only) is one of the check's spec hosts or the
+  configured proxy's name. The read guard of the list names the exact files `resolv.conf` may link to
+  (`systemd-resolved`, Debian `resolvconf`, NetworkManager). An address that `is_unusable_peer` refuses is refused with the rule "nameserver in a
   refused range", which the check reports as Skipped. The one exception is the exact IPv4 address
   168.63.129.16, the nameserver on every Azure VM, and only because the OS list gave it. A spec host at
   that address, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay
