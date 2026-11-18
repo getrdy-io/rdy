@@ -1,0 +1,10 @@
+{
+  "dns": {
+    "registry.acme.example": ["192.0.2.1"],
+    "license.acme.example": ["192.0.2.2"]
+  },
+  "tcp": {
+    "192.0.2.1:443": { "serve": "web" },
+    "192.0.2.2:443": { "serve": "web" }
+  }
+}

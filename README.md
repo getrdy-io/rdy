@@ -50,35 +50,62 @@ Until then, build from source ([below](#build-from-source)).
 
 ### Try it on an example spec
 
-This run uses
-[`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
+This run uses a spec like
+[`examples/specs/acme-platform.yaml`](examples/specs/acme-platform.yaml). The example is unsigned,
 so it needs `--allow-unsigned`. A spec from your vendor does not:
 
 ```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-quickstart.txt
-$ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
+$ rdy run acme-platform.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
-examples/specs/acme-quickstart.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
-(three more lines of warning left out here)
+acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
 
-rdy 0.1.0-alpha.0
-spec    acme-quickstart >=1.0   (examples/specs/acme-quickstart.yaml)
+rdy <version>
+spec    acme-platform >=1.0   (acme-platform.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    vm   linux   x86_64
+host    all-block.example   rhel 9.3   x86_64
 user    uid 0 (root)
 
-  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443 (dns),
-                             license.acme.example:443 (dns)
-                             fix from the spec file (not verified): Ask your network team to allow
-                             these endpoints through the proxy.
-  WARN     host.disk/root    `/` has 22.9 GiB free on `/` (ext4). 24 GiB is recommended and 20 GiB
-                             is the least.
-                             fix from the spec file (not verified): Free space on / or mount a
-                             larger volume.
-  PASS     host.cpu          4 vCPUs found, 4 needed
-  PASS     host.memory       13.4 GiB found, 8 GiB needed
-  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+  BLOCK    host.memory             7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB
+                                   wanted, the box is busy
+                                   fix from the spec file (not verified): Add RAM or choose a larger
+                                   VM size.
+  BLOCK    host.disk               `/var/lib/acme` has 0 bytes free on `/var` (xfs), 20 GiB needed.
+                                   fix from rdy: Run `df -h /var/lib/acme` to see the volume. If
+                                   `/dev/mapper/rhel-var` is an LVM volume, grow it with `lvextend
+                                   -r -L +24G /dev/mapper/rhel-var`. Otherwise grow the volume, or
+                                   point the install at a larger disk.
+  BLOCK    host.ports              Port 6443/tcp is held by `kube-apiserver` (pid 950).
+                                   fix from rdy: Port 6443/tcp is held by `kube-apiserver` (pid
+                                   950). Stop it, or change the product's port setting.
+  BLOCK    net.egress              1 of 1 endpoints unreachable: web.acme.test:8080 (refused)
+                                   fix from rdy: web.acme.test:8080 refused the connection: nothing
+                                   listens there, or a firewall rejects it. Check the port in the
+                                   spec, and ask the network team to allow tcp/8080 to web.acme.test
+                                   from this machine.
+  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
+  PASS     host.cpu                8 vCPUs found, 8 needed
+  PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
+                                   required modules are loaded or built in. BTF type information is
+                                   present.
+  PASS     host.cgroups            cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids`
+                                   available
+  PASS     host.sysctl             4 kernel parameters have the wanted value and are set at boot.
+                                   Services get an open files limit of 1048576
+                                   (`DefaultLimitNOFILE=1048576` in
+                                   `/etc/systemd/system.conf.d/10-acme.conf`).
+  PASS     host.lsm                SELinux is enforcing. AppArmor is off.
+  PASS     host.time_sync          Clock is synchronized, under 1 ms away from chrony's reference
+                                   `192.0.2.30`.
+  PASS     host.security_agents    No known security software process was found among 7 processes.
+  PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
+                                   driver overlayfs).
+  PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
+  PASS     net.mtu                 `eth0` has MTU 1500.
 
-1 block, 1 warning, 2 passed, 1 not applicable
+4 blocks, 0 warnings, 11 passed
 
 WARNING: UNSIGNED SPEC
 NOT READY
@@ -86,14 +113,15 @@ $ echo $?
 2
 ```
 
-This is a real run from a build of `main`, on a Linux VM. Two things were cut for width: the long
-warning text, and a note on the memory line about the cgroup the shell runs in. Your numbers will differ.
+This text is not typed by hand. A test makes it from a recorded Linux machine that fails four required
+checks, so it is the same on every build. `<version>` stands for the version of rdy. Your numbers and
+your checks will differ.
 
-Read it like this. Problems come first, each with its fix under it. The `registry.acme.example` name is
-made up and does not resolve, so `net.egress` blocks, and the verdict is `NOT READY`. The example is
-unsigned, so you get the warning. Real specs are signed, and then you drop `--allow-unsigned`. To see
-what a run looks like with no network, add `--no-network`. Then `net.egress` is reported as not run, and
-a required check that did not run is never a pass: the verdict stays `NOT READY`.
+Read it like this. Problems come first, each with its fix under it. Four required checks block, so the
+verdict is `NOT READY`. The example is unsigned, so you get the warning. Real specs are signed, and then
+you drop `--allow-unsigned`. To see what a run looks like with no network, add `--no-network`. Then
+`net.egress` is reported as not run, and a required check that did not run is never a pass: the verdict
+stays `NOT READY`.
 
 `READY` exits 0, `READY with warnings` exits 1, `NOT READY` exits 2. Exit 64 means the input must
 change (a bad flag, a spec with no valid signature). Exit 70 means rdy itself failed. Without

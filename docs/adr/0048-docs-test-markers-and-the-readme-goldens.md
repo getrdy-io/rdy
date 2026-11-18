@@ -69,3 +69,15 @@ ADR 0047 already defined `install-only` and `pending=<ticket>`.
 | `xtask docs-test` now | Needs the binary built and found by xtask. 09 plans it for M2 with docs-gen. |
 | Put the shape in a comment under the block | Moves the contract away from the fence. The info string is read by the same line that runs the block. |
 | Compare transcripts with live output | A transcript has host numbers. That is the thing the rule forbids. |
+
+## Amendment 2026-11-18 (M1-135)
+
+Rule 5 said a transcript is hand-trimmed from a real run and every golden must be used by a block. M1-135
+replaces that. The four goldens in `tests/fixtures/readme/` are made in process from the Replay envs by
+`crates/rdy-cli/tests/env_harness/readme.rs`, and `UPDATE_GOLDENS=1` rewrites them. A README block still
+must equal its golden, and the golden's exit code and verdict line must still agree with the block's marker.
+A golden that no README block uses is allowed only if the generator lists it, in
+`crates/rdy-cli/tests/common/readme_goldens.rs`. That file is the one list: the generator test and
+`docs_test` both read it, and a test fails if the folder and the list differ. The first command of a block
+still runs live, with the exit set and shape as before. The spec is shown under the name a reader types, and
+the version line is `rdy <version>`.
