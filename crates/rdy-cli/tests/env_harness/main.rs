@@ -252,6 +252,12 @@ const PENDING: &[Pending] = &[
         why: "M1-100 added the generated-chain cases and the handshake-never-completes case (an in-memory peer that never answers the ClientHello). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget (5 s for the handshake) and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class (correction-52 adds net.tls_intercept to its row; the case needs a hang marker M1-179 accepts), and the stale-row finding then forces this row out",
     },
     Pending {
+        check: "net.dns",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "Same as host.time_sync: net.dns cuts each name to its own budget, so a hung getent gives a bounded `timeout` finding for that name and never ends the check in `timed_out_ms`. The timeout case (a 60 s delay in its getent recording, an expect.json that holds the finding and the resolver evidence) proves that. M1-179 makes the harness accept a survived hang as the Timeout class",
+    },
+    Pending {
         check: "host.time_sync",
         classes: &[Class::Timeout],
         owner: "M1-179",

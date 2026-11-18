@@ -1,0 +1,29 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "gone.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`gone.acme.test` does not resolve on this machine: the system resolver found no record, or no nameserver answered. Ask the DNS team for a record or a conditional forwarder for `acme.test`. Check that the `hosts:` line of `/etc/nsswitch.conf` lists `dns`. As a stopgap add a line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 1 names do not resolve: `gone.acme.test` (not found)",
+    "notes": [],
+    "observed": {
+      "names": [
+        {
+          "ms": 0,
+          "name": "gone.acme.test",
+          "result": "not_found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
