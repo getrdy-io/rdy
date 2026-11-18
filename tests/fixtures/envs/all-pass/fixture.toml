@@ -14,7 +14,7 @@ spec = "spec.yaml"
 [caps]
 root = true
 network = true
-kube = false
+kube = true
 
 [run]
 clock = "2026-11-02T09:00:00Z"

@@ -67,3 +67,15 @@ checks:
     severity: block
   - id: net.mtu
     severity: warn
+  - id: k8s.version
+    min: "1.27"
+    max: "1.31"
+    severity: block
+    fix: "Upgrade the cluster to Kubernetes 1.27 or newer."
+  - id: k8s.storageclass
+    severity: block
+    fix: "Mark one StorageClass as the default."
+  - id: k8s.rbac
+    can: ["create namespaces"]
+    severity: block
+    fix: "Run the install with an identity that can create namespaces."

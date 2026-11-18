@@ -68,7 +68,11 @@ mod error;
 pub mod guard;
 mod impersonate;
 pub(crate) mod list;
-#[cfg(test)]
+// The mock serves a scripted cluster to the tests of this crate and, behind the `testing` feature, to the
+// env harness of rdy-cli (M1-185). The shipped build has neither.
+// Test support: a panic here is a broken fixture, so the `expect` calls the tests use are allowed.
+#[cfg(any(test, feature = "testing"))]
+#[allow(clippy::expect_used)]
 pub(crate) mod mock;
 mod proxy;
 mod secret_layer;
@@ -681,6 +685,62 @@ impl Loaded {
             latency,
             openshift: OnceLock::new(),
             client,
+        })
+    }
+}
+
+/// What a scripted cluster says about its connection: a context, a server and a user that name nothing
+/// real, no credential, no proxy. The cluster line shows it before the first request, as it shows a real one.
+#[cfg(feature = "testing")]
+pub(crate) fn scripted_facts() -> ConnectionFacts {
+    ConnectionFacts {
+        source: Source::Flag(PathBuf::from("scripted-cluster")),
+        line: ClusterLine {
+            context: "acme-fixture".to_owned(),
+            server: "https://k8s.acme.test:6443".to_owned(),
+            user: Some("acme-reader".to_owned()),
+            plugin: None,
+            tls_verification_off: false,
+            impersonates: false,
+        },
+        credentials: Vec::new(),
+        proxy: ProxyUse::none(),
+        ca_set: true,
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Connected {
+    /// The run's attempt over a scripted cluster (M1-185): what [`Loaded::connect_with`] does after the
+    /// client is built, with `mock` where the socket would be. No kubeconfig is read, no plugin runs and no
+    /// socket opens. `announce` gets the cluster line, then `GET /version` goes through the read-only
+    /// guard from the run-level `probe` and is logged like the real one. The mock sleeps for a recorded
+    /// `delay`, so a slow `/version` is a timer and blocks no worker.
+    ///
+    /// # Errors
+    ///
+    /// A [`KubeError`], sorted as the real attempt sorts it.
+    pub(crate) async fn over_mock(
+        mock: mock::Mock,
+        probe: &Probe,
+        announce: impl FnOnce(&ClusterLine),
+    ) -> Result<Self, KubeError> {
+        let facts = scripted_facts();
+        announce(&facts.line);
+        YieldOnce(false).await;
+        let client = kube::Client::new(mock, "");
+        let started = std::time::Instant::now();
+        let info = ReadOnlyClient::new_run(&client, probe, None, false)
+            .version()
+            .await
+            .map_err(|error| from_kube_error(&error, facts.line.server(), None, false, true))?;
+        Ok(Self {
+            version: ServerVersion::from_info(info),
+            latency: started.elapsed(),
+            files: Vec::new(),
+            openshift: OnceLock::new(),
+            client,
+            facts,
         })
     }
 }

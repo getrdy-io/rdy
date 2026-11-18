@@ -94,6 +94,13 @@ mod storageclass;
 )]
 mod version;
 
+// The scripted cluster of the env harness (M1-185). A release build with the feature does not compile, the
+// same rule as the `testing` feature of rdy-engine, and CI keeps the feature out of the binary's graph.
+#[cfg(all(feature = "testing", not(test), not(debug_assertions)))]
+compile_error!("the `testing` feature of rdy-checks-k8s must not be enabled in a release build");
+#[cfg(feature = "testing")]
+pub mod testing;
+
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
 pub use admission::AdmissionCheck;
 pub use cluster::Cluster;

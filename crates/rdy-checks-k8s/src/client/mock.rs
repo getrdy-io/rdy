@@ -54,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -63,18 +64,23 @@ use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, Method, Request, Response, Uri};
 use http_body::Body as _;
 use kube::client::Body;
+#[cfg(test)]
 use rdy_engine::check::{Need, Os};
+#[cfg(test)]
 use rdy_engine::probe::Probe;
-use rdy_engine::testing::{Fixture, Replay, TestRun, fixtures_dir};
+use rdy_engine::testing::Replay;
+#[cfg(test)]
+use rdy_engine::testing::{Fixture, TestRun, fixtures_dir};
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
+use super::ImpersonateAs;
+#[cfg(test)]
 use super::{
-    ConnectionFacts, ImpersonateAs, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion,
-    from_kube_error,
+    ConnectionFacts, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion, from_kube_error,
 };
 
 #[cfg(test)]
@@ -104,6 +110,7 @@ pub(crate) enum MockError {
     #[error("api/reviews.json: {0}")]
     BadReviews(String),
     /// The fixture did not load.
+    #[cfg(test)]
     #[error("the fixture did not load: {0}")]
     Fixture(String),
 }
@@ -336,6 +343,7 @@ impl Mock {
         })
     }
 
+    #[cfg(test)]
     /// The next presentation of the `continue` token `token` (decoded) answers `410 Gone`, once.
     pub(crate) fn expire_once(&self, token: &str) {
         self.state().expire_once.insert(token.to_owned());
@@ -649,6 +657,7 @@ pub(crate) fn audit(
 
 // ---- the harness --------------------------------------------------------------------------------------------
 
+#[cfg(test)]
 /// A fixture run: the mock, the run it logs into, and the audit that closes it.
 pub(crate) struct Harness {
     run: TestRun,
@@ -661,12 +670,14 @@ pub(crate) struct Harness {
     kubeconfig_impersonates: bool,
 }
 
+#[cfg(test)]
 impl fmt::Debug for Harness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Harness").finish_non_exhaustive()
     }
 }
 
+#[cfg(test)]
 impl Harness {
     /// Loads the fixture `name` under `tests/fixtures` (for example `checks/_kube/cluster`).
     ///
@@ -811,6 +822,7 @@ impl Harness {
     }
 }
 
+#[cfg(test)]
 impl Drop for Harness {
     fn drop(&mut self) {
         if self.audited.load(Ordering::SeqCst) || std::thread::panicking() {
@@ -825,5 +837,6 @@ impl Drop for Harness {
     }
 }
 
+#[cfg(test)]
 // The production paging helper, so the harness tests walk the same code a check does.
 pub(crate) use super::list::list_all;
