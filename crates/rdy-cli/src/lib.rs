@@ -3,9 +3,9 @@
 //! The binary in `src/main.rs` is a thin wrapper around [`run`]. Tests and the docs CLI reference
 //! use the same code (ADR 0011).
 //!
-//! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen`,
-//! `rdy spec sign`, `rdy trust add`, `list` and `remove` and `rdy run` (M1-057) do their jobs. `rdy
-//! verify` prints "not yet implemented in this build" and exits 70 until its own ticket lands.
+//! This is the M1 command tree (M1-029). Every command in it does its job: `rdy version`, `rdy spec
+//! lint`, `rdy spec keygen`, `rdy spec sign`, `rdy trust add`, `list` and `remove`, `rdy run` (M1-057)
+//! and `rdy verify` (M1-126).
 //!
 //! Exit codes (CLAUDE.md, Output): clap's own exit code is 2, but in rdy 2 means NOT READY. So rdy
 //! parses with [`clap::Parser::try_parse_from`] and maps the outcome itself. Help and version go to
@@ -62,11 +62,13 @@ pub mod terminal;
 
 mod spec_cmds;
 mod static_line;
+mod spec_load;
 
 #[doc(hidden)]
 pub mod trust;
 
 mod trust_cmds;
+mod verify_cmd;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
@@ -270,7 +272,12 @@ where
                     json,
                     stdout,
                     stderr,
-                    |_privilege, stdout, stderr| dispatch(&cli.command, json, stdout, stderr),
+                    |privilege, stdout, stderr| match &cli.command {
+                        Commands::Verify(args) => {
+                            verify_cmd::run(args, privilege, cli.global.color, json, stdout, stderr)
+                        }
+                        other => dispatch(other, json, stdout, stderr),
+                    },
                 ),
             }
         }
@@ -329,10 +336,9 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
         // `run` is async and takes the whole privilege snapshot, so `run_code` calls it directly and
         // never gets here. If it ever did, that is a bug in `run_code`.
         Commands::Run(_) => emit(&CliError::bug(), json, stdout, stderr),
-        Commands::Verify(args) => {
-            tracing::debug!(spec = %args.spec.display(), "verify requested");
-            not_implemented("verify", json, stdout, stderr)
-        }
+        // `verify` needs the privilege snapshot for the trust store layout, so `run_code` calls it
+        // directly and never gets here. If it ever did, that is a bug in `run_code`.
+        Commands::Verify(_) => emit(&CliError::bug(), json, stdout, stderr),
         Commands::Spec { command } => match command {
             SpecCommand::Lint(args) => lint::run(&args.spec, json, stdout, stderr),
             SpecCommand::Sign(args) => spec_cmds::run_sign(args, json, stdout, stderr),
@@ -397,17 +403,6 @@ fn finish(written: std::io::Result<()>, stderr: &mut dyn Write) -> u8 {
             emit(&err, false, &mut std::io::sink(), stderr)
         }
     }
-}
-
-/// The error for a command a later ticket implements. Exit 70, with a fix line.
-fn not_implemented(
-    command: &'static str,
-    json: bool,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> u8 {
-    let err = CliError::Internal(InternalKind::NotImplemented { command });
-    emit(&err, json, stdout, stderr)
 }
 
 /// Print a clap error the rdy way and return the exit code.

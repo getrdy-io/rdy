@@ -248,6 +248,7 @@ fn stdout_is_never_coloured_and_json_stays_the_report() {
     // The report block lists the files that were written, and the verdict is last.
     assert!(ran.stderr.contains("Report written to "), "{}", ran.stderr);
     assert!(ran.stderr.contains("\n  spec.yaml\n"), "{}", ran.stderr);
+    assert!(ran.stderr.contains(".html\n"), "{}", ran.stderr);
     assert!(ran.stderr.contains(".json\n"), "{}", ran.stderr);
     let mut plain = Vec::new();
     rdy_cli::style::write_styled(&mut plain, false, &ran.stderr).unwrap_or_else(|e| panic!("{e}"));

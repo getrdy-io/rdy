@@ -1868,6 +1868,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-width",
+ "winapi-util",
  "zeroize",
 ]
 
@@ -1922,6 +1923,7 @@ dependencies = [
  "rdy-spec",
  "serde_json",
  "tokio",
+ "x509-parser",
 ]
 
 [[package]]

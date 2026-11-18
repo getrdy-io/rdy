@@ -108,6 +108,11 @@ nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; ma
 .label { font-weight: 700; }
 .muted { color: var(--muted); }
 dl { margin: 0; }
+.facts { margin: 0.5rem 0; }
+.facts p { margin: 0; }
+.facts dl { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0 1rem; margin: 0.25rem 0 0; }
+.facts dt { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.facts dd { grid-column: 2; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 dl.details { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.25rem 1rem; }
 dl.details dt { font-weight: 700; }
 dl.details dd { margin: 0; overflow-wrap: anywhere; }
@@ -116,7 +121,8 @@ caption { text-align: left; font-weight: 700; padding: 0.25rem 0; }
 th, td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); overflow-wrap: anywhere; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); }
 @media (max-width: 40rem) {
-  dl.details { grid-template-columns: 1fr; }
+  dl.details, .facts dl { grid-template-columns: 1fr; }
+  .facts dd { grid-column: 1; }
 }
 /* Print is black on white whatever the screen theme: this block comes after the dark palette and replaces
    every variable it sets. No backgrounds, so a printer spends no ink on them. */
@@ -136,8 +142,12 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     --banner-bg: #ffffff;
   }
   body { background: #ffffff; color: #000000; }
+  /* The banners stay in the flow in print, so they print once, at the top of page one, and cover nothing.
+     A fixed banner that repeats on every page was tried: headless Chrome puts a fixed box with a negative
+     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
+     template adds a top page-margin box with the banner titles, so every page carries the mark. */
   .check, tr { break-inside: avoid; }
-  #passed, #capabilities { break-before: page; }
+  #passed, #capabilities, #actions { break-before: page; }
 }
 </style>
 </head>
@@ -171,6 +181,15 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>15.4 GiB found, 32 GiB needed</bdi></p>
 <p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Add RAM or choose a larger node class.</bdi></p>
 <p class="text"><span class="label">More from rdy:</span> <bdi>15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.</bdi></p>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Band</bdi></dt>
+<dd><bdi>1.6 GiB</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>32 GiB</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 1 ms</p>
 </article>
 <article class="check status-block" id="check-3">
@@ -178,6 +197,28 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>1 of 2 endpoints unreachable: license.acme.example:443 (proxy refused CONNECT, 403)</bdi></p>
 <p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Ask your network team to allow these endpoints through the proxy.</bdi></p>
 <p class="text"><span class="label">More from rdy:</span> <bdi>The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Endpoints</bdi></dt>
+<dd><bdi>Connect</bdi>: <bdi>38 ms</bdi>; <bdi>Outcome</bdi>: <bdi>ok</bdi>; <bdi>Target</bdi>: <bdi>registry.acme.example:443</bdi>; <bdi>TLS</bdi>: <bdi>61 ms</bdi></dd>
+<dd><bdi>Connect</bdi>: <bdi>37 ms</bdi>; <bdi>Outcome</bdi>: <bdi>proxy_403</bdi>; <bdi>Target</bdi>: <bdi>license.acme.example:443</bdi>; <bdi>TLS</bdi>: <bdi>none</bdi></dd>
+<dt><bdi>Proxy</bdi></dt>
+<dd><bdi>http://proxy.corp.example:3128</bdi></dd>
+<dt><bdi>Via</bdi></dt>
+<dd><bdi>proxy</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Reachable</bdi></dt>
+<dd><bdi>registry.acme.example:443</bdi></dd>
+<dd><bdi>license.acme.example:443</bdi></dd>
+<dt><bdi>Via proxy</bdi></dt>
+<dd><bdi>auto</bdi></dd>
+</dl>
+</div>
 <p>Requires: network access (available)</p>
 <p class="muted">Took 212 ms</p>
 </article>
@@ -189,12 +230,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>Not run. This version of rdy has no gpu checks yet.</bdi></p>
 <p>Not in this version of rdy</p>
 <p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+<p>required by <bdi>acme-platform</bdi></p>
 </article>
 <article class="check status-skip" id="check-7">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no aws checks yet.</bdi></p>
 <p>Not in this version of rdy</p>
 <p class="text"><span class="label">From rdy:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+<p>required by <bdi>acme-platform</bdi></p>
 </article>
 </section>
 <section aria-labelledby="warnings">
@@ -204,6 +247,33 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>60.0 GiB free on / for /var/lib, 100 GiB needed</bdi></p>
 <p class="text"><span class="label">From <bdi>acme-platform</bdi>:</span> <bdi>Mount a larger volume at /var/lib before install.</bdi></p>
 <p class="text"><span class="label">More from rdy:</span> <bdi>/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Free</bdi></dt>
+<dd><bdi>60 GiB</bdi></dd>
+<dt><bdi>Free inodes</bdi></dt>
+<dd><bdi>31205120</bdi></dd>
+<dt><bdi>Filesystem type</bdi></dt>
+<dd><bdi>xfs</bdi></dd>
+<dt><bdi>Mount</bdi></dt>
+<dd><bdi>/</bdi></dd>
+<dt><bdi>Options</bdi></dt>
+<dd><bdi>rw</bdi></dd>
+<dd><bdi>relatime</bdi></dd>
+<dt><bdi>Path</bdi></dt>
+<dd><bdi>/var/lib</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Min free</bdi></dt>
+<dd><bdi>100 GiB</bdi></dd>
+<dt><bdi>Recommended free</bdi></dt>
+<dd><bdi>120 GiB</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 3 ms</p>
 </article>
 </section>
@@ -212,17 +282,74 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-0">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.cpu</bdi></span></h3>
 <p class="text"><bdi>8 vCPUs found, 8 needed</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Cores</bdi></dt>
+<dd><bdi>8</bdi></dd>
+<dt><bdi>Labels</bdi></dt>
+<dd><bdi>X</bdi>: <bdi>3</bdi>, <bdi>2</bdi>, <bdi>1</bdi></dd>
+<dd><bdi>Y</bdi>: <bdi>1</bdi></dd>
+<dt><bdi>Zone</bdi></dt>
+<dd><bdi>b</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>8</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 2 ms</p>
 </article>
 <article class="check status-pass" id="check-4">
 <h3><span class="status">PASS</span> <span class="id"><bdi>k8s.version</bdi></span></h3>
 <p class="text"><bdi>Server v1.29.4, 1.28 or newer needed</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Distribution</bdi></dt>
+<dd><bdi>vanilla</bdi></dd>
+<dt><bdi>Git version</bdi></dt>
+<dd><bdi>v1.29.4</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>1.28</bdi></dd>
+</dl>
+</div>
 <p>Requires: a Kubernetes context (available)</p>
 <p class="muted">Took 48 ms</p>
 </article>
 <article class="check status-pass" id="check-5">
 <h3><span class="status">PASS</span> <span class="id"><bdi>k8s.storageclass</bdi></span></h3>
 <p class="text"><bdi>Default class gp3 (ebs.csi.aws.com) supports ReadWriteOnce</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Access modes</bdi></dt>
+<dd><bdi>ReadWriteOnce</bdi></dd>
+<dt><bdi>Binding</bdi></dt>
+<dd><bdi>WaitForFirstConsumer</bdi></dd>
+<dt><bdi>CSI driver present</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Default class</bdi></dt>
+<dd><bdi>gp3</bdi></dd>
+<dt><bdi>Provisioner</bdi></dt>
+<dd><bdi>ebs.csi.aws.com</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Access modes</bdi></dt>
+<dd><bdi>ReadWriteOnce</bdi></dd>
+</dl>
+</div>
 <p>Requires: a Kubernetes context (available)</p>
 <p class="muted">Took 95 ms</p>
 </article>
@@ -335,7 +462,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </section>
 </main>
 <footer>
-<p>rdy <bdi>0.1.0</bdi></p>
+<p>Made with Rdy. Use Rdy for your product: <a href="https://getrdy.io/?ref=report&#38;product=acme-platform" rel="noopener noreferrer">https://getrdy.io/?ref=report&#38;product=acme-platform</a></p>
+<p>This link carries the product name and nothing else.</p>
+<p>rdy <bdi>0.1.0</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
 <script type="application/json" id="rdy-result" data-sha256="8b3b0957264715dd98551948115a95102a268c073117b2b140b717def09e9937">{
   "api_version": "rdy/v1",

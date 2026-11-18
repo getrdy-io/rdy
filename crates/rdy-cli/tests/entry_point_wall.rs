@@ -128,9 +128,38 @@ fn only_the_entry_point_builds_the_live_backend() {
     assert_eq!(found, [Some("entry.rs".to_owned())]);
 }
 
-/// The hook fields a test steers a run through. A new field of `RunHooks` goes here too (the unit test
-/// in `src/hooks.rs` names every field, so adding one without it does not compile).
-const HOOK_FIELDS: [&str; 4] = ["clock", "run_id", "deadline", "families"];
+/// The hook fields a test steers a run through, read from the `pub <name>:` lines of `pub struct
+/// RunHooks` in `src/hooks.rs`, so a new field is covered the day it is added (S1, M1-130).
+fn hook_fields() -> &'static [String] {
+    static FIELDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FIELDS.get_or_init(|| {
+        let text = std::fs::read_to_string(src().join("hooks.rs"))
+            .unwrap_or_else(|e| panic!("cannot read hooks.rs: {e}"));
+        let fields = fields_of_run_hooks(&text);
+        assert!(!fields.is_empty(), "no field of RunHooks was found");
+        fields
+    })
+}
+
+/// The field names of `pub struct RunHooks { .. }` in `text`.
+fn fields_of_run_hooks(text: &str) -> Vec<String> {
+    let mut inside = false;
+    let mut fields = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("pub struct RunHooks") {
+            inside = true;
+        } else if inside && line == "}" {
+            break;
+        } else if inside
+            && let Some(rest) = line.strip_prefix("pub ")
+            && let Some((name, _)) = rest.split_once(':')
+        {
+            fields.push(name.trim().to_owned());
+        }
+    }
+    fields
+}
 
 /// What a shipped line does to `RunHooks`, if anything.
 #[derive(Debug, PartialEq, Eq)]
@@ -175,7 +204,13 @@ fn run_hooks_use(line: &str) -> Option<Use> {
             "a typed value of RunHooks that takes a default",
         ));
     }
-    if HOOK_FIELDS.iter().any(|field| assigns_field(line, field)) {
+    if line.contains("mut hooks") || (line.contains(": RunHooks") && line.contains("mut ")) {
+        return Some(Use::Steers("a mutable binding of hooks"));
+    }
+    if line.starts_with("let mut ") && line.trim_end().ends_with("= hooks;") {
+        return Some(Use::Steers("a mutable copy of hooks"));
+    }
+    if hook_fields().iter().any(|field| assigns_field(line, field)) {
         return Some(Use::Steers("an assignment to a hook field"));
     }
     ["RunHooks::", "RunHooks {", "RunHooks("]
@@ -247,6 +282,10 @@ fn the_run_hooks_scan_sees_what_it_must() {
     assert!(steers("hooks.deadline  = Some(d);"));
     assert!(steers("hooks.run_id=None;"));
     assert!(steers("h.clock = Some(now);"));
+    assert!(steers("h.fail_files = true;"));
+    assert!(steers("hooks.stderr_columns = Some(20);"));
+    assert!(steers("let mut x = hooks;"));
+    assert!(steers("fn f(mut h: RunHooks) {"));
     assert!(steers("self.families =  None;"));
     assert!(steers("fn tweak(h: &mut RunHooks) {"));
     assert!(steers("let h: RunHooks = Default::default();"));
@@ -259,6 +298,23 @@ fn the_run_hooks_scan_sees_what_it_must() {
     assert!(run_hooks_use("if hooks.clock == None {").is_none());
     assert!(run_hooks_use("let clock = hooks.clock.unwrap_or(now);").is_none());
     assert!(run_hooks_use("match hooks.deadline { _ => 1 }").is_none());
+}
+
+#[test]
+fn the_wall_reads_every_field_of_run_hooks_from_the_source() {
+    let fields = hook_fields();
+    for name in [
+        "clock",
+        "run_id",
+        "deadline",
+        "families",
+        "stderr_terminal",
+        "stderr_columns",
+        "style_env",
+        "fail_files",
+    ] {
+        assert!(fields.iter().any(|f| f == name), "{name} not in {fields:?}");
+    }
 }
 
 #[test]

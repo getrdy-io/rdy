@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["url_userinfo"]
+forms = ["proxy_env", "proxy_json"]
+secrets = ["svc:${SYN:noscheme_pw}", "${SYN:noscheme_pw}"]
+note = "A proxy URL with no scheme after a proxy env key (also inside a systemd Environment= line) and after the Docker JSON keys. The host stays. A value under any other key is not read."

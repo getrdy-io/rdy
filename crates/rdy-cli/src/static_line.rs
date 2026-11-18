@@ -15,7 +15,7 @@
 //!
 //! **Retired by the live line.** The live line of M1-142 (PR #60) also prints "Running N checks", so
 //! whichever of PR #60 and PR #82 merges second deletes this file, `static_line/tests.rs`,
-//! `tests/run_static_line_pty.rs` and the gate call in `run_cmd` (PC-53 in 13). M1-088's static-line
+//! `tests/run_static_line_pty.rs` and the gate call in `run_cmd` (PC-54 in 13). M1-088's static-line
 //! clause is then retired, and `tests/run_progress_pty.rs` of PR #60 holds the proof for a pipe,
 //! `--quiet` and `TERM=dumb`. The `--verbose` part of the gate moves with M1-143 (PR #68).
 
