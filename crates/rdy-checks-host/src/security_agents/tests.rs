@@ -360,7 +360,11 @@ fn a_detection_in_a_limited_view_is_still_a_detection() {
     let ran = run_case("unreadable-comm", &check(&["falco"], &[]));
     let f = ran.finding();
     assert_eq!(f.level, Level::Fail, "{f:?}");
-    assert!(f.partial.is_some());
+    assert!(f.partial.is_none(), "a positive hit is certain: {f:?}");
+    let fix = f.fix.as_deref().expect("a fix");
+    assert!(!fix.contains("Run rdy as root"), "{fix}");
+    // The view is still reported as limited.
+    assert_eq!(f.observed["limited_view"], true);
 }
 
 #[test]

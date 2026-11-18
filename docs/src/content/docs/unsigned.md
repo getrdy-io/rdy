@@ -9,7 +9,7 @@ The spec decides which files rdy reads and which hosts it contacts. A spec that 
 
 The examples on this page assume `rdy` is on your `PATH`. See [Install](install.md).
 
-This page describes `--key` and `rdy verify` as they ship in 0.1.0. Older builds print `not yet implemented`. Upgrade first.
+This page describes `--key` and `rdy verify` as they ship in 0.1.0.
 
 ## What the flags do
 
@@ -18,7 +18,7 @@ This page describes `--key` and `rdy verify` as they ship in 0.1.0. Older builds
 - rdy prints `WARNING: UNSIGNED SPEC` before any check runs.
 - rdy marks every report from the run `UNSIGNED SPEC`.
 
-```sh
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run acme-quickstart.yaml --allow-unsigned
 ```
 
@@ -34,18 +34,20 @@ Anyone who can send you a spec can send you a key as easily. So a `--key` run pr
 
 On Linux and macOS, `rdy trust add` is the normal path. It shows the key's fingerprint and asks you to compare it with the one the vendor published. It saves the key only after you say yes. Then every run of that product checks against the saved key.
 
-```sh pending=M1-126
+```sh skip=page-test
 rdy trust add acme-platform --key acme-platform.pub
 ```
 
 Use `--key` on a run when you do not want to save the key. Before you run the spec, check the key with `rdy verify`. Compare the fingerprint it prints with the vendor's fingerprint. Get the vendor's fingerprint by another route than the spec.
 
-```sh pending=M1-126
+```sh skip=page-test
 rdy verify --key acme-platform.pub acme-platform.yaml
 rdy run --key acme-platform.pub acme-platform.yaml
 ```
 
 Only run the spec when the fingerprints match.
+
+Compare the full fingerprint that `rdy verify --key` prints. Do not compare the short fingerprint in the `KEY NOT PINNED` banner. Someone can grind a key until its short form matches the one you expect.
 
 ## What the flags never do
 
@@ -78,9 +80,9 @@ Check a spec with your vendor's key on Windows in these steps.
 
 1. Get the vendor's public key file. Get the fingerprint the vendor publishes, by another route than the spec.
 2. Put the spec, its `.minisig` file and the key file in one folder. Open a terminal in that folder.
-3. Check the signature. Compare the fingerprint that rdy prints with the vendor's.
+3. Check the signature. Compare the full fingerprint that rdy prints with the vendor's, not the short one in the banner.
 
-```powershell pending=M1-126
+```powershell skip=windows-only
 rdy verify --key acme-platform.pub acme-platform.yaml
 ```
 
@@ -88,7 +90,7 @@ Exit 0 means the signature is good for that key. If the fingerprints differ, do 
 
 4. Run the spec with the same key:
 
-```powershell pending=M1-126
+```powershell skip=windows-only
 rdy run --key acme-platform.pub acme-platform.yaml
 ```
 
