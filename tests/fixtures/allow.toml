@@ -179,6 +179,12 @@ reason = "The product's own site: the report page holds its footer link on purpo
 
 [[allow]]
 rule = "host"
+path = "tests/fixtures/reports/golden/ready-with-warnings-nothing-verified.html"
+value = "getrdy.io"
+reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
 path = "tests/fixtures/envs/all-pass/golden/report.html"
 value = "getrdy.io"
 reason = "The report footer links to the product site (07 D.4). It is our own name, and the page loads nothing from it"

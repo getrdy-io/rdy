@@ -604,3 +604,11 @@ fn a_losing_claim_or_park_never_returns() {
     thread::sleep(Duration::from_millis(50));
     assert!(!returned.load(Ordering::SeqCst));
 }
+
+#[test]
+fn the_notice_starts_on_a_fresh_line_only_on_a_terminal() {
+    assert_eq!(notice_bytes(false), NOTICE.as_bytes());
+    let on_terminal = notice_bytes(true);
+    assert_eq!(on_terminal.first(), Some(&b'\n'));
+    assert_eq!(&on_terminal[1..], NOTICE.as_bytes());
+}

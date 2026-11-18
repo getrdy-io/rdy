@@ -52,7 +52,7 @@ pub fn registry() -> Result<Registry, RegistryError> {
     for row in rows() {
         registry.register(Shared(row.family))?;
     }
-    registry.register(K8sFamily::with_env(Env::default()))?;
+    registry.register(K8sFamily::with_env(Env::empty()))?;
     Ok(registry)
 }
 

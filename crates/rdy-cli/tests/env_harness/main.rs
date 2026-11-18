@@ -236,6 +236,13 @@ fn no_privileges_shows_partial_results_and_a_missing_need_skip() -> TestResult {
             "host.security_agents"
         ]
     );
+    let all_partial = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| c.partial.is_some())
+        .count();
+    assert_eq!(all_partial, 5, "every partial result needs root");
     assert_eq!(
         run.terminal.lines().last(),
         Some("NOT READY: 1 required check was not run")
