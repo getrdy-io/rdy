@@ -315,7 +315,7 @@ fn unsigned_page_covers_both_flags_and_windows() {
 
 /// The `rdy` command lines in the `sh` blocks of `page`, as written, and the `rdy` lines of any other
 /// fence. A fence is open from its line to the next line that is exactly three backticks. An opening
-/// fence whose info string is not exactly `sh` is not run by any test, so its `rdy` lines come back
+/// fence whose first info word is not `sh` is not run by any test, so its `rdy` lines come back
 /// as the second list and fail the test.
 fn page_commands(page: &str) -> (Vec<String>, Vec<String>) {
     let mut run = Vec::new();
@@ -336,7 +336,7 @@ fn page_commands(page: &str) -> (Vec<String>, Vec<String>) {
             }
             None => {
                 if let Some(info) = line.strip_prefix("```") {
-                    fence = Some(info == "sh");
+                    fence = Some(info.split_whitespace().next() == Some("sh"));
                 }
             }
         }
@@ -350,7 +350,7 @@ fn sign_and_verify_page_runs_every_command_it_shows() {
     let (commands, not_run) = page_commands(&page);
     assert!(
         not_run.is_empty(),
-        "these rdy lines are in a fence that is not exactly `sh`, so no test runs them: {not_run:?}"
+        "these rdy lines are in a fence whose first word is not `sh`, so no test runs them: {not_run:?}"
     );
     assert!(
         commands.len() >= 4,

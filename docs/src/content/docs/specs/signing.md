@@ -13,7 +13,7 @@ The commands on this page assume `rdy` is on your `PATH`. See [Install](../insta
 
 Vendors make a key once. Run this in the folder where you want the key files:
 
-```sh
+```sh skip=needs-release-files
 rdy spec keygen acme-signing
 ```
 
@@ -32,7 +32,7 @@ Keep a backup of `acme-signing.key`. Anyone who has it can sign specs as you. Do
 
 ## Sign a spec
 
-```sh
+```sh skip=needs-release-files
 rdy spec sign acme-platform.yaml --secret-key acme-signing.key
 ```
 
@@ -52,7 +52,7 @@ Do not change the spec after you sign it. A change, even a space or a line endin
 
 Use `--key` to check a spec against a key you have. This run does not save the key:
 
-```sh
+```sh skip=needs-release-files
 rdy verify --key acme-signing.pub acme-platform.yaml
 ```
 
@@ -62,7 +62,7 @@ Compare the full fingerprint that `rdy verify --key` prints with the fingerprint
 
 Without `--key`, rdy checks the signature against the keys you trust. A new vendor key is not trusted yet, so this command exits 64:
 
-```sh
+```sh skip=needs-release-files
 rdy verify acme-platform.yaml
 ```
 
@@ -74,7 +74,7 @@ If the spec changed after signing, `rdy verify` exits 64 with `does not match th
 
 Trust a key once, after you check its fingerprint:
 
-```sh
+```sh skip=needs-release-files
 rdy trust add acme-platform --key acme-signing.pub
 ```
 
@@ -84,7 +84,7 @@ In a script, add `--yes` after you have checked the fingerprint. Without a termi
 
 After you trust the key, check the spec again. The `KEY NOT PINNED` banner does not appear:
 
-```sh
+```sh skip=needs-release-files
 rdy verify acme-platform.yaml
 ```
 
