@@ -33,8 +33,8 @@ HTTP side serves the VM agent's settings. It must be reachable as a nameserver a
    only because it came from the OS list on port 53. The IPv4-mapped, IPv4-compatible and NAT64 forms are
    not the exception. `udp_exchange`, `tcp`, `tls_chain`, `http` and `lookup` are unchanged and still
    refuse that address on every port, so a spec host cannot use the door.
-5. A refused nameserver is `Denied` with "nameserver in a refused range". The check reports Skipped with
-   that text for that nameserver. The GCE metadata address 169.254.169.254 is such a case.
+5. A refused nameserver is `Denied` with "nameserver in a refused range". The check marks that nameserver's row skipped
+   with that text and the result is partial; the check itself is not skipped. The GCE metadata address 169.254.169.254 is such a case.
 6. Caps: query 512 bytes, reply 4 KiB over UDP and 16 KiB over TCP (the cut is flagged), 3 s per call.
    The log entry is kind `dns` with `server`, `name`, `rtype`, `proto` `udp` (absent for TCP, as for
    `connect`), `bytes` and `truncated`. The payload and reply are never logged.

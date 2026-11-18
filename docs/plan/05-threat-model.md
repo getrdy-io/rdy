@@ -117,7 +117,7 @@ ADR 0010 stays as a second line.
   facade reads itself, so a check passes an index and never an address (INV-11). A spec host on any
   port, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay refused, each
   with a test. Any other nameserver in a refused range (the GCE metadata address 169.254.169.254, for
-  one) is refused with "nameserver in a refused range" and the check reports Skipped. The payload must be
+  one) is refused with "nameserver in a refused range"; the check marks that nameserver's row skipped with those words and the result is partial (the check is not skipped, and the system answer is still reported). The payload must be
   one plain DNS query of type A, AAAA, CNAME or SOA and class IN, ending right after the question (or a
   bare OPT record), and its name must be one of the check's spec hosts or the configured proxy's name,
   made of letters, digits, `-` and `_` only. So the door cannot carry other bytes to port 53 (SEC-155-1).

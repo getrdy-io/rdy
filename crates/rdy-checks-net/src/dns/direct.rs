@@ -54,17 +54,6 @@ pub(super) struct NsResult {
     pub(super) answer: NsAnswer,
 }
 
-/// A stable message ID for one question, so a reply to another question cannot pass. Not secret: this
-/// check reads, it does not defend against an off-path attacker.
-fn message_id(name: &str, index: usize, qtype: Qtype) -> u16 {
-    let mut h: u32 = 0x811c_9dc5;
-    for b in name.bytes().chain([index as u8, qtype as u8]) {
-        h ^= u32::from(b);
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    ((h >> 16) ^ h) as u16
-}
-
 /// What one exchange came to, before it is joined with the others.
 enum Exchange {
     Reply(wire::Reply),
@@ -78,8 +67,7 @@ async fn exchange(
     qtype: Qtype,
     transport: DnsTransport,
 ) -> Result<Exchange, CheckError> {
-    let id = message_id(name, index, qtype);
-    let query = match wire::build_query(name, qtype, id) {
+    let query = match wire::build_query(name, qtype) {
         Ok(q) => q,
         Err(why) => return Ok(Exchange::Over(NsAnswer::Bad(why))),
     };
@@ -88,12 +76,14 @@ async fn exchange(
         .nameserver_exchange(index, &query, transport)
         .await
     {
-        Ok(reply) => Ok(
-            match wire::parse_reply(&reply.bytes, reply.truncated, id, name, qtype) {
+        Ok(reply) => Ok(match reply.query_id {
+            // The facade picked the message ID and reports it. A reply without one cannot be matched.
+            None => Exchange::Over(NsAnswer::Bad("the facade gave no message ID")),
+            Some(id) => match wire::parse_reply(&reply.bytes, reply.truncated, id, name, qtype) {
                 Ok(parsed) => Exchange::Reply(parsed),
                 Err(why) => Exchange::Over(NsAnswer::Bad(why)),
             },
-        ),
+        }),
         Err(error) if error.is_no_network() => Err(CheckError::MissingNeed(Need::Network)),
         // A nameserver in a refused range (the GCE metadata address is the usual one) is skipped with
         // the facade's own words. Every other refusal is a mistake in this check's manifest.
