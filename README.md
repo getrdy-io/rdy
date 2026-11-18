@@ -97,15 +97,14 @@ $ echo $?
 2
 ```
 
-This text is not typed by hand. A test makes it from a recorded Linux machine that fails four required
-checks, so it is the same on every build. `<version>` stands for the version of rdy. Your numbers and
-your checks will differ.
+This text is not typed by hand. A test makes it from a recorded Linux machine, so it is the same on
+every build. `<version>` stands for the version of rdy. Your numbers and your checks will differ.
 
-Read it like this. Problems come first, each with its fix under it. Four required checks block, so the
-verdict is `NOT READY`. The example is unsigned, so you get the warning. Real specs are signed, and then
-you drop `--allow-unsigned`. To see what a run looks like with no network, add `--no-network`. Then
-`net.egress` is reported as not run, and a required check that did not run is never a pass: the verdict
-stays `NOT READY`.
+Read it like this. Problems come first, each with its fix under it. One required check blocks, and three
+required checks were not run, so the verdict is `NOT READY`. The example is unsigned, so you get the
+warning. Real specs are signed, and then you drop `--allow-unsigned`. To see what a run looks like with
+no network, add `--no-network`. Then `net.egress` is reported as not run, and a required check that did
+not run is never a pass: the verdict stays `NOT READY`.
 
 `READY` exits 0, `READY with warnings` exits 1, `NOT READY` exits 2. Exit 64 means the input must
 change (a bad flag, a spec with no valid signature). Exit 70 means rdy itself failed. Without
