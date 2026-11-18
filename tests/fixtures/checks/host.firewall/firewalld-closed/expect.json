@@ -24,16 +24,18 @@
         {
           "interface": "eth0",
           "manager": "firewalld",
-          "ports": {
-            "10250": {
-              "detail": "ports: 10250/tcp",
-              "verdict": "open"
-            },
-            "6443": {
+          "ports": [
+            {
               "detail": "not in ports or services, and the zone target is default",
+              "port": 6443,
               "verdict": "closed"
+            },
+            {
+              "detail": "ports: 10250/tcp",
+              "port": 10250,
+              "verdict": "open"
             }
-          },
+          ],
           "zone": "public"
         }
       ]

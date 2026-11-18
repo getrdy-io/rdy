@@ -1,0 +1,3 @@
+{
+  "symlinks": { "sys/class/dmi/id": "../../devices/virtual/dmi/id" }
+}

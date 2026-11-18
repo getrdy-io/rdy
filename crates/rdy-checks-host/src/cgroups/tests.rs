@@ -52,6 +52,7 @@ const CASES: &[(&str, &str)] = &[
     expect!("v2-memory-off-pi"),
     expect!("v1-hierarchy-not-mounted"),
     expect!("unmounted"),
+    expect!("hybrid-v2-lists-unreadable"),
 ];
 
 fn load(case: &str) -> Fixture {
@@ -120,6 +121,11 @@ fn run(fixture: &Fixture, check: CgroupsCheck) -> Run {
 
 fn run_case(case: &str) -> Run {
     run(&load(case), check_for(&entry_of(case)))
+}
+
+/// A case of the fixture folder asked a different question than its own entry.
+fn run_case_with(case: &str, entry: &Value) -> Run {
+    run(&load(case), check_for(entry))
 }
 
 fn level_word(level: Level) -> &'static str {
@@ -229,6 +235,7 @@ fn the_levels_are_what_the_catalog_says() {
         ("v2-memory-off-pi", Level::Fail),
         ("v1-hierarchy-not-mounted", Level::Warn),
         ("unmounted", Level::Warn),
+        ("hybrid-v2-lists-unreadable", Level::Warn),
     ] {
         assert_eq!(run_case(case).finding().level, level, "{case}");
     }
@@ -253,6 +260,7 @@ fn the_mapped_status_of_a_required_check_blocks_on_a_fail_and_passes_on_a_pass()
         ("v2-memory-off-pi", Status::Block),
         ("v1-hierarchy-not-mounted", Status::Warn),
         ("unmounted", Status::Warn),
+        ("hybrid-v2-lists-unreadable", Status::Warn),
     ] {
         assert_eq!(mapped_status(case, &none), status, "{case}");
     }
@@ -474,6 +482,29 @@ fn a_run_stays_inside_the_manifest_and_only_reads() {
 }
 
 #[test]
+fn a_hierarchy_zero_controller_on_a_hybrid_host_is_unconfirmed_only_when_the_v2_lists_are_unreadable()
+ {
+    // The v2 lists of this host cannot be read, so `pids` (hierarchy 0, the v2 tree) may be offered there.
+    let unread = run_case("hybrid-v2-lists-unreadable");
+    let f = unread.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(
+        f.message.contains("could not confirm `pids`"),
+        "{}",
+        f.message
+    );
+    // The same host with readable (empty) v2 lists: `pids` is attached to nothing, so it is missing.
+    let entry = json!({"id": "host.cgroups", "version": "v1", "controllers": ["pids"]});
+    let readable = run_case_with("hybrid-wanted-v1", &entry);
+    assert_eq!(
+        readable.finding().level,
+        Level::Fail,
+        "{:?}",
+        readable.finding()
+    );
+}
+
+#[test]
 fn every_fix_and_the_remediation_pass_the_fix_text_audit() {
     let mut seen = 0;
     for (case, _) in CASES {
@@ -484,7 +515,7 @@ fn every_fix_and_the_remediation_pass_the_fix_text_audit() {
             seen += 1;
         }
     }
-    assert_eq!(seen, 8);
+    assert_eq!(seen, 9, "only the cases that give a fix are counted");
     if let Err(error) = rdy_engine::fixtext::check(INFO.meta.remediation) {
         panic!("{error}");
     }

@@ -13,7 +13,7 @@ The example needs no root and no cloud account. It works offline too. You do not
 
 ## Check the version
 
-```sh
+```sh tested shape=^rdy\s\d+\.\d+\.\d+
 rdy version
 ```
 
@@ -31,7 +31,7 @@ Save the file in an empty folder. Change into that folder before you run the com
 
 ## Lint the spec
 
-```sh
+```sh tested shape=^acme-quickstart\.yaml:\s0\serrors,\s0\swarnings$
 rdy spec lint acme-quickstart.yaml
 ```
 
@@ -45,7 +45,7 @@ Lint exits 0 when the spec is clean. A spec with a mistake prints the line, a fi
 
 ## Run the checks
 
-```sh
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run acme-quickstart.yaml --allow-unsigned
 ```
 
@@ -88,7 +88,7 @@ The exit code is 2. Exit 2 means at least one check blocks, or a required check 
 
 ## Read the JSON report
 
-```sh
+```sh tested exit=2 shape="verdict":\s"not_ready"
 rdy run acme-quickstart.yaml --allow-unsigned --json
 ```
 

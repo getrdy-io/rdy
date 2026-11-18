@@ -482,7 +482,7 @@ fn the_banner_shows_the_spec_file_name_in_its_own_isolate() -> TestResult {
     doc["spec"]["file_name"] = json!("evil\u{202e}.yaml");
     let html = html_of(doc)?;
     assert!(html.contains(
-        "<p><bdi>evil\u{202e}.yaml</bdi> has no signature. rdy cannot tell who wrote it or whether it was changed.</p>"
+        "<p><bdi>evil\\u{202e}.yaml</bdi> has no signature. rdy cannot tell who wrote it or whether it was changed.</p>"
     ));
     Ok(())
 }
@@ -506,8 +506,8 @@ fn text_from_the_report_inside_a_sentence_is_isolated() -> TestResult {
     let mut doc = sample()?;
     doc["producer"]["version"] = json!("1.0\u{202e}x");
     let html = html_of(doc)?;
-    assert!(html.contains("with rdy <bdi>1.0\u{202e}x</bdi>"));
-    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi> | source: <a href="));
+    assert!(html.contains("with rdy <bdi>1.0\\u{202e}x</bdi>"));
+    assert!(html.contains("<p>rdy <bdi>1.0\\u{202e}x</bdi> | source: <a href="));
     assert!(html.contains("<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy"));
     Ok(())
 }
@@ -549,10 +549,10 @@ fn only_the_untrusted_words_of_a_reason_and_a_summary_are_isolated() -> TestResu
     ]);
     let html = html_of(doc)?;
     assert!(html.contains(
-        "<p>Checked in part. Could not read: root, <bdi>list nodes\u{202e}</bdi>. The result may be incomplete.</p>"
+        "<p>Checked in part. Could not read: root, <bdi>list nodes\\u{202e}</bdi>. The result may be incomplete.</p>"
     ));
-    assert!(html.contains("<p>Missing: the command <bdi>ss\u{202e}</bdi></p>"));
-    assert!(html.contains("<p>Requires: the command <bdi>ss\u{202e}</bdi> (not available)</p>"));
+    assert!(html.contains("<p>Missing: the command <bdi>ss\\u{202e}</bdi></p>"));
+    assert!(html.contains("<p>Requires: the command <bdi>ss\\u{202e}</bdi> (not available)</p>"));
     Ok(())
 }
 
@@ -1075,5 +1075,29 @@ fn the_table_lists_what_the_embedded_json_holds() -> TestResult {
     }
     // The writer shed entries, so the page says the log was cut.
     assert!(section.contains("rdy left some entries out of its own log"));
+    Ok(())
+}
+
+/// M1-141: a hostname with U+202E and a vendor fix with U+2066 render inside `<bdi>` as escapes, and the
+/// title carries the product escaped between its own isolates. The raw controls never reach the page
+/// outside the embedded JSON data block, except the one pair of isolates of the title.
+#[test]
+fn a_hostname_and_a_fix_with_bidi_controls_show_as_escapes_in_a_bdi() -> TestResult {
+    let mut doc = sample()?;
+    doc["host"]["hostname"] = json!("web\u{202e}01");
+    doc["checks"][1]["fix"] = json!("run \u{2066}rm -rf /");
+    doc["spec"]["product"] = json!("x\u{2069}\u{202e}");
+    let html = html_of(doc)?;
+    assert!(html.contains("on <bdi>web\\u{202e}01</bdi>"));
+    assert!(html.contains("</span> <bdi>run \\u{2066}rm -rf /</bdi></p>"));
+    assert!(
+        html.contains("<title>rdy report: NOT READY, \u{2068}x\\u{2069}\\u{202e}\u{2069}</title>")
+    );
+    let page = &html[..at(&html, OPEN)?];
+    let raw: Vec<char> = page
+        .chars()
+        .filter(|c| matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        .collect();
+    assert_eq!(raw, ['\u{2068}', '\u{2069}']);
     Ok(())
 }

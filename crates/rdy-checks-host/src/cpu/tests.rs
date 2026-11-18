@@ -71,7 +71,7 @@ fn flags(list: &[&str]) -> CpuCheck {
     CpuCheck::new(None, None, [], names(list))
 }
 
-const CASES: [&str; 12] = [
+const CASES: [&str; 15] = [
     "pass",
     "no-avx2",
     "quota-2",
@@ -84,6 +84,9 @@ const CASES: [&str; 12] = [
     "status-missing",
     "cgroup-malformed",
     "cgroup-self-malformed",
+    "recommended-cores",
+    "arch-mismatch",
+    "arm64-dmi-link",
 ];
 
 #[test]
@@ -507,6 +510,33 @@ fn the_check_reads_only_what_it_declares_and_only_the_cpu_files() {
     for path in crate::cgroup::READS {
         assert!(INFO.reads.contains(&path), "{path} is missing from reads");
     }
+}
+
+#[test]
+fn the_real_paths_of_the_dmi_reads_are_declared_beside_the_class_paths() {
+    for real in [DMI_PRODUCT_REAL, DMI_VENDOR_REAL] {
+        assert!(INFO.reads.contains(&real), "{real} is not declared");
+        assert!(real.starts_with("/sys/devices/virtual/dmi/id/"));
+    }
+}
+
+#[test]
+fn a_dmi_class_directory_that_is_a_link_is_read_through_and_judged_as_a_vm() {
+    // `/sys/class/dmi/id` is a link to `/sys/devices/virtual/dmi/id`. The check asks for the class paths,
+    // and the facade follows the link and judges the real path against the declared reads.
+    let ran = run_case("arm64-dmi-link", &min(2));
+    let f = ran.finding();
+    assert_eq!(f.observed["virtualization"], "vm", "{f:?}");
+    let paths = ran.paths();
+    assert!(paths.iter().any(|p| p == DMI_PRODUCT), "{paths:?}");
+    assert!(
+        ran.run
+            .action_log()
+            .actions
+            .iter()
+            .all(|a| a.outcome != rdy_spec::result::ActionOutcome::Denied),
+        "no read was refused"
+    );
 }
 
 #[test]
