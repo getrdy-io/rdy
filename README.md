@@ -6,8 +6,8 @@ rdy checks a machine, a Kubernetes cluster or (later) a cloud account against a 
 written requirements, before the install. It tells you what is wrong and how to fix it. One signed
 binary. No runtime. Works offline.
 
-> **Pre-release.** No release is tagged yet. `rdy run` works on `main` today with 24 checks (host,
-> network and Kubernetes). The install command below is the shape it will have. Until a tag exists you
+> **Pre-release.** No release is tagged yet. `rdy run` works on `main` today with host,
+> network and Kubernetes checks. The install command below is the shape it will have. Until a tag exists you
 > build from source. [Status](#status) says what works and what is planned.
 
 ## The problem
@@ -46,7 +46,7 @@ live host, and the spec files `not-ready.yaml` and `ready.yaml` are test fixture
 `examples/`. Your output will differ. Problems come first, each with its fix under it. Passing checks
 come last.
 
-```console skip=placeholder transcript=tests/fixtures/readme/run-not-ready.txt
+```console skip=page-test transcript=tests/fixtures/readme/run-not-ready.txt
 $ rdy run not-ready.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
 not-ready.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
@@ -107,7 +107,7 @@ $ echo $?
 
 The team resizes the disk, frees the port and opens the firewall rule. They run it again.
 
-```console skip=placeholder transcript=tests/fixtures/readme/run-ready.txt
+```console skip=page-test transcript=tests/fixtures/readme/run-ready.txt
 $ rdy run ready.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
 ready.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
@@ -209,14 +209,14 @@ $ echo $?
 ```
 
 A check marked `severity: warn` that did not run is an optional check not run. It gives
-`READY with warnings` at worst. A CI gate written as `[ $? -le 1 ]` therefore never passes an
-environment nobody checked.
+`READY with warnings` at worst. A CI gate written as `[ $? -le 1 ]` therefore never passes a
+required check nobody ran.
 
 ## Install and first run
 
 Releases are signed. The M1 install path is the `install.sh` file attached to a pinned GitHub release.
 It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.1.3 or newer on your
-PATH. Without it, the script stops and installs nothing. It checks the signature of the checksum file
+PATH. Without it, the script stops and installs nothing. `RDY_INSECURE_SKIP_SIGNATURE=1` skips only the cosign signature check, prints a warning, and the sha256 check still runs. Otherwise the script checks the signature of the checksum file
 and the sha256 of the archive before it makes anything executable. It never runs `sudo` and never edits
 your shell profile. It writes one file, `rdy`, to `$HOME/.local/bin`, or to the folder in
 `RDY_INSTALL_DIR`, and prints a PATH hint. As root, it refuses unless you pass `--allow-root`, and then
@@ -225,7 +225,7 @@ it writes `/usr/local/bin/rdy`, unless `RDY_INSTALL_DIR` is set.
 There is no tagged release yet. When there is one, the tags look like `v0.1.0-alpha.N` and the
 command is this:
 
-```sh skip=placeholder
+```sh skip=network
 TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
 curl --proto '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
 "$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
@@ -243,7 +243,7 @@ and verify it by hand, as below. A PowerShell installer is planned for M3.
 Download, verify and unpack by hand. The archive holds `rdy-<triple>/rdy`. One signed file,
 `SHA256SUMS`, lists every asset:
 
-```sh skip=placeholder
+```sh skip=network
 TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
 BASE=https://github.com/getrdy-io/rdy/releases/download/$TAG
 F=rdy-x86_64-unknown-linux-musl.tar.gz   # pick the file for your platform
@@ -278,16 +278,16 @@ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
 
 It takes a few seconds. rdy runs what it can, and says what it could not run and why. It never asks for
 sudo. Expect `NOT READY` and exit 2. The example talks to `registry.acme.example`, which does not exist,
-so `net.egress` blocks and names the endpoints it could not reach. On a small machine you may also see
+so `net.egress` blocks and names the endpoints it could not reach. On a small Linux machine you may also see
 `BLOCK` on `host.memory` or `WARN` on `host.disk`, each with its fix. `--no-network` opens no
 connections. Then `net.egress` is reported as not run, and the verdict is still `NOT READY`.
 
 rdy also writes a new folder in the current directory, and never overwrites one. It holds
-`rdy-report-<spec>-<time>.html`, the same data as `.json`, and a copy of the spec. The HTML is one
+`rdy-report-<product>-<time>.html`, the same data as `.json`, and a copy of the spec. The HTML is one
 self-contained page you can email or print. `--out-dir <dir>` picks the parent folder and `--no-report`
 writes no files.
 
-To see green, copy the spec and point `net.egress` at a host you can reach. In a real install you fix
+To see green on Linux, copy the spec and point `net.egress` at a host you can reach. In a real install you fix
 the machine, not the spec. This is only so you can see a green run on whatever you are holding:
 
 ```sh skip=network
@@ -296,7 +296,7 @@ sed 's|\["registry.acme.example:443", "license.acme.example:443"\]|["github.com:
 rdy run my-spec.yaml --allow-unsigned
 ```
 
-On a machine with 4 cores, 8 GiB of RAM, 20 GiB free and a route to github.com, that ends in `READY`
+On Linux, on a machine with 4 cores, 8 GiB of RAM, 20 GiB free and a route to github.com, that ends in `READY`
 and exit 0. If the disk is short, you get `READY with warnings` and exit 1.
 
 ## Why it is safe to run
@@ -353,7 +353,7 @@ parse `message` or `fix`.
 | Host | CPU, memory, disk, OS, kernel, cgroups, time sync, ports, SELinux and AppArmor, firewall, security agents, sysctl, container runtime | In `rdy run`, on Linux. On macOS and Windows they report not run |
 | Network | egress, proxy, MTU, TLS interception | In `rdy run` |
 | Network | DNS, registry, bandwidth | Planned after 0.1.0 |
-| Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission, namespace, nodes | In `rdy run`. Tested on recorded fixtures, not yet on live clusters |
+| Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission, namespace, nodes | In `rdy run`. Tested on recorded fixtures and on kind clusters in CI |
 | Diagnostics bundle | redacted collection and upload | Planned (M2) |
 | AWS account | IAM dry run, quotas, regions | Planned (M3) |
 | GPU | driver, CUDA, VRAM, device plugin | Planned (M4) |
