@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 183 | 404 |
-| M1, core | 155 | 344 |
+| M1, all | 183 | 404.5 |
+| M1, core | 155 | 344.5 |
 | M1, `core: no` (the cut list) | 28 | 60 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -113,7 +113,7 @@ and Dec 28 run at half capacity.
 | 5 | Dec 21 to Dec 27, 2026 | 6.5 | 6 | 2 Spec parser, result model, engine core | M1-023 to M1-025 | `v0.1.0-alpha.4`: same CLI; typed parameters for the M1 host, net and k8s check ids |
 | 6 | Dec 28, 2026 to Jan 3, 2027 | 6.5 | 6.5 | 2 Spec parser, result model, engine core | M1-026 to M1-028 | `v0.1.0-alpha.5`: same CLI; semantic validation, parser property tests, root CI job |
 | 7 | Jan 4 to Jan 10, 2027 | 13 | 14 | 2 Spec parser, result model, engine core | M1-029 to M1-032, M1-123 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
-| 8 | Jan 11 to Jan 17, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-033 to M1-037 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP |
+| 8 | Jan 11 to Jan 17, 2027 | 13 | 14.5 | 2 Spec parser, result model, engine core; 6 Signing, `rdy verify`, 0.1.0 | M1-033 to M1-037, M1-112 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP; `--password` refused on argv |
 | 9 | Jan 18 to Jan 24, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-038 to M1-042 | `v0.1.0-alpha.8`: commands only through the mediated runner; action log; privilege snapshot |
 | 10 | Jan 25 to Jan 31, 2027 | 13 | 14.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048, M1-170 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; machine identity files denied; redactor core |
 | 11 | Feb 1 to Feb 7, 2027 | 13 | 15 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056, M1-169 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted; facade `read_link` |
@@ -125,11 +125,11 @@ and Dec 28 run at half capacity.
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-091 to M1-095, M1-141, M1-168 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy; umask 077 and an inherited-descriptor warning at start-up |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-100, M1-180, M1-184 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; every TLS result says no revocation check |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072, M1-181 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux; `rdy run` writes the HTML report next to the JSON |
-| 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
-| 21 | Apr 12 to Apr 18, 2027 | 13 | 15 | 4 Network checks; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115, M1-101 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; TLS verifier review closed |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 15 | 4 Network checks; 5 Kubernetes checks | M1-105 to M1-109, M1-101 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI; TLS verifier review closed |
+| 21 | Apr 12 to Apr 18, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-110, M1-111, M1-113 to M1-115, M1-182 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; no proxy password in host.container_runtime evidence |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120, M1-175 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
-| 23 | Apr 26 to May 2, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-125, M1-177, M1-185, M1-186 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign`; the fixture envs serve a cluster; the terminal report names missing grants |
-| 24 | May 3 to May 9, 2027 | 13 | 15 | 3 Host checks, HTML report; 6 Signing, `rdy verify`, 0.1.0 | M1-126, M1-127, M1-129 to M1-131, M1-182 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove`; no proxy password in host.container_runtime evidence |
+| 23 | Apr 26 to May 2, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-125, M1-177, M1-185 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign`; the fixture envs serve a cluster |
+| 24 | May 3 to May 9, 2027 | 13 | 14 | 3 Host checks, HTML report; 6 Signing, `rdy verify`, 0.1.0 | M1-126, M1-127, M1-129 to M1-131, M1-186 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove`; the terminal report names missing grants |
 | 25 | May 10 to May 16, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-128, M1-132, M1-134 to M1-139, M1-183 | **`v0.1.0`**: signing review closed; every spec read refuses a FIFO or device within 1 s; sign page; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 12.5 | Non-core, steps 2 and 3 | M1-140, M1-142, M1-144, M1-145, M1-172, M1-178 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |

@@ -650,17 +650,19 @@ the corrections log of `11-backlog.md`.
   new M2-152 (2 h), which wires the generated-chain rig into the env driver; its SEC-22 run uses a
   loopback-literal variant spec. The moved M1 rows stay as stubs that say `moved to M2-xxx`, and 11's "How
   to work the backlog" states the rule. 03's `### net.registry (M1-late)` and `### net.bandwidth (M1-late)`
-  headings carry the tag in their text and a test reads them, so they stay; the network table, a Milestone
-  line in each section and the tickets-implied list say M2. The env harness cannot serve a cluster: the
-  kube mock is `cfg(test)` and the family opens a real kubeconfig and socket. New core M1-185 (2 h) exports
-  the mock behind `testing` and adds the k8s parts of `all-pass` (from M1-107 and M1-117; M1-107 goes to
-  3.5 h) and `all-block` (from M1-118). `no-privileges` has no kubeconfig, so no check there fills
+  headings are left as they are (the tests read only the heading id); the network table, a Milestone line
+  in each section and the tickets-implied list say M2. The env harness cannot serve a cluster: the
+  kube mock is `cfg(test)` and the family opens a real kubeconfig and socket. New core M1-185 (3 h) exports
+  the mock behind `testing` and adds the k8s parts of `all-pass` (from M1-107 and M1-117), `all-block`
+  (from M1-118) and `warnings-only` (no default StorageClass, which had no owner), and the `timeouts` slow
+  `/version` case (from M1-107 and M1-119; M1-107 goes to 3 h). `no-privileges` has no kubeconfig, so no check there fills
   `partial.missing_grants`, but k8s.version and k8s.storageclass fill it without a namespace, so the golden
   stays in M1: new core M1-186 (1 h) prints the field in the terminal, with the `all-block` golden. 07 had
   no wording for it, so cli-ux adds the line to 07 section 2.2. M1-138 depends on both. The pending-claim
   age moves to M2-142 (+0.5 h), which also hands `run.clock` to `StorageClassCheck`. The `all-block` TLS
   interception moves to M2-152, and 08's table says so. M1-118 goes to 1.5 h. M1-154 depends on M1-155.
   New M2-146 (1 h) builds the release's macOS arm64 target on `macos-15`, and new M2-147 (2 h) runs the
-  signing and unsigned pages through docs-test with the #112 nits. M1-124, M1-169, M1-170 and M1-174
-  (merged) move to weeks 13, 11, 10 and 14, so weeks 23 and 22 hold 15 h and 14.5 h. M1-101's progress line
+  signing and unsigned pages through docs-test with the #112 nits. M1-185 runs in week 23 and M1-186 in week
+  24. The merged M1-124, M1-169, M1-170, M1-174, M1-112, M1-101 and M1-182 move to weeks 13, 11, 10, 14, 8,
+  20 and 21, so no week holds more than 15 h. M1-101's progress line
   gets PR #104. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
