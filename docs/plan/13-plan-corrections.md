@@ -637,3 +637,30 @@ the corrections log of `11-backlog.md`.
   each. #62 also extends the `pods` entry that M1-115 removes, so the first of M1-159 and M1-162 to merge
   adds the entry, the role rule and the live read citing only its own check, and the second adds its id.
   Weeks 29 and 30 go to 13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-58, three non-core tickets move to M2, the env harness serves a cluster, the terminal
+  prints missing grants, and four M2 follow-ups.** From the M1-118, M1-156, M1-158 and M1-166 builds, the
+  security review of `ci/macos-arm64-gate` (finding 3) and the PR #112 review. Correction-49 is PR #85.
+  `Probe::http` sends a fixed `Accept`, keeps no body, reports no `WWW-Authenticate` and cannot send a
+  Bearer token, and it cuts every body at 64 KiB and 5 s with no `Range` and no per-read samples. So
+  net.registry and net.bandwidth cannot be built on it. M1-156 moves to M2-149 after new M2-148 (3 h: an
+  `Accept` allow-list, a Bearer token registered as a known secret, a captured body of at most 64 KiB that
+  is never logged, and the auth and rate-limit headers), and M1-158 moves to M2-151 after new M2-150 (2 h:
+  `range`, a `sample` of at most 100 MiB and 10 s, per-read samples). security-reviewer reviews both, and
+  one ADR covers them. The env driver has no scripted TLS, so M1-166 (net-airgapped) moves to M2-153 after
+  new M2-152 (2 h), which wires the generated-chain rig into the env driver; its SEC-22 run uses a
+  loopback-literal variant spec. The moved M1 rows stay as stubs that say `moved to M2-xxx`, and 11's "How
+  to work the backlog" states the rule. 03's `### net.registry (M1-late)` and `### net.bandwidth (M1-late)`
+  headings carry the tag in their text and a test reads them, so they stay; the network table, a Milestone
+  line in each section and the tickets-implied list say M2. The env harness cannot serve a cluster: the
+  kube mock is `cfg(test)` and the family opens a real kubeconfig and socket. New core M1-185 (2 h) exports
+  the mock behind `testing` and adds the k8s parts of `all-pass` (from M1-107 and M1-117; M1-107 goes to
+  3.5 h) and `all-block` (from M1-118). `no-privileges` has no kubeconfig, so no check there fills
+  `partial.missing_grants`, but k8s.version and k8s.storageclass fill it without a namespace, so the golden
+  stays in M1: new core M1-186 (1 h) prints the field in the terminal, with the `all-block` golden. 07 had
+  no wording for it, so cli-ux adds the line to 07 section 2.2. M1-138 depends on both. The pending-claim
+  age moves to M2-142 (+0.5 h), which also hands `run.clock` to `StorageClassCheck`. The `all-block` TLS
+  interception moves to M2-152, and 08's table says so. M1-118 goes to 1.5 h. M1-154 depends on M1-155.
+  New M2-146 (1 h) builds the release's macOS arm64 target on `macos-15`, and new M2-147 (2 h) runs the
+  signing and unsigned pages through docs-test with the #112 nits. M1-124, M1-169, M1-170 and M1-174
+  (merged) move to weeks 13, 11, 10 and 14, so weeks 23 and 22 hold 15 h and 14.5 h. M1-101's progress line
+  gets PR #104. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.

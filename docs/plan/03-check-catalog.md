@@ -227,9 +227,9 @@ Shared stack, all through the probe facade: `tokio::net::TcpStream` opened by th
 | 2 | `net.proxy` | M1 | none | The proxy settings the product would really see |
 | 3 | `net.tls_intercept` | M1 | none | Is a middlebox re-signing TLS |
 | 4 | `net.dns` | M1-late | none | Names resolve, by the system and by each nameserver |
-| 5 | `net.registry` | M1-late | none | OCI registry API, token host and blob host |
+| 5 | `net.registry` | M2 | none | OCI registry API, token host and blob host |
 | 6 | `net.mtu` | M1-late | none | Interface MTU and overlay headroom |
-| 7 | `net.bandwidth` | M1-late | none | Download throughput sample |
+| 7 | `net.bandwidth` | M2 | none | Download throughput sample |
 
 ### net.egress (M1)
 - **Measures:** for each endpoint, per stage: DNS, TCP connect, TLS handshake (chain, SNI, ALPN), optional HTTP request; direct and through the proxy; latency; the `Date` header skew (evidence only, no other check reads it); the `Location` host of any redirect.
@@ -275,6 +275,7 @@ Shared stack, all through the probe facade: `tokio::net::TcpStream` opened by th
 - **Fixture:** `resolv.conf` (stub and real), `nsswitch.conf` (with `sss` and mdns), recorded `getent` output (found, not found exit 2, timeout, dual-stack rows), an in-process scripted DNS server (`hickory-server` with default features off, dev dependency) with zones for NXDOMAIN, SERVFAIL, delayed and split answers. Exit test includes `cargo deny check`.
 
 ### net.registry (M1-late)
+- **Milestone:** M2 (M2-149, moved from M1-156 by correction-58). The heading keeps "M1-late" because a test reads it. `Probe::http` sends a fixed `Accept`, keeps no body, reports no `WWW-Authenticate` and cannot send a Bearer token, so M2-148 extends the facade first: an `Accept` allow-list, the anonymous Bearer token registered as a known secret, a captured body of at most 64 KiB that is never logged, and `www-authenticate` and `ratelimit-remaining` in the reported headers.
 - **Measures:** an OCI registry works end to end: API ping, auth token host, manifest, and the host that serves layer blobs.
 - **Source:** `GET https://<host>/v2/` (200 or 401); parse `WWW-Authenticate: Bearer realm=...,service=...`. Hosts the spec does not list are not contacted (ADR 0009): the token realm host and any blob redirect host are recorded, and the text says which to add under `hosts`. For listed public images: anonymous token, then on `docker.io` a manifest `HEAD` (does not count against the anonymous pull limit), on other registries a manifest `GET` with the OCI and Docker v2 `Accept` types (a multi-arch index is resolved to the first matching platform), then `HEAD` on the config blob, which is served from the same blob host as the layers. Never reads or sends credentials. Reports mirror settings found in `/etc/docker/daemon.json` and `/etc/containerd/certs.d/*`, and Docker Hub rate-limit headers when present.
 - **Needs:** needs Network, 15s per step.
@@ -291,6 +292,7 @@ Shared stack, all through the probe facade: `tokio::net::TcpStream` opened by th
 - **Fixture:** `/sys/class/net` trees, `/proc/net/route`, `/proc/net/ipv6_route` (`native/sysinfo_networks.json` arrives with M2-010).
 
 ### net.bandwidth (M1-late)
+- **Milestone:** M2 (M2-151, moved from M1-158 by correction-58). The heading keeps "M1-late" because a test reads it. `Probe::http` cuts every body at 64 KiB and 5 s, sends no `Range` and gives no per-read samples, so M2-150 extends the facade first: `range`, a `sample` of at most 100 MiB and 10 s for that call only, and `(bytes, instant)` samples from the facade clock.
 - **Measures:** single-stream download rate and time to first byte from a vendor-chosen URL (a lower bound).
 - **Source:** facade GET through the resolved proxy with `Range: bytes=0-{bytes-1}` and `Accept-Encoding: identity`; stream and discard, never buffer; stopped at `bytes` (default 10 MiB, max 100 MiB) or 10s. A response shorter than 1 MiB reports "sample too small", not a rate. The rate is measured after the first 10% to avoid slow-start bias. No upload in any case. No default URL. The URL goes into evidence as `scheme://host:port/path` only (presigned URLs).
 - **Needs:** needs Network, 15s.
@@ -841,9 +843,9 @@ Host M1-late
 Network M1-late
 - [M1] net.dns system answer (getent path, name validation, fallback, timeout evidence) (M1-late) | owner: check-author | est: 3h | depends on: Command table and argument allow-lists from Appendix A; net.egress staged connector (lookup, dual-stack connect, TLS, ALPN) | exit test: found, not found (exit 2), AAAA-only, dual-stack rows deduped, and a leading-`-` name rejected; with `getent` absent the fallback is used and says so.
 - [M1] net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted DNS server (M1-late) | owner: check-author | est: 3h | depends on: net.dns system answer (getent path, name validation, fallback, timeout evidence) (M1-late) | exit test: split-horizon and slow-first-nameserver fixtures warn, NXDOMAIN blocks, and `cargo deny check` passes with `hickory` default features off.
-- [M1] net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late) | owner: check-author | est: 4h | depends on: net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence | exit test: a mock whose listed blob host is closed blocks and names it, an unlisted blob host warns "add it", a multi-arch index resolves.
+- [M2] net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late; M2-149 since correction-58) | owner: check-author | est: 4h | depends on: net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence | exit test: a mock whose listed blob host is closed blocks and names it, an unlisted blob host warns "add it", a multi-arch index resolves.
 - [M1] net.mtu (Linux sysfs, sysinfo elsewhere, overlay overhead tables) (M1-late) | owner: check-author | est: 2h | depends on: Fixture manifest (symlinks, unreadable, dirs), placeholders and Windows-safe command names | exit test: MTU 1450 with `overlay: vxlan` and `min_mtu: 1450` blocks (1450 minus 50 is 1400, which fits `min_mtu: 1400`), MTU 9001 is informational without `overlay`.
-- [M1] net.bandwidth (ranged sample, injected clock) (M1-late) | owner: check-author | est: 2h | depends on: net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence | exit test: fixed `(bytes, instant)` samples give the expected rate, a 500 KiB response says "sample too small", a loose loopback smoke test is within a factor of 2.
+- [M2] net.bandwidth (ranged sample, injected clock) (M1-late; M2-151 since correction-58) | owner: check-author | est: 2h | depends on: net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence | exit test: fixed `(bytes, instant)` samples give the expected rate, a 500 KiB response says "sample too small", a loose loopback smoke test is within a factor of 2.
 - [M1] macOS and Windows sources for net.proxy, net.dns and net.mtu (M1-late) | owner: check-author | est: 3h | depends on: net.proxy (process env, systemd drop-ins, NO_PROXY coverage, PAC detection, reachability) | exit test: `scutil` and registry fixtures parse to the expected proxy and nameserver lists.
 
 Kubernetes M1-late
