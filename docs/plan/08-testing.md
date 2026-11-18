@@ -351,7 +351,8 @@ Rules that keep these stable:
 | --- | --- | --- |
 | linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
 | linux-arm64 | `ubuntu-24.04-arm`, musl | Unit, property, fixtures, goldens, in-process CLI, real-binary tests |
-| macos-arm64, macos-x64 | `macos-15`, `macos-15-intel` | Same, with the Unix process tests |
+| macos-arm64 | `macos-15` | Same, with the Unix process tests |
+| macos-x64-build | `macos-15` | `x86_64-apple-darwin` compile only. The tests run in `macos-intel.yml` on `macos-15-intel`, on main and nightly (ADR 0050) |
 | windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
 
 **The `root_*` convention.** A test that needs uid 0 has a name whose last path segment starts with `root_`

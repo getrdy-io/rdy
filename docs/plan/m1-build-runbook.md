@@ -291,7 +291,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0050. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+- The next free ADR is 0051 (0050 is the macOS CI gate, `ci/macos-arm64-gate`). ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165). ADR 0047 is on the M1-133 branch. ADR 0048 is reserved for M1-136's docs-test ADR
   (its branch numbers it 0046). ADR 0049 is correction-56's (Proposed).
@@ -547,9 +547,8 @@ Hand steps an agent cannot do (also in the Founder hand steps list in `11-backlo
 - Delete the throwaway branches `tmp/m1-005-clippy`, `tmp/m1-005-openssl`, `tmp/m1-005-unsigned` and
   `tmp/m1-005-signed`, and any merged `m1/*` branches. The agent proxy refuses branch deletes.
 
-- Enable macOS arm64 runners for the org (none are assigned today; see #21 and correction-05). Then
-  move the macos-arm64 test leg back into ci-ok.
-- Update CLAUDE.md's "Five CI legs" wording for the temporary arm64 exception (correction-05).
+- Done by ADR 0050 (2026-11-18): the gate runs the arm64 tests on `macos-15`, and `macos-intel.yml` runs the
+  Intel tests on main and nightly. CLAUDE.md's "Five CI legs" wording is updated.
 - Run the release-sandbox proof in 06 "Sandbox proof" before M1-010 (correction-07).
 - Add a ruleset that restricts tag creation (M1-007).
 - Delete `tmp/m1-006-macos-probe` as well.
