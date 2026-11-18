@@ -32,6 +32,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::NetFamily;
 
+mod proxy;
+
 // ---- the harness --------------------------------------------------------------------------------
 
 struct Ran {
@@ -97,10 +99,32 @@ fn params(entry: &CheckSpec) -> NetEgress {
 }
 
 async fn run_on(replay: Replay, endpoints: Value, extra: Value, needs: &[Need]) -> Ran {
-    run_on_with(TestRun::new(replay), endpoints, extra, needs).await
+    run_via(replay, endpoints, extra, needs, None).await
 }
 
-async fn run_on_with(run: TestRun, endpoints: Value, extra: Value, needs: &[Need]) -> Ran {
+/// Like [`run_on`], with the run's proxy set the way `rdy run` sets it from `HTTPS_PROXY`.
+async fn run_via(
+    replay: Replay,
+    endpoints: Value,
+    extra: Value,
+    needs: &[Need],
+    proxy: Option<&str>,
+) -> Ran {
+    let run = match proxy {
+        Some(text) => TestRun::new(replay).with_proxy(text),
+        None => TestRun::new(replay),
+    };
+    run_with(run, endpoints, extra, needs).await
+}
+
+/// Like [`run_via`], with the proxy read from the machine's environment as `rdy run` reads it, so the
+/// variable it came from is known.
+async fn run_from_env(replay: Replay, endpoints: Value, extra: Value, needs: &[Need]) -> Ran {
+    let run = TestRun::new(replay).with_proxy_from_env();
+    run_with(run, endpoints, extra, needs).await
+}
+
+async fn run_with(run: TestRun, endpoints: Value, extra: Value, needs: &[Need]) -> Ran {
     let entry = entry(&endpoints, &extra);
     let params = params(&entry);
     let hosts = HostSet::new(params.endpoints.iter().map(|e| e.target.clone()));
@@ -370,7 +394,7 @@ async fn a_connect_slower_than_max_latency_warns() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_proxy_only_endpoint_is_not_tried_and_the_result_is_partial() {
+async fn a_proxy_only_endpoint_with_no_proxy_is_not_tried_and_the_result_is_partial() {
     let ran = run_on(
         case("pass-plain"),
         json!(["web.acme.test:8080"]),
@@ -531,7 +555,7 @@ async fn the_revocation_note_is_said_once_for_many_tls_endpoints() {
         {"target": target, "tls": true},
         {"target": target, "tls": true, "optional": true},
     ]);
-    let ran = run_on_with(run, endpoints, json!({}), NET).await;
+    let ran = run_with(run, endpoints, json!({}), NET).await;
     assert!(ran.finding().observed["endpoints"][1]["tls_stage"].is_object());
     assert_eq!(
         ran.finding().level,
@@ -1302,8 +1326,10 @@ fn the_info_declares_the_network_need_and_only_the_spec_hosts() {
     assert_eq!(INFO.id, "net.egress");
     assert_eq!(INFO.needs, &[Need::Network]);
     assert!(INFO.wants.is_empty(), "root adds nothing to this check");
-    assert_eq!(INFO.peers, &[PeerClass::SpecHosts]);
-    assert!(INFO.reads.is_empty() && INFO.commands.is_empty() && INFO.env.is_empty());
+    assert_eq!(INFO.peers, &[PeerClass::SpecHosts, PeerClass::Proxy]);
+    assert!(INFO.reads.is_empty() && INFO.commands.is_empty());
+    // `NO_PROXY` is read only to say it is not applied yet.
+    assert_eq!(INFO.env, &["NO_PROXY", "no_proxy"]);
     assert_eq!(
         INFO.default_timeout,
         Some(std::time::Duration::from_secs(60))
@@ -1428,14 +1454,14 @@ fn endpoints_not_tried_are_grouped_by_their_own_reason() {
     let params = params(&entry);
     let specs: Vec<_> = params.endpoints.iter().cloned().collect();
     let probed = vec![
-        stage::Probed::not_tried(&specs[0], PROXY_LATER),
+        stage::Probed::not_tried(&specs[0], NO_PROXY_SET),
         stage::Probed::not_tried(&specs[1], stage::OUT_OF_TIME),
         stage::Probed::not_tried(&specs[2], stage::OUT_OF_TIME),
     ];
     let finding = EgressCheck::new(params).judge(Os::Linux, &probed);
     let note = finding.partial.expect("partial").note;
     assert!(
-        note.contains(&format!("1 of 3 endpoints were not tried: {PROXY_LATER}")),
+        note.contains(&format!("1 of 3 endpoints were not tried: {NO_PROXY_SET}")),
         "{note}"
     );
     assert!(
@@ -1540,10 +1566,22 @@ async fn a_name_that_rebinds_to_a_metadata_address_between_lookups_is_refused_an
 fn every_fix_text_on_every_os_names_only_listed_commands_and_no_foreign_paths() {
     for os in [Os::Linux, Os::Macos, Os::Windows] {
         for class in Class::ALL {
-            let text = class.fix(os, "web.acme.test", 8443, Some("192.0.2.9:8443"));
-            if let Err(error) = rdy_engine::fixtext::check(&text) {
-                panic!("{os:?} {}: {error}", class.id());
+            // The proxy classes read their own detail words, so every one is audited.
+            for detail in [
+                "192.0.2.9:8443",
+                "request",
+                "negotiate",
+                "rejected HTTPS_PROXY",
+                "needed http_proxy",
+                "HTTP_PROXY",
+                "502",
+            ] {
+                let text = class.fix(os, "web.acme.test", 8443, Some(detail));
+                if let Err(error) = rdy_engine::fixtext::check(&text) {
+                    panic!("{os:?} {} {detail}: {error}", class.id());
+                }
             }
+            let text = class.fix(os, "web.acme.test", 8443, Some("192.0.2.9:8443"));
             if os != Os::Linux {
                 for linux_only in [
                     "timedatectl",

@@ -19,6 +19,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 mod common;
+use common::NoProxyEnv;
 
 /// The user the tests drop to when they run as root (a local run under `sudo`). CI runs as its own user.
 const UNPRIVILEGED_ID: u32 = 65534;
@@ -84,6 +85,7 @@ fn run_for(binary: &Path, args: &[&str], limit: Duration) -> Ended {
     command
         .args(args)
         .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

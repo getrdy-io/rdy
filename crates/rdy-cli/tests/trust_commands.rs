@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 mod common;
+use common::NoProxyEnv;
 
 use rdy_spec::sig::PublicKey;
 
@@ -105,6 +106,7 @@ impl Home {
             .env("HOME", self.home())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("NO_COLOR")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -476,6 +478,7 @@ mod pty {
             .env("HOME", home.home())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("NO_COLOR");
         let mut session =
             rexpect::session::spawn_command(cmd, Some(TIMEOUT_MS)).expect("spawn on a pty");
