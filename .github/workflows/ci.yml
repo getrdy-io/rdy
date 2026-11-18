@@ -439,6 +439,8 @@ jobs:
       TARGET: x86_64-unknown-linux-musl
       # Makes a `root_*` test fail, not skip, when it does not run as uid 0.
       RDY_REQUIRE_ROOT: "1"
+      # Makes the no-phone-home test (M1-128, SEC-22) fail, not skip, without strace or `unshare -n`.
+      RDY_REQUIRE_STRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -451,6 +453,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends strace musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
           strace -V
+      # The no-phone-home test runs rdy under `unshare -n`. Ubuntu 24.04 blocks unprivileged user
+      # namespaces, so it needs sudo. A runner image without it fails here, not as a skipped test.
+      - name: Check that sudo unshare -n works
+        run: sudo unshare -n -- true
       - name: Install the pinned toolchain and the target
         run: |
           rustup toolchain install --no-self-update
@@ -473,7 +479,7 @@ jobs:
           nextest="$(command -v cargo-nextest)"
           echo "uid under sudo: $(sudo id -u)"
           test "$(sudo id -u)" = 0
-          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT \
+          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT,RDY_REQUIRE_STRACE \
             "$nextest" nextest run \
             --archive-file "$RUNNER_TEMP/rdy-tests.tar.zst" \
             --workspace-remap "$PWD" \
