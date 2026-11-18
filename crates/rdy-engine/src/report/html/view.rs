@@ -22,6 +22,33 @@ pub(super) const LEGEND: &str =
 /// How the verdict is decided, in plain words (01 section 6 item 2, 07 D.7).
 pub(super) const RULE: &str = "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.";
 
+/// The sentence after "What to do next" that is the same for every verdict (07 D.7).
+pub(super) const SHARE: &str = "To share this result, send the .json file from the same folder.";
+
+/// What to do next, by verdict (07 D.7). Fixed product text, so it is not shown in `<bdi>`.
+fn next_step(
+    verdict: Verdict,
+    reason: Option<&rdy_spec::result::VerdictReason>,
+    summary: &Summary,
+) -> String {
+    use rdy_spec::result::VerdictReason;
+    match (verdict, reason) {
+        (Verdict::Ready, _) => "Everything the spec asks for passed.".to_owned(),
+        (Verdict::ReadyWithWarnings, Some(VerdictReason::NothingVerified)) => "rdy checked nothing on this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that is expected, or follow the fix for each skipped check.".to_owned(),
+        (Verdict::ReadyWithWarnings, _) => "Nothing blocks the install. Read the warnings.".to_owned(),
+        _ if summary.block > 0 => format!(
+            "Fix the {} {} below, then run rdy again.",
+            summary.block,
+            if summary.block == 1 { "block" } else { "blocks" }
+        ),
+        _ => format!(
+            "rdy could not check {} required {}. Follow the fix for each, then run rdy again.",
+            summary.required_not_run,
+            if summary.required_not_run == 1 { "item" } else { "items" }
+        ),
+    }
+}
+
 /// A banner at the top of the page.
 pub(super) struct Banner {
     /// The first line, in capitals.
@@ -174,6 +201,13 @@ pub(super) struct View {
     pub summary_line: String,
     /// True when no check has status block: the header then says "No blocks." (07 D.7).
     pub no_blocks: bool,
+    /// "What to do next" for this verdict (07 D.7).
+    pub next_step: String,
+    /// The sentence on how to share the result, the same for every verdict (07 D.7).
+    pub share: &'static str,
+    /// The spec's `metadata.contact`, shown as plain text, never a link. It comes from the
+    /// spec, so the template wraps it in `<bdi>`.
+    pub contact: Option<Shown>,
     pub legend: &'static str,
     pub rule: &'static str,
     pub run_when: Shown,
@@ -258,6 +292,7 @@ impl View {
             _ => "verdict-not-ready",
         };
         let banners = banners(report);
+        let summary = Summary::from_checks(&report.checks);
         Ok(Self {
             product: shown(&report.spec.product),
             title_product: format!("\u{2068}{}\u{2069}", shown(&report.spec.product)),
@@ -268,7 +303,10 @@ impl View {
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
             summary_line: summary_line(&report.checks),
-            no_blocks: Summary::from_checks(&report.checks).block == 0,
+            no_blocks: summary.block == 0,
+            next_step: next_step(judgement.verdict, judgement.reason.as_ref(), &summary),
+            share: SHARE,
+            contact: report.spec.contact.as_deref().map(shown),
             legend: LEGEND,
             rule: RULE,
             run_when: shown(&utc_text(&report.run.started_at)),
