@@ -32,6 +32,14 @@
 //! switch escaping off (the `safe` filter, `escape = "none"`, a second marker, the askama features that
 //! add `json` and `urlencode` filters), M1-078.
 //!
+//! **Format characters (M1-141).** Every string from the report goes through `shown` in `view.rs` before it
+//! reaches the template: each Unicode format (Cf) and zero-width character, among them the bidi controls
+//! U+202A to U+202E and U+2066 to U+2069, is written as an escape like `\u{202e}`. A `<bdi>` limits
+//! reordering but a U+2069 in the text can close it early, so the escape is what keeps a hostname or a
+//! vendor fix from reordering the words around it. The `<title>` cannot hold `<bdi>`, so it wraps the escaped
+//! product in one U+2068 and one U+2069 of ours. The embedded JSON data block keeps the report's text as
+//! the `.json` file has it, because the page must hold the same bytes. No browser shows that block.
+//!
 //! **Print.** `@media print` is black on white whatever the screen theme: it sets `color-scheme: light`
 //! and replaces every variable of the dark palette, with no backgrounds. No raw JSON key is visible
 //! text in the template (a test scans it).

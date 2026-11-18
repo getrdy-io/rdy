@@ -404,6 +404,11 @@ jobs:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
           RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
+      # The docs-test runner (M1-136, ADR 0048) already ran in nextest above. This step runs it again by
+      # name, on the same build, so each leg's log shows how many tested blocks ran, or why Windows skipped them.
+      - name: docs-test (tested blocks of the README and the pages)
+        if: ${{ !matrix.compile_only }}
+        run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci -E 'binary(docs_test)' --no-capture
       # A golden file that no test compared is an orphan: its test was renamed or deleted (M1-052).
       - name: No orphaned golden files
         if: matrix.name == 'linux-x64'
@@ -440,6 +445,8 @@ jobs:
       TARGET: x86_64-unknown-linux-musl
       # Makes a `root_*` test fail, not skip, when it does not run as uid 0.
       RDY_REQUIRE_ROOT: "1"
+      # Makes the no-phone-home test (M1-128, SEC-22) fail, not skip, without strace or `unshare -n`.
+      RDY_REQUIRE_STRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -452,6 +459,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends strace musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
           strace -V
+      # The no-phone-home test runs rdy under `unshare -n`. Ubuntu 24.04 blocks unprivileged user
+      # namespaces, so it needs sudo. A runner image without it fails here, not as a skipped test.
+      - name: Check that sudo unshare -n works
+        run: sudo unshare -n -- true
       - name: Install the pinned toolchain and the target
         run: |
           rustup toolchain install --no-self-update
@@ -474,7 +485,7 @@ jobs:
           nextest="$(command -v cargo-nextest)"
           echo "uid under sudo: $(sudo id -u)"
           test "$(sudo id -u)" = 0
-          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT \
+          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT,RDY_REQUIRE_STRACE \
             "$nextest" nextest run \
             --archive-file "$RUNNER_TEMP/rdy-tests.tar.zst" \
             --workspace-remap "$PWD" \

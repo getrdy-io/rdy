@@ -280,7 +280,7 @@ The house rules apply to every page. These ten rules are the docs version.
 4. **Use the present tense and the active voice.** "rdy writes the report," not "the report is written."
 5. **No em dashes and no en dashes.** Use a full stop, a comma or a colon. `cargo xtask docs-lint` fails on either character.
 6. **Use plain words.** Avoid corporate words such as "leverage," "empower," "seamless," "robust," "solution," "journey" and "unlock." `docs-lint` also checks tracked text files for banned tokens. The banned list is stored as SHA-256 hashes of lowercase tokens in the xtask. The banned words are never written in plain text anywhere in the repo, so the check cannot leak the list it enforces.
-7. **Test every command you show.** From M2, a command in a fenced block either runs in `docs-test` or it is marked as pending with the ticket that owns it. Until then, the first-run commands are integration test cases. Show real output, with synthetic names only.
+7. **Test every command you show.** From M2, a command in a fenced block either runs in `docs-test`, is marked as pending with the ticket that owns it, or is skipped with a reason from a closed list: `placeholder`, `builds`, `network`, `needs-release-files` or `windows-only`. Until then, the first-run commands are integration test cases. Show real output, with synthetic names only.
 8. **Give every failure a fix.** When a page names a failure, it names the remediation next to it. Copy the remediation text from the registry, not from memory.
 9. **Name what is not built yet.** Write "Ships in M3," not "coming soon." Readers can plan around a milestone.
 10. **Link, do not repeat.** Each fact has one home. Exit codes live on one page. Field lists come from the generated reference. Never edit a generated page; fix the generator or the source.
@@ -343,7 +343,7 @@ cargo xtask docs --check
 cd docs && pnpm install --frozen-lockfile && pnpm dev
 ```
 
-From M2, tested blocks run in `docs-test`. A block marked `tested` runs in an empty temporary directory with `rdy` on `PATH` and the repo's `examples/` copied in. A block may declare its exit set, for example ```` ```sh tested exit=0|1|2 ````. A block marked `install-only` runs only in the post-release verify job, through a block extraction script that `06` owns.
+From M2, tested blocks run in `docs-test`. A block marked `tested` runs in an empty temporary directory with `rdy` on `PATH` and the repo's `examples/` copied in. A block declares its exit set and a shape regex, for example ```` ```sh tested exit=0|1|2 shape=^NOT\sREADY ````. The marker words, the run folder, the `--no-network` rule and the README transcript goldens are in ADR 0048. M1 runs them in an integration test of the `rdy` package (`crates/rdy-cli/tests/docs_test.rs`), not in `xtask`. A block marked `install-only` runs only in the post-release verify job, through a block extraction script that `06` owns.
 
 ## Plan corrections found
 
