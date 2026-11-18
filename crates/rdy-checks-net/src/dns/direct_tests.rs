@@ -656,7 +656,10 @@ async fn musl_image_without_getent_with_sss_gets_the_documented_warning() {
     assert_eq!(finding.observed["names"][0]["source"], "rdy_resolver");
     assert_eq!(finding.observed["direct"]["nsswitch_hosts"]["sss"], true);
     assert!(
-        finding.notes.iter().any(|n| n.strip_suffix('.') == Some(SSS_WARNING)),
+        finding
+            .notes
+            .iter()
+            .any(|n| n.strip_suffix('.') == Some(SSS_WARNING)),
         "{:?}",
         finding.notes
     );
