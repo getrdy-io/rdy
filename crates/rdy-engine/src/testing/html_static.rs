@@ -67,10 +67,24 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     Some(tag[start..start + end].to_owned())
 }
 
-/// The hrefs a page may hold besides `#id` links, written out in full. The footer links of 07 D.4 are
-/// added here, exactly, when the page gets a footer. Until then the page links nowhere outside itself, and
-/// a new off-file `href` fails every page check.
-const OUTSIDE_HREFS: [&str; 0] = [];
+/// The footer links of 07 D.4: the source repository, and the product link. The product link has only
+/// `ref=report` and the product, percent-encoded to unreserved characters, so it cannot carry anything else.
+/// Any other off-file `href` fails every page check. The page is lower-cased before this runs.
+const REPO_HREF: &str = "https://github.com/getrdy-io/rdy";
+
+/// Where the product link starts. askama writes `&` in an attribute as `&#38;`.
+const PRODUCT_HREF: &str = "https://getrdy.io/?ref=report&#38;product=";
+
+/// Whether `href` is one of the two footer links.
+fn is_footer_href(href: &str) -> bool {
+    href == REPO_HREF
+        || href.strip_prefix(PRODUCT_HREF).is_some_and(|product| {
+            !product.is_empty()
+                && product
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '%'))
+        })
+}
 
 /// The static checks of ADR 0003 on one HTML report page. `what` names the page in a failure. It panics on
 /// a broken rule and returns an error when the page is not shaped as expected at all (no head, no data
@@ -163,7 +177,7 @@ pub fn assert_static_html(what: &str, html: &str) -> Result<(), Box<dyn Error>> 
         let href = attribute(&tag, "href").ok_or("a link has no href")?;
         if !href.starts_with('#') {
             assert!(
-                OUTSIDE_HREFS.contains(&href.as_str()),
+                is_footer_href(&href),
                 "{what}: an outside link that is not allowed: {href}"
             );
             assert_eq!(

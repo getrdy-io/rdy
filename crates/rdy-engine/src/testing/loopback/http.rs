@@ -11,6 +11,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::ring::default_provider;
+use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
+use tokio_rustls::rustls::sign::CertifiedKey;
+use tokio_rustls::rustls::version::{TLS12, TLS13};
 
 use super::{Guard, Leaf, serve};
 
@@ -68,6 +71,25 @@ impl Request {
     }
 }
 
+/// The one TLS version a server speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TlsVersion {
+    /// TLS 1.2.
+    Tls12,
+    /// TLS 1.3.
+    Tls13,
+}
+
+/// Serves one certified key whatever the client asks for.
+#[derive(Debug)]
+struct Forged(Arc<CertifiedKey>);
+
+impl ResolvesServerCert for Forged {
+    fn resolve(&self, _hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        Some(Arc::clone(&self.0))
+    }
+}
+
 /// How to start an [`HttpServer`].
 pub struct HttpOptions {
     tls: Option<ServerConfig>,
@@ -119,6 +141,43 @@ impl HttpOptions {
         }
     }
 
+    /// A TLS server that sends the chain of `sent` and signs the handshake with the key of `key_of`,
+    /// which it does not hold the certificate for: a server that replays a leaf it has no key for
+    /// (M1-184). It speaks only `version`. Both keys come from the same generator, so they use the
+    /// same algorithm and the handshake fails on the signature, not on a scheme mismatch.
+    ///
+    /// # Panics
+    ///
+    /// If the key cannot be loaded, which is a broken build.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
+    pub fn tls_signing_with_another_key(sent: &Leaf, key_of: &Leaf, version: TlsVersion) -> Self {
+        let provider = Arc::new(default_provider());
+        let signing = provider
+            .key_provider
+            .load_private_key(key_of.key())
+            .expect("load the other key");
+        let resolver = Arc::new(Forged(Arc::new(CertifiedKey::new(
+            sent.chain().to_vec(),
+            signing,
+        ))));
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[match version {
+                TlsVersion::Tls12 => &TLS12,
+                TlsVersion::Tls13 => &TLS13,
+            }])
+            .expect("TLS protocol version")
+            .with_no_client_auth()
+            .with_cert_resolver(resolver);
+        Self {
+            tls: Some(config),
+            ..Self::plain()
+        }
+    }
+
     /// What the server answers.
     #[must_use]
     pub fn reply(mut self, reply: Reply) -> Self {
@@ -154,6 +213,7 @@ impl HttpOptions {
 #[derive(Debug, Default)]
 struct Shared {
     accepted: AtomicUsize,
+    finished: AtomicUsize,
     handshakes: AtomicUsize,
     application_bytes: AtomicUsize,
     sni: Mutex<Vec<Option<String>>>,
@@ -229,6 +289,13 @@ impl HttpServer {
         self.shared.accepted.load(Ordering::SeqCst)
     }
 
+    /// Connections the server has finished with, after the last byte it will read from them. A test
+    /// waits on it before it reads `application_bytes`, which is counted while a connection is read.
+    #[must_use]
+    pub fn finished(&self) -> usize {
+        self.shared.finished.load(Ordering::SeqCst)
+    }
+
     /// TLS handshakes that finished.
     #[must_use]
     pub fn handshakes(&self) -> usize {
@@ -271,8 +338,19 @@ async fn handle(
     date: String,
 ) {
     shared.accepted.fetch_add(1, Ordering::SeqCst);
+    serve_one(stream, &shared, acceptor, &reply, &date).await;
+    shared.finished.fetch_add(1, Ordering::SeqCst);
+}
+
+async fn serve_one(
+    stream: TcpStream,
+    shared: &Shared,
+    acceptor: Option<TlsAcceptor>,
+    reply: &Reply,
+    date: &str,
+) {
     match acceptor {
-        None => exchange(stream, &shared, &reply, &date).await,
+        None => exchange(stream, shared, reply, date).await,
         Some(acceptor) => {
             let Ok(tls) = acceptor.accept(stream).await else {
                 return;
@@ -284,7 +362,7 @@ async fn handle(
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(name);
-            exchange(tls, &shared, &reply, &date).await;
+            exchange(tls, shared, reply, date).await;
         }
     }
 }

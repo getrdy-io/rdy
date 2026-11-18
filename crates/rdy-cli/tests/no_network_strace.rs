@@ -23,6 +23,8 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::expect_used)]
 
+mod common;
+use common::NoProxyEnv;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,7 +68,10 @@ fn traced(argv: &[&OsStr], envs: &[(&str, &str)], log: &Path) -> Option<Traced> 
     for (key, value) in envs {
         command.env(key, value);
     }
-    command.env_remove("RDY_PROGRESS").env_remove("RUST_LOG");
+    command
+        .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
+        .env_remove("RUST_LOG");
     let output = match command.output() {
         Ok(output) => output,
         Err(error) => return skip_or_fail(&format!("strace did not start: {error}")),

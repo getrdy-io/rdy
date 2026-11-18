@@ -9,6 +9,7 @@
 use std::process::{Command, Output};
 
 mod common;
+use common::NoProxyEnv;
 
 const ENV_CANARY: &str = "canary-binary-env-1";
 const ARG_CANARY: &str = "canary-binary-arg-2";
@@ -18,6 +19,7 @@ fn rdy(args: &[&str], rust_log: Option<&str>) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rdy"));
     cmd.args(args)
         .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
         .env_remove("RUST_LOG")
         .env("API_TOKEN", ENV_CANARY);
     if let Some(level) = rust_log {

@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-env-store-canary-user"
+summary = "A trust store named by SSL_CERT_FILE and SSL_CERT_DIR, under a canary user name that must not reach the result"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

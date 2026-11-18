@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/getent",
+    "ahosts",
+    "--",
+    "slow.acme.test"
+  ],
+  "stdout": "",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 60000
+}
