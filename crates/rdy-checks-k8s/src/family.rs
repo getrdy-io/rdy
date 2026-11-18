@@ -50,12 +50,16 @@ mod tests;
 /// The ids of this crate that the family does not build yet. The planner skips each as `not_in_build`.
 /// Their checks exist. M1-175 gives them a spec entry (the target namespace of the k8s block of the spec for
 /// three of them), adds the arm to [`K8sFamily::build`] and takes the id off this list.
-static NOT_BUILT: [&str; 4] = [
+static NOT_BUILT: [&str; 5] = [
     "k8s.admission",
     "k8s.namespace",
+    "k8s.nodes",
     "k8s.rbac",
     "k8s.storageclass",
 ];
+
+/// The most time the probe spends on the OpenShift group list.
+const OPENSHIFT_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// What a check that has no cluster to read sees: no version.
 static NO_VERSION: ServerVersion = ServerVersion {
@@ -82,6 +86,15 @@ impl K8sFamily {
         Self {
             holder: Arc::new(Holder::new(None)),
         }
+    }
+
+    /// The cluster as the checks of this family see it: the answer of the run's attempt, read when a check
+    /// asks. Before the probe has run, and when it did not reach the cluster, it holds no connection (a
+    /// client from it refuses every request, and `read_only_as` says it is not connected). Every call
+    /// returns a handle to the same answer.
+    #[must_use]
+    pub fn cluster(&self) -> Arc<dyn Cluster> {
+        Arc::clone(&self.holder) as Arc<dyn Cluster>
     }
 
     /// A family that reads `env` and not the process. Tests use it, so they never change the process.
@@ -160,6 +173,7 @@ impl Holder {
 
     /// The probe: one attempt to reach the cluster, in the order of the module text.
     async fn attempt(&self, ctx: FamilyProbe<'_>) -> Result<Vec<Capability>, FamilyFatal> {
+        let started = std::time::Instant::now();
         if !ctx.network {
             self.settle(Dialed::no_network());
             return Ok(vec![unavailable(
@@ -224,7 +238,26 @@ impl Holder {
             Ok(connected) => {
                 let mut cap = Capability::new(Need::KubeContext.wire(), true);
                 cap.detail = Some(format!("{}", connected.line()));
+                // Settle first: what follows is extra, and a probe that the engine ends in the middle of
+                // it still leaves the connection as the answer.
                 self.settle(Dialed::reached(connected));
+                // A check that words its fix for OpenShift (k8s.rbac) needs to know. One group list, asked
+                // only when the plan holds that check, on the run's own probe, and for OPENSHIFT_LIMIT at
+                // most: a server that never answers it must not use the time of the probe.
+                if ctx.checks.iter().any(|info| info.id == "k8s.rbac")
+                    && let Some(connected) = self.dialed.get().and_then(Dialed::connected)
+                {
+                    // Never more than the probe has left, with a margin: a slow connect plus a hung
+                    // `/apis` must not overrun the family limit.
+                    let left = FAMILY_PROBE_LIMIT
+                        .saturating_sub(started.elapsed())
+                        .saturating_sub(std::time::Duration::from_millis(500));
+                    let _ = rdy_engine::blocking::within(
+                        OPENSHIFT_LIMIT.min(left),
+                        connected.discover_openshift(&ctx.probe),
+                    )
+                    .await;
+                }
                 Ok(vec![cap])
             }
             Err(error) => Ok(self.failed(Some(facts), error)),
@@ -294,6 +327,13 @@ impl Cluster for Holder {
             // No connection: there is nothing to impersonate on. A check that needs the cluster never runs here.
             None => Err(ImpersonationError::NotConnected),
         }
+    }
+
+    fn is_openshift(&self) -> bool {
+        self.dialed
+            .get()
+            .and_then(Dialed::connected)
+            .is_some_and(|connected| connected.is_openshift())
     }
 
     /// Sorts an error with what the connection knows: the server, the credential plugin, whether a proxy

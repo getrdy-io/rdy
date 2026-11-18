@@ -62,6 +62,12 @@ mod namespace;
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
+mod nodes;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 mod provisioners;
 #[forbid(
     clippy::disallowed_methods,
@@ -93,6 +99,7 @@ pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
 pub use family::K8sFamily;
 pub use namespace::NamespaceCheck;
+pub use nodes::NodesCheck;
 pub use rbac::RbacCheck;
 pub use storageclass::StorageClassCheck;
 pub use version::VersionCheck;

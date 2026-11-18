@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-prefer-no-schedule"
+summary = "A node with a PreferNoSchedule taint, which does not keep pods off"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true
