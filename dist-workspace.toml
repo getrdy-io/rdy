@@ -65,8 +65,8 @@ pr-run-mode = "plan"
 [dist.github-custom-runners]
 x86_64-unknown-linux-musl = "ubuntu-24.04"
 aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
-# The org has no macOS arm64 runners (ADR 0006, decision 8). This target is cross-compiled on the
-# Intel runner and not run there. Move it to macos-15 when the org has arm64 runners.
+# Release is not the PR gate (ADR 0050). The aarch64 target is cross-compiled on the Intel runner and
+# not run there. Moving it to macos-15, which the CI gate now uses, is follow-up work.
 aarch64-apple-darwin = "macos-15-intel"
 x86_64-apple-darwin = "macos-15-intel"
 x86_64-pc-windows-msvc = "windows-2022"
