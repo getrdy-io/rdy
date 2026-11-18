@@ -28,10 +28,11 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 /// The file stems of the three goldens (07 Appendix B.1 to B.3). The result file of each is the stem
 /// without `results-` in `tests/fixtures/results/plan-07/`.
-const GOLDENS: [&str; 3] = [
+const GOLDENS: [&str; 4] = [
     "results-b1-ready",
     "results-b2-ready-with-warnings",
     "results-b3-not-ready",
+    "ready-with-warnings-nothing-verified",
 ];
 
 /// The words of the status span of an `h3` (`status_word` in `report/html/view.rs`).
@@ -67,12 +68,13 @@ fn golden_html(stem: &str) -> TestResult<String> {
     std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
-/// The product the result file of the golden `stem` names.
+/// The product the result file of the golden `stem` names. A golden without the `results-` prefix is
+/// built from the `not-ready-7.2.json` sample, so that file names its product.
 fn golden_product(stem: &str) -> TestResult<String> {
-    let name = stem
-        .strip_prefix("results-")
-        .ok_or("not a results golden")?;
-    let path = fixtures_dir().join(format!("results/plan-07/{name}.json"));
+    let path = match stem.strip_prefix("results-") {
+        Some(name) => fixtures_dir().join(format!("results/plan-07/{name}.json")),
+        None => fixtures_dir().join("reports/not-ready-7.2.json"),
+    };
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let doc: Value = serde_json::from_str(&text)?;
     Ok(doc["spec"]["product"]
