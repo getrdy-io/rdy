@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-windows-env-names"
+summary = "A Windows host with both spellings of a proxy variable set"
+origin = "hand"
+os = "windows"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = false
+kube = false

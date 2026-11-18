@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-daemon-json-proxy"
+summary = "Docker has its proxy in daemon.json, with a planted password"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false
