@@ -23,10 +23,10 @@ static CHECKS: [&CheckInfo; 4] = [
 
 /// The `net` family.
 ///
-/// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.proxy` ([`ProxyCheck`]),
-/// `net.mtu` ([`MtuCheck`]) and `net.tls_intercept` ([`TlsInterceptCheck`]). A check gets the hosts its
-/// own spec entry lists and no others (INV-11): for `net.egress`, its `endpoints`; for
-/// `net.tls_intercept`, its `hosts`, or by default the TLS endpoints of the spec's `net.egress` entries.
+/// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.proxy` ([`ProxyCheck`]), `net.mtu` ([`MtuCheck`]) and
+/// `net.tls_intercept` ([`TlsInterceptCheck`]). A check gets the hosts its own spec entry lists and no
+/// others (INV-11): for `net.egress`, its `endpoints`; for `net.tls_intercept`, its `hosts`, or by
+/// default the TLS endpoints of the spec's `net.egress` entries.
 /// `net.dns`, `net.registry` and `net.bandwidth` are reserved ids that
 /// no family lists yet, so the planner skips them with `not_in_build`. Each ticket that writes one adds
 /// its [`CheckInfo`] to the list and its arm to [`Family::build`]. There are no stubs, so the family may

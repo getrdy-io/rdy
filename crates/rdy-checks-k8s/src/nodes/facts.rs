@@ -388,6 +388,7 @@ pub(super) enum Platform {
     Eks,
     EksAuto,
     Gke,
+    GkeAutopilot,
     Aks,
     OpenShift,
     Other,
@@ -411,6 +412,8 @@ impl NodeFacts {
             || kubelet.contains("-eks-")
         {
             Platform::Eks
+        } else if self.name.starts_with("gk3-") {
+            Platform::GkeAutopilot
         } else if has("cloud.google.com/gke-nodepool") || kubelet.contains("-gke.") {
             Platform::Gke
         } else if has("kubernetes.azure.com/cluster") {

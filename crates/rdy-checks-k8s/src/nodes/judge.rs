@@ -24,7 +24,7 @@ use rdy_engine::check::{Finding, Level, Partial};
 use rdy_spec::check::K8sNodes;
 use serde_json::{Value, json};
 
-use super::facts::{Excluded, NodeFacts, RESOURCES, Resource, command_arg, shown};
+use super::facts::{Excluded, NodeFacts, Platform, RESOURCES, Resource, command_arg, shown};
 use super::fix;
 use crate::namespace::amount::{Amount, show};
 
@@ -161,6 +161,8 @@ pub(super) struct Assessment<'a> {
     /// A capacity service that sizes new nodes to pending pods (Karpenter, Auto Mode, Autopilot, node
     /// auto-provisioning), from the labels of any node.
     managed: Option<&'static str>,
+    /// A node runs on GKE or AKS, whose own autoscaler leaves no object that rdy may read.
+    hosted: bool,
 }
 
 impl<'a> Assessment<'a> {
@@ -191,6 +193,9 @@ impl<'a> Assessment<'a> {
                 .min_ready
                 .map(|n| usize::try_from(n.get()).unwrap_or(usize::MAX)),
             managed: nodes.iter().find_map(NodeFacts::scaler_hint),
+            hosted: nodes
+                .iter()
+                .any(|node| matches!(node.platform(), Platform::Gke | Platform::Aks)),
         }
     }
 
@@ -276,6 +281,12 @@ pub(super) fn finish(
         notes.push(format!(
             "rdy could not check for a node autoscaler ({why}), so the shortfall stands."
         ));
+    }
+    if found.only_a_count_is_short() && found.hosted && !matches!(scaler, Some(Scaler::Found(_))) {
+        notes.push(
+            "managed autoscalers are invisible without a ConfigMap read, so check by hand: `kubectl get nodes` after a scale-up, or the node pool settings in the cloud console."
+                .to_owned(),
+        );
     }
     if params.per_node.is_some()
         && let Some(managed) = found.managed
