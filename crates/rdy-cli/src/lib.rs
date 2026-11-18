@@ -61,8 +61,8 @@ pub mod style;
 pub mod terminal;
 
 mod spec_cmds;
-mod static_line;
 mod spec_load;
+mod static_line;
 
 #[doc(hidden)]
 pub mod trust;
