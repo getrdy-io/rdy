@@ -14,7 +14,8 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 1. Every side effect goes through `Probe`, so a fixture can answer every question a check asks.
 2. Every fixture is synthetic. A lint enforces it.
 3. Fixtures are data. A Linux environment replays on a Windows runner. Only the thin native closures
-   (`statvfs`, the Windows registry) are behind `cfg`.
+   (`statvfs`, the Windows registry) are behind `cfg`. In M1 the env harness still skips an environment of
+   another OS, until M2-130 (see Environments).
 4. The CLI is tested in process. Tests call `rdy_cli::run(args, backend, out, err)` with the Replay backend.
    No shipped binary contains a way to read a fixture directory.
 5. A golden is the exact bytes the product writes. It changes only with `UPDATE_GOLDENS=1`, and a golden
@@ -33,7 +34,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, Replay | One check against one fixture case; scheduler, timeouts, panics, cancellation | All five legs |
 | Loopback network | `rdy_engine::testing::loopback`, behind the `loopback` feature of `rdy-engine` (ADR 0035) | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
-| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
+| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs; in M1 an environment runs only on the legs of its own OS (see Environments) |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
 | Live CI jobs | `ci.yml`; the kind job is `kind.yml` (M1-108, ADR 0039, not a gate) | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
 | Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
@@ -197,7 +198,7 @@ command. It fails on:
   case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout`
   case where it declares a command, a peer or a `statfs` prefix. A case counts through its `expect.json`
   (`result.level`, `result.partial`, `result.timed_out_ms`). A `PENDING` list in the test names what is still
-  owed and by which ticket (empty since M1-174), and a row that is no longer true is a failure; a missing
+  owed and by which ticket (only the Timeout class of checks that cut a hang themselves, until M1-179), and a row that is no longer true is a failure; a missing
   `checks/_policy/symlink-to-shadow` stays in the lint file.
 
 Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
@@ -214,8 +215,14 @@ M2 adds the rule that nothing in a fixture changes under the redactor (it needs 
 
 ### Environments
 
-Five in M1, because the M1 exit test needs exit codes 0, 1 and 2 on every leg, and `all-pass` already has
-host, net and k8s facts in it. The rest are M2.
+Five in M1, because the M1 exit test needs exit codes 0, 1 and 2, and `all-pass` already has host, net and
+k8s facts in it. The rest are M2.
+
+In M1 the env harness runs an environment only on the legs of its `os` (a deviation decided in M1-086, PR #42).
+`rdy_cli::run` plans for `current_os()` and has no hook to change it, so the harness skips an environment of
+another OS with a line on stderr. Every M1 environment is a Linux machine, so they run on the two Linux legs,
+and macOS and Windows skip them. M2-130 adds a `RunHooks` OS override, `None` in the shipped binary, and then
+every environment runs on all five legs (correction-48).
 
 | Env | Milestone | Story | Verdict, exit |
 | --- | --- | --- | --- |
@@ -223,7 +230,7 @@ host, net and k8s facts in it. The rest are M2.
 | `warnings-only` | M1 | Swap on, port inside the ephemeral range, one `NO_PROXY` gap, no default StorageClass | `ready_with_warnings`, 1 |
 | `all-block` | M1 | 8 GiB RAM, disk full, 6443 held, egress refused, TLS interception, cluster too old, RBAC denied | `not_ready`, 2 |
 | `no-privileges` | M1 | Not root, audit log unreadable, no kubeconfig: partial results and `missing_need` skips | `not_ready`, 2 |
-| `timeouts` | M1 | Commands with `delay_ms` past the limit, a black-hole endpoint, a slow `/version`, a hung `statvfs` | `not_ready`, 2 |
+| `timeouts` | M1 | A black-hole endpoint and a hung `statvfs`; M1-107 adds a slow `/version` while the cluster client is built (correction-50) | `not_ready`, 2 |
 | `net-airgapped` | M2, first to add back | No default route, internal DNS only, public endpoints refused, mirror reachable; runs `acme-airgap-host.yaml` | per spec |
 | `host-ubuntu2204-container` | M2 | `memory.max` 8 GiB on a 64 GiB host, `cpu.max` quota, overlayfs, `noexec` tmpfs | per spec |
 | `net-corp-proxy` | M2 | 407 Basic proxy, CONNECT ok, `NO_PROXY` gap, private-CA interception | `not_ready`, 2 |
@@ -249,7 +256,7 @@ Windows marks host checks `not_yet_on_os`, a pure unit test with no I/O.
 **What is golden.** Per environment: `report.json` (the `--json` stdout), `report.html` and `terminal.txt`
 (stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`, an
 `entry` (the spec entry the check runs with) and a `result` (the finding, error or timeout), compared by
-`rdy_engine::testing::assert_cases` through the scheduler on a paused clock.
+`rdy_engine::testing::assert_cases` through the scheduler on a paused clock (`assert_cases_with` also registers the in-process servers of a `serve` entry and the spec hosts of a network check).
 Redaction expectations are goldens too. HTML goldens exist for `all-pass`, `warnings-only` and `all-block`
 only. Goldens sit next to what they describe, so a reviewer sees input and output in one diff.
 
@@ -323,8 +330,8 @@ whole `Report`) and the verdict properties are M2. Appendix D has both tables.
 | Stuck blocking thread | `Fake::Block` waits on a `std::sync::mpsc::Receiver` that the test releases after its asserts. The test builds its own runtime and ends it with `shutdown_timeout(100 ms)`. **Real time**: 50 ms check timeout, upper bound 1 s | `Timeout`, and the run returns without waiting for the thread. It never uses paused time, because tokio can stop auto-advancing while a blocking task runs |
 | Run deadline | Deadline 10 s, one check running, three unstarted | Running becomes `Timeout`, unstarted ones are not run (`skipped`), all counted as required or optional not run |
 | Cancellation | Cancel the token while checks run | Report written with `interrupted: true`; unfinished checks `skipped` with `skip_kind: cancelled`; nothing left running (a drop guard counts live futures); verdict from the 01 rule. `complete` is not asserted until 01 says what it is after Ctrl-C (see corrections) |
-| Replay delays | `delay_ms` past the limit, or a `blackhole` entry | `Timeout`, and an action log entry that says what was in flight |
-| `timeouts` env | In process, paused time, at `jobs = 1` and `jobs = 8` | Every hung source gives `Timeout`; the run ends inside `deadline_ms` in virtual time; verdict `not_ready` with `required_check_not_run` |
+| Replay delays | `delay_ms` past the limit, or a `blackhole` entry | `Timeout` (for a `blackhole`, for a check with no per-endpoint budget), and an action log entry that says what was in flight |
+| `timeouts` env | In process, paused time, at `jobs = 1` and `jobs = 8` | The hung `statvfs` gives `Timeout` and the black-hole endpoint a bounded `Block`, because net.egress cuts each endpoint to its own budget (correction-50); the run ends inside `deadline_ms` in virtual time; verdict `not_ready` with `required_check_not_run` |
 | Process level, Unix (M2) | Live backend, a test check running `/bin/sleep 600`, timeout 1 s | The run ends in under 4 s, and the process group is gone (checked with `rustix` on the group id right after the run), so no reused pid can fool it |
 | Real binary, Unix (M2) | `rdy run` with a spec that sets `timeout: 1s`, `SIGINT` after the first check starts | Exit within 3 s, report directory with `interrupted: true`, exit by the verdict rule; a second `SIGINT` exits 70 with no report; `SIGTERM` acts like the first `SIGINT` |
 
@@ -732,9 +739,9 @@ below are coarse and move to 11-backlog.md when it is merged.
 - [M1] Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | owner: qa-engineer | est: 2h | depends on: Engine test helpers FakeCheck, run_fixture and normalize | exit test: a changed output fails with a diff and an `.actual` file, a missing golden fails, `UPDATE_GOLDENS=1` is refused when `CI` is set and never touches `tests/fixtures/redaction/**`, and `cargo xtask goldens check` fails on an orphan.
 - [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: `report.json` for the ready, warning and not-ready runs validates against the result schema, `report.html` passes the static checks (CSP, no off-file src or href, `</script>` hostname round trip), and all pass on five legs.
 - [M1] Env-level harness, in process | owner: qa-engineer | est: 3h | depends on: In-process CLI entry point rdy_cli::run taking a Backend; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: one test per env checks exit code, `report.json`, `terminal.txt` and, where present, `report.html`, with the clock, run id and environment pinned, and the `jobs = 1` and `jobs = 8` reports are equal.
-- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness, in process; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress staged connector (lookup, dual-stack connect, TLS, ALPN); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: the env exits 0 on all five legs with golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
+- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness, in process; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress staged connector (lookup, dual-stack connect, TLS, ALPN); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: the env exits 0 on the two Linux legs with golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
 - [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `missing_need` skips, and its verdict reason is `required_check_not_run`.
-- [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, every hung source gives `Timeout`, the run ends inside `deadline_ms` in virtual time, cancellation gives `interrupted: true` with `skip_kind: cancelled`, and only the `Fake::Block` test uses real time with a 1 s upper bound.
+- [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, the hung `statvfs` gives `Timeout` and the black-hole endpoint a bounded `Block`, and the run ends inside `deadline_ms` in virtual time. Correction-50: the slow `/version` case is M1-107's, the cancellation tests are M2-037's, and the real-time `Fake::Block` test is M1-051's (built).
 - [M1] Property tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the section 4 table holds, 10,000 cases for never-panics and limits and 256 for the rest, with a fixed seed on PRs, committed regressions, `max_shrink_time` 30 s and the suite under 60 s on linux-x64.
 - [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 28 synthetic cases (04 Appendix D; the rest of SEC-26 moves to SEC-44, M2-061) pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
 - [M1] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: Golden tests for JSON and HTML reports | exit test: `tests/fixtures/results/0.1.0-alpha.1/` parses with the current rdy-engine on every leg, and a modified file under an older version directory fails the lint.

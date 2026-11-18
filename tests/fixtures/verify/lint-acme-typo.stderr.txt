@@ -1,0 +1,6 @@
+acme-typo.yaml:24:5: error: unknown field 'mn' in host.memory
+  fix: check the spelling (did you mean 'min'?)
+acme-typo.yaml:30:5: error: host.cpu has no threshold, so it can only pass
+  fix: add 'min: 4'.
+
+acme-typo.yaml: 2 errors, 0 warnings
