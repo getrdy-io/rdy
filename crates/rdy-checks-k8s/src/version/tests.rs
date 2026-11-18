@@ -19,6 +19,9 @@ use super::*;
 use crate::client::mock::Harness;
 use crate::client::{ImpersonateAs, ImpersonationError, ServerVersion};
 
+/// The review `k8s.version` asks before it lists nodes.
+const NODES_REVIEW: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
+
 /// A cluster over the mock: the `/version` answer the fixture records, and the harness for the rest.
 struct Fixtured {
     harness: Harness,
@@ -163,6 +166,7 @@ async fn eks_v1_29_4_parses_to_1_29_and_passes_when_the_apis_are_served() {
         rig.paths(),
         [
             "/apis",
+            NODES_REVIEW,
             "/api/v1/nodes",
             "/apis/autoscaling/v2",
             "/apis/networking.k8s.io/v1",
@@ -170,11 +174,11 @@ async fn eks_v1_29_4_parses_to_1_29_and_passes_when_the_apis_are_served() {
             "/api/v1",
         ]
     );
-    assert!(
-        rig.requests()
-            .iter()
-            .all(|(method, _, outcome)| method == "GET" && *outcome == ActionOutcome::Ok)
-    );
+    // Every request is a GET, except the one review, which is a POST (the guard allows only that one).
+    assert!(rig.requests().iter().all(|(method, path, outcome)| {
+        *outcome == ActionOutcome::Ok
+            && (method == "GET" || (method == "POST" && path == NODES_REVIEW))
+    }));
     rig.audit();
 }
 
@@ -322,7 +326,7 @@ async fn a_missing_autoscaling_v2_blocks() {
     );
     assert_eq!(result.status, Status::Block);
     // `/apis` already says the group version is not served, so no document is asked for.
-    assert_eq!(rig.paths(), ["/apis", "/api/v1/nodes"]);
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
     rig.audit();
 }
 
@@ -356,7 +360,13 @@ async fn missing_apis_say_why() {
     // The core document lists Pod; version v2 of the core group is not a thing and needs no request.
     assert_eq!(
         rig.paths(),
-        ["/apis", "/api/v1/nodes", "/apis/batch/v1", "/api/v1"]
+        [
+            "/apis",
+            NODES_REVIEW,
+            "/api/v1/nodes",
+            "/apis/batch/v1",
+            "/api/v1"
+        ]
     );
     rig.audit();
 }
@@ -450,6 +460,7 @@ async fn an_unreadable_group_list_and_cluster_version_leave_min_unapplied_and_pa
         [
             "/apis",
             "/apis/config.openshift.io/v1/clusterversions/version",
+            NODES_REVIEW,
             "/api/v1/nodes"
         ]
     );
@@ -473,7 +484,7 @@ async fn an_unreadable_group_list_and_no_cluster_version_is_not_openshift_and_mi
     let plain = self::rig("apis-unreadable-vanilla");
     let finding = plain.finding(json!({"min": "1.28"})).await;
     assert_eq!(finding.level, Level::Fail);
-    assert_eq!(plain.paths(), ["/apis", "/api/v1/nodes"]);
+    assert_eq!(plain.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
     plain.audit();
     rig.audit();
 }
@@ -500,8 +511,13 @@ async fn a_forbidden_node_list_is_partial_with_the_grant_and_never_blocks() {
     // The suffix still says EKS.
     assert_eq!(finding.observed["distribution"], "eks");
     assert!(finding.observed.get("nodes_read").is_none());
-    let requests = rig.requests();
-    assert_eq!(requests[1].2, ActionOutcome::Failed);
+    // The review said no, so no list request was sent: the group list and the review are all there is.
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW]);
+    assert!(
+        rig.requests()
+            .iter()
+            .all(|(_, _, outcome)| *outcome == ActionOutcome::Ok)
+    );
     // A required check with a partial pass is a warning, never a block.
     let result = map_outcome(
         &INFO,
@@ -538,20 +554,18 @@ async fn a_kubelet_far_behind_or_ahead_warns_and_a_virtual_kubelet_is_left_out()
 }
 
 #[tokio::test]
-async fn a_node_list_with_a_second_page_is_partial_and_says_the_rest_is_not_evaluated() {
+async fn a_node_list_with_a_second_page_is_read_to_the_end_with_the_paging_helper() {
     let rig = rig("paged");
     let finding = rig.finding(json!({"min": "1.28"})).await;
     assert_eq!(finding.level, Level::Pass);
-    let partial = finding.partial.as_ref().expect("partial");
-    assert!(
-        partial.note.contains("first 500 nodes only")
-            && partial.note.contains("the rest are not evaluated"),
-        "{}",
-        partial.note
+    // Two pages are under the cap, so nothing is left unread (the cap itself is tested with the helper).
+    assert!(finding.partial.is_none());
+    assert_eq!(finding.observed["nodes_read"], 2);
+    // The review, then both pages: the second one carries the `continue` token of the first.
+    assert_eq!(
+        rig.paths(),
+        ["/apis", NODES_REVIEW, "/api/v1/nodes", "/api/v1/nodes"]
     );
-    assert!(partial.missing_grants.is_empty());
-    // One page only: no continue request.
-    assert_eq!(rig.paths(), ["/apis", "/api/v1/nodes"]);
     rig.audit();
 }
 
@@ -747,4 +761,14 @@ async fn the_check_declares_what_the_registry_and_the_planner_read() {
             .iter()
             .any(|registered| registered.id == "k8s.version")
     );
+}
+
+#[tokio::test]
+async fn a_review_the_authorizer_could_not_decide_leaves_the_list_to_say() {
+    // `allowed: false` with an evaluation error and no `denied` is not a no: the list is tried.
+    let rig = rig("nodes-review-undecided");
+    let finding = rig.finding(json!({"min": "1.28"})).await;
+    assert_eq!(finding.observed["nodes_read"], 2);
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
+    rig.audit();
 }

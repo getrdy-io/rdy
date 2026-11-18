@@ -96,6 +96,18 @@ fn call_as_given(machine: Replay, hooks: RunHooks, args: &[&str]) -> Ran {
 }
 
 /// Hooks that pin the clock and the run id.
+/// The families of this build with the Kubernetes family reading an empty environment, so a test never
+/// reads the kubeconfig of the machine it runs on (the kube client does not go through the probe).
+fn hermetic_families() -> Result<rdy_engine::family::Registry, rdy_engine::family::RegistryError> {
+    let mut registry = rdy_engine::family::Registry::new();
+    registry.register(rdy_checks_host::HostFamily)?;
+    registry.register(rdy_checks_net::NetFamily)?;
+    registry.register(rdy_checks_k8s::K8sFamily::with_env(
+        rdy_checks_k8s::client::Env::empty(),
+    ))?;
+    Ok(registry)
+}
+
 fn pinned() -> RunHooks {
     let mut hooks = RunHooks::default();
     // 2027-03-09T10:15:02.123Z
@@ -124,9 +136,11 @@ fn parse(stdout: &str) -> Value {
 fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let spec = acme();
+    let mut hooks = pinned();
+    hooks.families = Some(hermetic_families);
     let ran = call(
         common::unprivileged(),
-        pinned(),
+        hooks,
         &[
             "run",
             &spec.to_string_lossy(),
@@ -168,7 +182,11 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     let checks = doc["checks"].as_array().cloned().unwrap_or_default();
     assert_eq!(checks[3]["status"], "skipped", "{}", checks[3]);
     assert_eq!(checks[3]["skip_kind"], "missing_need", "{}", checks[3]);
-    for check in &checks[4..] {
+    // `k8s.version` is built since M1-107. This machine has no kubeconfig in the replay, so its cluster is
+    // missing and it is skipped for that need. The ids after it are still not built.
+    assert_eq!(checks[4]["status"], "skipped", "{}", checks[4]);
+    assert_eq!(checks[4]["skip_kind"], "missing_need", "{}", checks[4]);
+    for check in &checks[5..] {
         assert_eq!(check["status"], "skipped", "{check}");
         assert_eq!(check["skip_kind"], "not_in_build", "{check}");
     }

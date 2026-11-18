@@ -58,7 +58,7 @@ use kube::Config;
 use kube::client::ClientBuilder;
 use kube::config::{AuthInfo, Cluster, ExecInteractiveMode, Kubeconfig};
 use rdy_engine::check::{CheckError, MAX_TIMEOUT};
-use rdy_engine::probe::Probe;
+use rdy_engine::probe::{NativeCall, NativeValue, Probe};
 use secrecy::ExposeSecret;
 
 mod b64;
@@ -66,9 +66,11 @@ mod credential;
 mod error;
 pub mod guard;
 mod impersonate;
+pub(crate) mod list;
 #[cfg(test)]
 pub(crate) mod mock;
 mod proxy;
+mod secret_layer;
 mod text;
 
 #[cfg(test)]
@@ -88,6 +90,7 @@ pub use guard::{
 };
 pub use impersonate::ImpersonationError;
 pub use proxy::{ProxyRule, ProxyUse};
+pub use secret_layer::SecretHook;
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
@@ -206,6 +209,10 @@ pub struct Env {
     pub rdy_vars: Vec<String>,
     /// The time at load, in Unix seconds. The time left on a token or certificate is counted from it.
     pub now_unix: i64,
+    /// `PATH`, to name the file of a bare credential plugin command in the `exec` action-log entry.
+    pub path: Option<OsString>,
+    /// `PATHEXT` (Windows), the extensions that complete a bare plugin command.
+    pub pathext: Option<OsString>,
 }
 
 impl fmt::Debug for Env {
@@ -220,6 +227,7 @@ impl fmt::Debug for Env {
             .field("no_proxy", &self.no_proxy)
             .field("rdy_vars", &self.rdy_vars)
             .field("now_unix", &self.now_unix)
+            .field("path", &self.path)
             .finish()
     }
 }
@@ -251,6 +259,8 @@ impl Env {
                 .filter(|name| is_rdy_var(name, cfg!(windows)))
                 .collect(),
             now_unix: unix_now(),
+            path: std::env::var_os("PATH"),
+            pathext: std::env::var_os("PATHEXT"),
         }
     }
 
@@ -595,18 +605,46 @@ impl Loaded {
         probe: &Probe,
         announce: impl FnOnce(&ClusterLine),
     ) -> Result<Connected, KubeError> {
+        self.connect_with(probe, announce, None).await
+    }
+
+    /// Like [`Loaded::connect`], and with a `hook` the `Authorization` value of every request is added to
+    /// the run's known-secret set before the request is sent, a token from a credential plugin included.
+    /// When the set refuses a value the request is not sent and the hook's flag is set.
+    ///
+    /// # Errors
+    ///
+    /// A [`KubeError`]. It never holds plugin output or credentials.
+    pub async fn connect_with(
+        self,
+        probe: &Probe,
+        announce: impl FnOnce(&ClusterLine),
+        hook: Option<SecretHook>,
+    ) -> Result<Connected, KubeError> {
         announce(&self.facts.line);
+        // Give the caller a turn before the plugin starts or a socket opens. The line is written by the
+        // caller between two polls of this future; it must not depend on the shape of the runtime.
+        YieldOnce(false).await;
         let Self {
             facts,
             files,
-            config,
+            mut config,
             ..
         } = self;
+        // With no CA of its own the client trusts the roots the facade read (ADR 0031 decision 9). The
+        // connector never asks the operating system itself: that is where `rustls-platform-verifier` and
+        // `rustls-native-certs` would be reached.
+        if !facts.ca_set
+            && let Some(roots) = facade_roots(probe).await
+        {
+            config.root_cert = Some(roots);
+        }
         let server = facts.line.server.clone();
         let plugin = facts.line.plugin.clone();
         let (proxied, ca_set) = (facts.proxy.is_proxied(), facts.ca_set);
         let built =
-            rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config))).await;
+            rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config, hook)))
+                .await;
         let client = match built {
             Ok(Ok(client)) => client,
             Ok(Err(error)) => {
@@ -642,6 +680,15 @@ impl Loaded {
             latency,
             client,
         })
+    }
+}
+
+/// The trust roots the probe facade read from this machine, as DER, or `None` when it has none (an empty
+/// or unreadable store, or an OS with no source yet). `None` leaves kube on the bundled roots.
+async fn facade_roots(probe: &Probe) -> Option<Vec<Vec<u8>>> {
+    match probe.native(NativeCall::SystemRoots).await {
+        Ok(NativeValue::SystemRoots(found)) if !found.certs.is_empty() => Some(found.certs),
+        _ => None,
     }
 }
 
@@ -998,7 +1045,14 @@ fn from_kubeconfig(
 
     // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
     // as /dev/zero would fill memory. The files are listed for the action log.
-    let mut secrets = inline_secrets(auth);
+    // The inline credentials of every user entry, not only the chosen one: the file is parsed in memory
+    // already, and a value of an entry that is not in use must not reach a log either (PR #96 review).
+    let mut secrets: Vec<String> = kubeconfig
+        .auth_infos
+        .iter()
+        .filter_map(|named| named.auth_info.as_ref())
+        .flat_map(|other| inline_secrets(Some(other)))
+        .collect();
     let mut token_text = auth
         .and_then(|auth| auth.token.as_ref())
         .map(|t| t.expose_secret().to_owned());
@@ -1049,6 +1103,7 @@ fn from_kubeconfig(
     secrets.extend(resolved.secrets);
     config.proxy_url = resolved.uri;
     harden_plugin(&mut config, env, kubeconfig_proxy.as_deref());
+    pin_plugin_path(&mut config, env);
 
     let line = ClusterLine {
         context: escape(&context_name),
@@ -1058,7 +1113,7 @@ fn from_kubeconfig(
         tls_verification_off: config.accept_invalid_certs,
         impersonates,
     };
-    let plugin_exec = plugin_exec_of(&config);
+    let plugin_exec = plugin_exec_of(&config, env);
     let ca_set = config.root_cert.is_some();
     // No namespace is used (ADR 0031 decision 12), so the one from the context is not kept.
     config.default_namespace = String::new();
@@ -1289,8 +1344,54 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
 ///
 /// The client is not guarded: the guard needs a probe, and a probe belongs to a check. It stays inside
 /// [`Connected`], and [`ReadOnlyClient`] is the only way to send with it.
-fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
-    Ok(ClientBuilder::try_from(config)?.build())
+///
+/// With a `hook` and a credential, kube's auth layer is put outside a layer that registers the header (see
+/// `secret_layer`). The config the inner stack gets has no credential of its own, so the header is added
+/// once, by the outer auth layer.
+fn build_client(config: Config, hook: Option<SecretHook>) -> Result<kube::Client, kube::Error> {
+    use kube::client::ConfigExt;
+    let Some(hook) = hook else {
+        return Ok(ClientBuilder::try_from(config)?.build());
+    };
+    // The plugin runs here, on the blocking pool, as it always did.
+    let Some(auth) = config.auth_layer()? else {
+        return Ok(ClientBuilder::try_from(config)?.build());
+    };
+    let mut bare = config;
+    bare.auth_info.token = None;
+    bare.auth_info.token_file = None;
+    bare.auth_info.username = None;
+    bare.auth_info.password = None;
+    bare.auth_info.exec = None;
+    bare.auth_info.auth_provider = None;
+    // The inner client is a whole kube client without a credential. Kube's auth layer goes outside a layer
+    // that registers the header, and the result is the client everything else uses.
+    let inner = ClientBuilder::try_from(bare)?.build();
+    let stack = secret_layer::Stack { auth, hook };
+    Ok(kube::Client::new(
+        tower_layer::Layer::layer(&stack, guard::RawService(inner)),
+        "",
+    ))
+}
+
+/// A future that is pending once and then ready.
+struct YieldOnce(bool);
+
+impl std::future::Future for YieldOnce {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        }
+    }
 }
 
 /// The wall clock in Unix seconds. A clock before 1970 reads as 0, which makes every token look valid.
@@ -1339,11 +1440,115 @@ fn plugin_file(command: &str) -> Option<String> {
     Some(escape(&file))
 }
 
+/// The command of an exec plugin as the `exec` action-log entry shows it. A command with a path is shown
+/// as it is. A bare name is looked for in the directories of `path` (the `PATH` value), as the OS will
+/// when kube starts it: the first regular file wins. On Windows each extension of `pathext` is tried too
+/// (`.cmd`, `.exe`). A name that is found nowhere stays bare, so the entry never claims a path rdy did
+/// not see.
+///
+/// The text is not escaped: escape it before it is shown. `find_plugin` has the path itself.
+#[must_use]
+pub fn resolve_plugin(
+    command: &str,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> String {
+    find_plugin(command, path, pathext)
+        .map_or_else(|| command.to_owned(), |found| found.display().to_string())
+}
+
+/// The file a bare plugin `command` is, searched as [`resolve_plugin`] says. `None` for a command with a
+/// directory in it and for a name found nowhere.
+fn find_plugin(
+    command: &str,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    if command.is_empty() || command.contains(['/', '\\']) || Path::new(command).is_absolute() {
+        return None;
+    }
+    // Windows tries the `PATHEXT` extensions before the bare name, as the shell does.
+    let extensions: Vec<String> = if cfg!(windows) {
+        let mut all: Vec<String> = pathext
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(str::to_owned)
+            .collect();
+        all.push(String::new());
+        all
+    } else {
+        vec![String::new()]
+    };
+    for dir in path.into_iter().flat_map(std::env::split_paths) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for extension in &extensions {
+            let candidate = dir.join(format!("{command}{extension}"));
+            if fs::metadata(&candidate).is_ok_and(|meta| meta.is_file() && is_executable(&meta)) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Whether a file can be started. On Unix it needs an execute bit, as `execvp` does; other systems start
+/// by extension, which the search already applied.
+fn is_executable(meta: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        true
+    }
+}
+
+/// Gives kube the file the search found, so what runs is what the `exec` entry names. kube starts a bare
+/// name with `std::process::Command`, which on Windows adds only `.exe`: a `.cmd` or `.bat` plugin that
+/// `kubectl` finds through `PATHEXT` would not start. The plugin's own `env` may set `PATH`, and then that
+/// value is the one that is searched, as it is the one the plugin process will see.
+fn pin_plugin_path(config: &mut Config, env: &Env) {
+    let Some(exec) = config.auth_info.exec.as_mut() else {
+        return;
+    };
+    let Some(command) = exec.command.clone() else {
+        return;
+    };
+    let own_path = exec
+        .env
+        .iter()
+        .flatten()
+        .find(|entry| {
+            entry.get("name").is_some_and(|name| {
+                name.eq_ignore_ascii_case("PATH") && cfg!(windows) || name == "PATH"
+            })
+        })
+        .and_then(|entry| entry.get("value"))
+        .map(OsString::from);
+    let path = own_path.as_deref().or(env.path.as_deref());
+    // kube gets the real path, never the escaped text of the log.
+    if let Some(found) = find_plugin(&command, path, env.pathext.as_deref()) {
+        exec.command = Some(found.to_string_lossy().into_owned());
+    }
+}
+
 /// The exec plugin's command and arguments for the action log.
-fn plugin_exec_of(config: &Config) -> Option<PluginExec> {
+fn plugin_exec_of(config: &Config, env: &Env) -> Option<PluginExec> {
     let exec = config.auth_info.exec.as_ref()?;
     Some(PluginExec {
-        command: escape(exec.command.as_deref()?),
+        // A bare name is the file the OS will find on `PATH`, so the entry names that file.
+        command: escape(&resolve_plugin(
+            exec.command.as_deref()?,
+            env.path.as_deref(),
+            env.pathext.as_deref(),
+        )),
         args: exec
             .args
             .as_deref()

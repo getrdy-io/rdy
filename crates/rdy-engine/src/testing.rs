@@ -252,6 +252,28 @@ impl TestRun {
         crate::sched::Scheduler::new(jobs, os, available).with_probes(self.hub.clone())
     }
 
+    /// `text` as the run's redactor writes it, with every known secret of the run removed.
+    #[must_use]
+    pub fn redact(&self, text: &str) -> String {
+        self.hub.redactor().redact_str(text).to_string()
+    }
+
+    /// The context a family's probe gets, over this run's hub and its run-level probe. `checks` are the
+    /// checks of the family that will run, and `announce` takes the lines the probe prints.
+    #[must_use]
+    pub fn family_probe<'a>(
+        &'a self,
+        checks: &'a [&'static crate::check::CheckInfo],
+        announce: &'a (dyn Fn(&str) + Send + Sync),
+    ) -> crate::family::FamilyProbe<'a> {
+        crate::family::FamilyProbe::new(
+            self.hub.run_probe_for(Os::Linux),
+            self.hub.secret_sink(),
+            checks,
+            announce,
+        )
+    }
+
     /// The action log so far.
     #[must_use]
     pub fn action_log(&self) -> ActionLogOutput {

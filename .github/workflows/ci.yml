@@ -294,8 +294,8 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # The Intel macOS leg is the slow one (about 22 minutes), so it gets 45.
-    timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}
+    # Both macOS legs run on the slow Intel runner for now (ADR 0050, "Suspended"), so both get 45.
+    timeout-minutes: ${{ startsWith(matrix.name, 'macos-') && 45 || 25 }}
     permissions:
       contents: read
     defaults:

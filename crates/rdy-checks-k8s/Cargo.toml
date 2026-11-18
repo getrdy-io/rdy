@@ -44,7 +44,7 @@ rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["t
 serde-saphyr = { workspace = true, features = ["deserialize"] }
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 tracing = { workspace = true, features = ["std"] }
 log = { workspace = true, features = ["std"] }
