@@ -54,7 +54,7 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Level,
     Need, Os, OsSupport, Partial, PeerClass, Support,
 };
-use rdy_engine::probe::net::{Route, TlsChain, TrustFailure, TrustVerdict};
+use rdy_engine::probe::net::{REVOCATION_NOTE, Route, TlsChain, TrustFailure, TrustVerdict};
 use rdy_engine::probe::{AttemptOutcome, NetFailure, NoRoots, ProbeError};
 use rdy_spec::Target;
 use rdy_spec::check::{CheckParams, NetEgress, NetTlsIntercept};
@@ -555,6 +555,11 @@ impl TlsInterceptCheck {
                 done.len(),
                 named.join(", ")
             ));
+        }
+
+        // A pass or a warning here never means the leaf is not revoked. Said once per result (SF-01).
+        if !verdicts.is_empty() {
+            finding = finding.with_note(REVOCATION_NOTE);
         }
 
         let mut not_verified: Vec<String> = Vec::new();
