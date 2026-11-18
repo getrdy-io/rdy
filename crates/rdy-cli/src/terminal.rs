@@ -12,8 +12,9 @@
 //! puts one blank line after it.
 //!
 //! **The check list** is sorted with [`group_by_bucket`], which reads the stored bucket and never
-//! recomputes it. Each entry is `  <STATUS> <key> <message>`, and a check with a fix has `fix from
-//! <source>: <fix>` on the lines below, under the message. Lines wrap at word boundaries to `width`
+//! recomputes it. Each entry is `  <STATUS> <key> <message>`, a check with missing grants has
+//! `missing grants: <grant>, <grant>` below it, and a check with a fix has `fix from
+//! <source>: <fix>` after that, on the lines below, under the message. Lines wrap at word boundaries to `width`
 //! with a hanging indent. A word wider than the line is not cut, so a path stays copyable.
 //!
 //! **Untrusted text.** Everything that comes from the report (host and user names, the spec's
@@ -504,7 +505,8 @@ fn check_list(view: &View<'_>) -> String {
     out
 }
 
-/// One entry of the list: the status line and, when there is a fix, the fix line.
+/// One entry of the list: the status line, the missing grants line when the result has grants, and the
+/// fix line when there is a fix.
 fn entry(
     view: &View<'_>,
     check: &CheckResult,

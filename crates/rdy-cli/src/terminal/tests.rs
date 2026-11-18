@@ -1115,9 +1115,30 @@ fn a_list_past_the_cap_ends_and_n_more() {
 
 #[test]
 fn a_grant_is_escaped_and_never_styled() {
-    let out = with_grants(&["list \u{1b}[31mnodes"], 100, Styler::new(true));
-    assert!(!out.contains("\u{1b}[31mnodes"), "{out}");
-    assert!(out.contains("nodes"), "{out}");
+    let raw = "list \u{1b}[31mnodes";
+    let escaped = untrusted(raw);
+    assert_ne!(escaped, raw);
+    // Colour off: the whole line is exact.
+    let plain = with_grants(&[raw], 100, Styler::new(false));
+    let line = plain
+        .lines()
+        .find(|l| l.contains("missing grants:"))
+        .unwrap_or_else(|| panic!("{plain}"));
+    assert_eq!(line.trim_start(), format!("missing grants: {escaped}"));
+    let after = line.split("grants:").nth(1).unwrap_or_default();
+    assert!(!after.contains('\u{1b}'), "{line:?}");
+    // Colour on: the labels are styled, the grant text is not and holds no ESC.
+    let styled = with_grants(&[raw], 100, Styler::new(true));
+    let line = styled
+        .lines()
+        .find(|l| l.contains(&escaped))
+        .unwrap_or_else(|| panic!("{styled}"));
+    let text = line.split_once("list").map_or("", |(_, rest)| rest);
+    assert!(
+        text.ends_with(escaped.trim_start_matches("list")),
+        "{line:?}"
+    );
+    assert!(!text.contains('\u{1b}'), "{line:?}");
 }
 
 #[test]
