@@ -10,9 +10,34 @@
 //! 3. **TLS** for port 443, an `https` URL or `tls: true`: one handshake, the protocol, the ALPN the
 //!    server chose, the handshake time, the chain depth, and a verdict against the roots the spec chose.
 //!
-//! What this version does not do yet: the HTTP request and `expect_status` (M1-096), the proxy path
-//! (M1-097), redirect and `Date` evidence. An endpoint whose `via_proxy` is `proxy_only` is not tried,
-//! and the result says so and is partial.
+//! 4. **HTTP** for a URL endpoint (`http://` or `https://`) that connected and, for https, that the
+//!    roots accepted: one `HEAD` (or `GET`, by the spec) with no redirect followed. The status is judged
+//!    against `expect_status`. With none listed, 2xx, 3xx and 4xx count as reachable except 407 (an
+//!    intercepting proxy on the direct route), which fails, and a 5xx, which fails, both as `http_status`.
+//!    A 3xx, 401, 404 and any other 4xx get a note, and a 403 warns, because a transparent proxy's deny
+//!    page looks the same. A reply that is not HTTP is `http_failed`. A `host:port` endpoint gets no
+//!    request, and an `expect_status` on it is noted as ignored. The URL's path and query go to the
+//!    facade and never into the finding; the action log keeps the path and never the query.
+//!
+//! **Through the proxy (M1-097).** The run has at most one proxy, read from `HTTPS_PROXY` or
+//! `HTTP_PROXY` (either case) by `rdy run`. `via_proxy: direct` never uses it. `proxy_only` uses it, and
+//! with none set the endpoint is not tried and the result is partial. `auto`, the default, goes through
+//! the proxy when the run has one and direct when it has none: that is what a product started from the
+//! same shell does. A `host:port` or `https` endpoint is tunnelled with the facade's own `CONNECT` and
+//! then verified end to end. An `http://` URL is sent to the proxy in the absolute form, with no tunnel,
+//! because a proxy that allows `CONNECT` only to port 443 would answer a tunnel to another port with a
+//! false 403. The name is not looked up here, because names resolve at the proxy. Classes: `proxy_403`
+//! (the endpoint is not on the allow list), `proxy_407` (credentials wanted or rejected, or Negotiate or
+//! NTLM, which rdy never attempts), `proxy_refused` (another status to the tunnel), `proxy_bad_reply`
+//! and `proxy_unreachable` (no connection to the proxy itself). The proxy password never reaches a
+//! finding: the evidence names the proxy as `http://host:port`.
+//!
+//! **Redirects.** A redirect is never followed. The host of an absolute `Location` is in the evidence
+//! (`http_stage.location_host`), and when it is not an endpoint of this check a note says to add it.
+//!
+//! What this version does not do yet: `Date` evidence, issuer names (M1-099), and the sentence that says
+//! the other path works when `auto` fails (the direct retry after a proxy failure), which waits for the
+//! `NO_PROXY` rules of M1-098.
 //!
 //! **Levels.** An endpoint that cannot be reached fails the check, or warns when it is `optional`. A
 //! connect slower than `max_latency` (2 s by default) warns. A dead address of one family in front of a
@@ -32,6 +57,7 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
     Os, OsSupport, PeerClass, Support,
 };
+use rdy_engine::probe::net::REVOCATION_NOTE;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
@@ -59,7 +85,7 @@ const FIXES: usize = 3;
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "net.egress",
     family: "net",
-    summary: "Each endpoint resolves, connects on every address family, and completes TLS",
+    summary: "Each endpoint resolves, connects on every address family, completes TLS and answers HTTP",
     meta: CheckMeta {
         title: "Egress",
         remediation: "Ask the network team to allow the endpoint from this machine: the TCP port to the host named in the result. If the name does not resolve, fix DNS or add a temporary hosts file entry. If the certificate is not trusted, a TLS-inspecting proxy is the usual cause: bypass inspection for the host, or install the proxy's CA in the OS trust store. Where openssl is installed, run `openssl s_client -connect <host>:<port> -servername <host>` to see what the server sends.",
@@ -74,9 +100,10 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     },
     reads: &[],
     statfs: &[],
-    env: &[],
+    // `NO_PROXY` is read to say that it is not applied yet (M1-098 applies it). Neither name is secret.
+    env: &["NO_PROXY", "no_proxy"],
     commands: &[],
-    peers: &[PeerClass::SpecHosts],
+    peers: &[PeerClass::SpecHosts, PeerClass::Proxy],
 };
 
 /// `net.egress`, built from its spec entry.
@@ -121,6 +148,8 @@ impl Check for EgressCheck {
             let entry_route = self.params.via_proxy;
             let trust = self.params.trust;
             let total = self.params.endpoints.len();
+            let proxy = ctx.probe().proxy_origin();
+            let proxy_var = ctx.probe().proxy_source();
             let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> = self
                 .params
                 .endpoints
@@ -129,27 +158,69 @@ impl Check for EgressCheck {
                 .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
                     // Rounds of endpoints that wait behind this one, for the budget of its extra call.
                     let queued = (total - at - 1) / PARALLEL;
-                    if routes_direct(spec, entry_route) {
-                        Box::pin(probe(ctx, spec, trust, queued))
-                    } else {
-                        Box::pin(std::future::ready(Ok(Probed::not_tried(spec, PROXY_LATER))))
+                    match route_of(spec, entry_route, proxy.as_deref()) {
+                        Routing::Direct => Box::pin(probe(ctx, spec, trust, queued, None, None)),
+                        Routing::Proxy(origin) => Box::pin(probe(
+                            ctx,
+                            spec,
+                            trust,
+                            queued,
+                            Some(origin.to_owned()),
+                            proxy_var,
+                        )),
+                        Routing::NoProxy => Box::pin(std::future::ready(Ok(Probed::not_tried(
+                            spec,
+                            NO_PROXY_SET,
+                        )))),
                     }
                 })
                 .collect();
             let probed: Vec<Result<Probed, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let probed: Vec<Probed> = probed.into_iter().collect::<Result<_, _>>()?;
-            Ok(self.judge(ctx.os(), &probed))
+            let mut finding = self.judge(ctx.os(), &probed);
+            // `auto` takes the proxy for every endpoint until M1-098 applies `NO_PROXY`. Say so, once and
+            // without the value (a `NO_PROXY` list can name internal hosts).
+            if proxy.is_some() && no_proxy_is_set(ctx) {
+                finding = finding.with_note(NO_PROXY_NOTE);
+            }
+            Ok(finding)
         })
     }
 }
 
-/// Why a proxy-only endpoint is not tried.
-const PROXY_LATER: &str = "this version of rdy does not send a check through a proxy yet";
+/// The note when `NO_PROXY` is set and a proxy is in use.
+const NO_PROXY_NOTE: &str = "NO_PROXY is set, and this build of rdy does not apply it: every endpoint of this run went through the proxy, including hosts NO_PROXY lists. The product may reach those hosts directly.";
 
-/// Whether the endpoint is tried directly. `auto` and `direct` are; `proxy_only` is not tried yet.
-fn routes_direct(spec: &Endpoint, entry: ViaProxy) -> bool {
-    spec.via_proxy.unwrap_or(entry) != ViaProxy::ProxyOnly
+/// Whether `NO_PROXY` or `no_proxy` has a non-blank value. The value is never kept.
+fn no_proxy_is_set(ctx: &CheckContext) -> bool {
+    ["NO_PROXY", "no_proxy"]
+        .iter()
+        .any(|name| matches!(ctx.probe().env(name), Ok(Some(value)) if !value.trim().is_empty()))
+}
+
+/// Why a proxy-only endpoint is not tried when the run has no proxy.
+const NO_PROXY_SET: &str = "the endpoint is proxy_only and no proxy is set for this run; set HTTPS_PROXY or HTTP_PROXY before running rdy";
+
+/// How an endpoint is reached.
+enum Routing<'p> {
+    /// Straight to the host.
+    Direct,
+    /// Through the run's proxy, named by its origin.
+    Proxy(&'p str),
+    /// The spec says proxy only and the run has no proxy.
+    NoProxy,
+}
+
+/// The route of an endpoint: its own `via_proxy`, else the entry's. `auto` takes the proxy when the run
+/// has one, because that is the path the product takes when it is started from the same shell.
+fn route_of<'p>(spec: &Endpoint, entry: ViaProxy, proxy: Option<&'p str>) -> Routing<'p> {
+    match (spec.via_proxy.unwrap_or(entry), proxy) {
+        (ViaProxy::Direct, _) => Routing::Direct,
+        (ViaProxy::ProxyOnly, None) => Routing::NoProxy,
+        (_, Some(origin)) => Routing::Proxy(origin),
+        (_, None) => Routing::Direct,
+    }
 }
 
 impl EgressCheck {
@@ -181,7 +252,27 @@ impl EgressCheck {
                     }
                     for (family, took) in p.slow() {
                         notes.push(format!(
-                            "{}: the {family} address did not answer within {took} ms, so another family connected first",
+                            "{}: the {family} address had no reply within {took} ms, so another family connected first",
+                            p.label()
+                        ));
+                    }
+                    if let Some(http) = &p.http
+                        && let Some((why, warn)) = http.default_judgement()
+                    {
+                        let text = format!("{} answered {}: {why}", p.label(), http.status);
+                        if warn {
+                            warns.push(text);
+                        } else {
+                            notes.push(text);
+                        }
+                    }
+                    if let Some(http) = &p.http
+                        && let Some(host) = http.location_host.as_deref()
+                        && !listed(&self.params, host)
+                    {
+                        let port = http.location_port.unwrap_or(443);
+                        notes.push(format!(
+                            "{} redirects to {host}, which rdy did not follow. Add {host}:{port} to the endpoints to test it.",
                             p.label()
                         ));
                     }
@@ -193,12 +284,48 @@ impl EgressCheck {
                         ));
                     }
                 }
-                Ending::Failed(..) if p.optional => optional_failed.push(p),
-                Ending::Failed(..) => failed.push(p),
+                Ending::Failed(class, ip) => {
+                    if matches!(class, Class::Blackhole) {
+                        notes.push(format!(
+                            "{}: no reply within 3 s from {}",
+                            p.label(),
+                            ip.as_deref().unwrap_or("any address")
+                        ));
+                    }
+                    if p.optional {
+                        optional_failed.push(p);
+                    } else {
+                        failed.push(p);
+                    }
+                }
                 Ending::NotTried(_) => not_tried.push(p),
             }
         }
 
+        let proxied =
+            |p: &&Probed| p.via_proxy.is_some() && !matches!(p.ending, Ending::NotTried(_));
+        if let Some(origin) = probed
+            .iter()
+            .filter(proxied)
+            .find_map(|p| p.via_proxy.as_deref())
+        {
+            notes.push(format!(
+                "{} endpoint(s) went through the proxy {origin}. A name resolves at the proxy, not on this machine.",
+                probed.iter().filter(proxied).count()
+            ));
+        }
+        // One proxy serves the whole run. When it came from `HTTP_PROXY`, a tunnelled endpoint used it
+        // although the usual tool would have taken `HTTPS_PROXY` for it.
+        if let Some(var) = probed
+            .iter()
+            .filter(proxied)
+            .filter(|p| p.tls_wanted)
+            .find_map(|p| p.proxy_var.filter(|v| v.eq_ignore_ascii_case("http_proxy")))
+        {
+            notes.push(format!(
+                "An https endpoint went through a proxy read from {var}, because rdy uses one proxy for the whole run and {var} was the only proxy variable set. Set HTTPS_PROXY if the product uses a different proxy for https."
+            ));
+        }
         let total = probed.len();
         let observed = json!({
             "endpoints": probed.iter().map(Probed::json).collect::<Vec<_>>(),
@@ -219,19 +346,22 @@ impl EgressCheck {
                 Finding::pass(format!("{tried} of {total} endpoints reachable"))
             }
         } else if failed.is_empty() {
-            let mut parts = names(&optional_failed, "optional, unreachable");
+            let optional_tag = format!("optional, {}", word(&optional_failed));
+            let mut parts = names(&optional_failed, &optional_tag);
             parts.extend(warns.iter().cloned());
             Finding::warn(parts.join("; "))
         } else {
             let mut message = format!(
-                "{} of {total} endpoints unreachable: {}",
+                "{} of {total} endpoints {}: {}",
                 failed.len(),
+                word(&failed),
                 names(&failed, "").join(", ")
             );
             if !optional_failed.is_empty() {
                 message.push_str(&format!(
-                    "; {} optional also unreachable",
-                    optional_failed.len()
+                    "; {} optional also {}",
+                    optional_failed.len(),
+                    word(&optional_failed)
                 ));
             }
             Finding::fail(message)
@@ -242,6 +372,11 @@ impl EgressCheck {
         let unreachable: Vec<&Probed> = failed.iter().chain(&optional_failed).copied().collect();
         if let Some(fix) = fixes(os, &unreachable) {
             finding = finding.with_fix(fix);
+        }
+        // A handshake that finished says nothing about revocation. Said once per result (SF-01), first, because a report keeps only the first
+        // notes and an endpoint list can fill the rest.
+        if probed.iter().any(|p| p.tls.is_some()) {
+            finding = finding.with_note(REVOCATION_NOTE);
         }
         for warn in &warns {
             finding = finding.with_note(warn.clone());
@@ -267,18 +402,39 @@ impl EgressCheck {
                 .join("; ");
             finding = finding.with_partial(rdy_engine::check::Partial::new(Vec::new(), note));
         }
-        if self
+        let ignored = self
             .params
             .endpoints
             .iter()
-            .any(|e| e.expect_status.is_some())
-        {
-            finding = finding.with_note(
-                "expect_status is not checked yet: this version of rdy stops after the TLS handshake and sends no HTTP request",
-            );
+            .filter(|e| e.expect_status.is_some() && !e.target.is_url())
+            .count();
+        if ignored > 0 {
+            finding = finding.with_note(format!(
+                "expect_status is ignored for {ignored} endpoint(s) written as host:port: rdy sends an HTTP request only to an http:// or https:// URL"
+            ));
         }
         finding
     }
+}
+
+/// Whether `host` is the host of one of the check's endpoints.
+fn listed(params: &NetEgress, host: &str) -> bool {
+    params
+        .endpoints
+        .iter()
+        .any(|e| e.target.host().to_string().eq_ignore_ascii_case(host))
+}
+
+/// "failed" when every endpoint in the list got an answer that was wrong (an HTTP status or a reply that is
+/// not HTTP), else "unreachable": an endpoint that answered HTTP was reached.
+fn word(list: &[&Probed]) -> &'static str {
+    let answered = list.iter().all(|p| {
+        matches!(
+            p.ending,
+            Ending::Failed(Class::HttpStatus | Class::HttpFailed, _)
+        )
+    });
+    if answered { "failed" } else { "unreachable" }
 }
 
 /// `host:port (class)` for up to [`NAMED`] endpoints, then "and N more". `tag` is added to each when
@@ -289,8 +445,12 @@ fn names(list: &[&Probed], tag: &str) -> Vec<String> {
         .take(NAMED)
         .map(|p| {
             let class = match &p.ending {
-                Ending::Failed(class, _) => class.id(),
-                _ => "not tried",
+                Ending::Failed(Class::HttpStatus, _) => match &p.http {
+                    Some(http) => format!("http_status {}", http.status),
+                    None => Class::HttpStatus.id().to_owned(),
+                },
+                Ending::Failed(class, _) => class.id().to_owned(),
+                _ => "not tried".to_owned(),
             };
             if tag.is_empty() {
                 format!("{} ({class})", p.label())

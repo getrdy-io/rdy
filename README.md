@@ -37,7 +37,7 @@ Windows, download the `.zip` from the release page and check its sha256 by hand.
 
 There is no tagged release yet. When there is one, the command is this, with the version filled in:
 
-```sh
+```sh skip=placeholder
 curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL \
   https://github.com/getrdy-io/rdy/releases/download/v<VERSION>/install.sh | sh
 "$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
@@ -54,7 +54,7 @@ This run uses
 [`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
 so it needs `--allow-unsigned`. A spec from your vendor does not:
 
-```console
+```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-quickstart.txt
 $ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
 examples/specs/acme-quickstart.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
@@ -122,8 +122,8 @@ not in the code yet.
   whose signature does not verify, always. It refuses an unsigned spec unless you pass
   `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
-  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` two
-  checks can reach the network. `net.egress` does, and `--no-network` skips it. `host.time_sync` sends
+  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` three
+  checks can reach the network. `net.egress` and `net.tls_intercept` do, and `--no-network` skips them. `host.time_sync` sends
   an SNTP packet only to servers the spec lists, and with `--no-network` it skips that measurement and
   runs on local data. `net.mtu` reads local interface and route data and runs offline. `net.egress`
   makes no HTTP request yet, so there is no redirect to follow. The rule for the HTTP path, when it lands, is
@@ -153,7 +153,8 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 | Host | CPU, memory, disk, OS, kernel, cgroups, time sync, ports, SELinux and AppArmor, firewall, security agents, sysctl, container runtime | Runs in `rdy run` on Linux |
 | Network | egress (lookup, connect, TLS) | Runs in `rdy run`. Direct only: no HTTP request and no proxy yet |
 | Network | MTU | Runs in `rdy run` |
-| Network | egress through a proxy, proxy settings, TLS interception | Coming before 0.1.0. The probe layer under them is built |
+| Network | TLS interception | Runs in `rdy run`. Classes only: no issuer name or root hash yet |
+| Network | egress through a proxy, proxy settings | Coming before 0.1.0. The probe layer under them is built |
 | Network | DNS, registry, bandwidth | Planned after 0.1.0 |
 | Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission | Built and tested on fixtures. Not registered in `rdy run` yet |
 | Kubernetes | nodes | Coming before 0.1.0 |
@@ -163,8 +164,8 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 | GPU | driver, CUDA, VRAM, device plugin | Planned (M4) |
 
 A spec may name a check this build does not have. rdy counts it as not run and never reports it as a
-pass. On `main` that includes every `k8s.*` check, the `net.*` checks other than `net.egress` and
-`net.mtu`, and every `gpu.*` and `aws.*` check.
+pass. On `main` that includes every `k8s.*` check, the `net.*` checks other than `net.egress`,
+`net.mtu` and `net.tls_intercept`, and every `gpu.*` and `aws.*` check.
 
 ## Write your own spec
 
@@ -173,7 +174,7 @@ the schema: [`docs/intro/reference-spec.md`](docs/intro/reference-spec.md) for s
 [`docs/intro/reference-result.md`](docs/intro/reference-result.md) for results. Check it, make a key and
 sign it:
 
-```sh
+```sh skip=placeholder
 rdy spec lint my-spec.yaml
 rdy spec keygen acme-signing
 rdy spec sign my-spec.yaml --secret-key acme-signing.key
@@ -187,7 +188,7 @@ signature before it runs anything. A separate `rdy verify` command is coming bef
 
 For contributors and testers. You need the Rust toolchain that `rust-toolchain.toml` pins.
 
-```sh
+```sh skip=builds
 git clone https://github.com/getrdy-io/rdy
 cd rdy
 cargo install --path crates/rdy-cli --locked
@@ -197,8 +198,11 @@ rdy spec lint examples/specs/acme-quickstart.yaml
 That lint run is real. It prints `examples/specs/acme-quickstart.yaml: 0 errors, 0 warnings` and exits 0.
 Now run a spec. `--no-network` opens no connections, and `--jobs N` sets how many checks run at once:
 
-```sh
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
+```
+
+```sh tested exit=2 shape=^NOT\sREADY
 rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-network --jobs 2
 ```
 
@@ -221,22 +225,25 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
   macOS and Windows they report not run.
 - Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
-  and ALPN, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
+  and ALPN, and the HTTP status of a URL endpoint, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
   local data and runs offline.
+- The `net.tls_intercept` check, registered in `rdy run`. It does one TLS handshake per host, sends no
+  data, and says whether the chain is public, trusted by this machine only (warn), from an unknown CA
+  (block), or a clock or expiry problem (block, never called interception). `--no-network` skips it and
+  says so.
 - The spec format, the schema and a spec linter (`rdy spec lint`).
 - Signing: key generation, `rdy spec sign` and `rdy trust add|list|remove`. `rdy run` checks the
   signature and refuses a bad one.
 - The check engine: scheduler, timeouts, privilege negotiation, the probe layer that all side effects go
   through, and redaction of secrets in reports.
-- The JSON report, the verdict logic and the HTML report renderer.
+- The JSON report, the verdict logic and the HTML report, which `rdy run` writes next to the JSON.
 - Kubernetes version, storage class, access, RBAC and Pod Security checks. These are tested against
   recorded fixtures. They are not registered in `rdy run` yet.
 
 **Next**
 
 - Registering the Kubernetes checks in `rdy run`.
-- The HTML report from `rdy run`.
-- The egress HTTP request and proxy path, the proxy and TLS interception checks, and Kubernetes nodes.
+- The egress proxy path, the proxy check, and Kubernetes nodes.
 
 **Before 0.1.0**
 

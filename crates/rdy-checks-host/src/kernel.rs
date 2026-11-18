@@ -258,11 +258,14 @@ async fn read_modules(
         Got::Failed(why) => Got::Failed(why),
     };
 
+    let release_read = release.value().is_some();
     let release = release.value().filter(|r| version::is_path_safe(r));
     let Some(release) = release else {
         return Ok(Modules {
             dir: MODULES_DIRS[0].to_owned(),
+            searched: Vec::new(),
             path_safe: false,
+            release_read,
             loaded,
             builtin: Got::Absent,
             dep: Got::Absent,
@@ -271,28 +274,36 @@ async fn read_modules(
 
     // The first directory that has a modules.dep decides. A merged-usr system has both names for one
     // directory, and an older one has only `/lib/modules`.
-    let mut dir = format!("{}/{release}", MODULES_DIRS[0]);
+    let searched: Vec<String> = MODULES_DIRS
+        .iter()
+        .map(|base| format!("{base}/{release}"))
+        .collect();
+    let mut dir = searched[0].clone();
     let mut dep_file = Got::Absent;
-    for base in MODULES_DIRS {
-        let candidate = format!("{base}/{release}");
+    for candidate in &searched {
         let file = read_file(ctx, &format!("{candidate}/modules.dep")).await?;
         if matches!(file, Got::Absent) {
             continue;
         }
-        dir = candidate;
+        dir.clone_from(candidate);
         dep_file = file;
         break;
     }
 
+    let dep_found = !matches!(dep_file, Got::Absent);
     let dep = match dep_file {
         Got::Value(head) => Got::Value(scan_dep_file(ctx, &dir, &head, &wanted).await?),
         Got::Absent => Got::Absent,
         Got::Failed(why) => Got::Failed(why),
     };
-    let builtin = if matches!(dep, Got::Absent) {
-        Got::Absent
-    } else {
-        match read_file(ctx, &format!("{dir}/modules.builtin")).await? {
+    // `modules.builtin` is read even when `modules.dep` is missing: a built-in module is settled by it
+    // alone. With no `modules.dep` the first directory that has a `modules.builtin` is used.
+    let mut builtin = Got::Absent;
+    for candidate in &searched {
+        if dep_found && *candidate != dir {
+            continue;
+        }
+        builtin = match read_file(ctx, &format!("{candidate}/modules.builtin")).await? {
             Got::Value(file) if file.truncated() => {
                 Got::Failed("it is larger than rdy reads".to_owned())
             }
@@ -302,11 +313,19 @@ async fn read_modules(
             )),
             Got::Absent => Got::Absent,
             Got::Failed(why) => Got::Failed(why),
+        };
+        if !matches!(builtin, Got::Absent) {
+            if !dep_found {
+                dir.clone_from(candidate);
+            }
+            break;
         }
-    };
+    }
     Ok(Modules {
         dir,
+        searched,
         path_safe: true,
+        release_read,
         loaded,
         builtin,
         dep,

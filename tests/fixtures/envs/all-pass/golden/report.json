@@ -820,7 +820,7 @@
       "at_ms": 0,
       "check": "host.time_sync",
       "duration_ms": 0,
-      "error": "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run",
+      "error": "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run",
       "host": "192.0.2.10",
       "kind": "connect",
       "outcome": "failed",

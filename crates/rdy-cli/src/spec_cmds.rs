@@ -18,16 +18,18 @@
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rdy_spec::lint::CheckLint;
+use rdy_spec::SpecError;
+use rdy_spec::lint::lint_bytes;
 use rdy_spec::sig::{Policy, PublicKey, SignatureState, TrustSource, TrustStore};
-use rdy_spec::{MAX_SPEC_BYTES, load, parse_unverified};
+use rdy_spec::{load, parse_unverified};
 
 use crate::cli::{KeygenArgs, SignArgs};
 use crate::error::{CliError, InternalKind, IoReason, emit, escape_untrusted, shell_word};
+use crate::lint;
 use crate::password::{KeyPassword, PasswordError, read_key_password};
 use crate::prompt::{Prompter, Terminal};
 use crate::signing::files::{self, FileError};
@@ -339,14 +341,23 @@ pub fn sign<T: Terminal>(
     out: &mut dyn Write,
 ) -> Result<(), CliError> {
     let spec_name = args.spec.display().to_string();
-    let bytes = read_spec(&args.spec)?;
+    let bytes = lint::read_spec(&args.spec, &spec_name)?;
 
-    // 1. Lint the buffer. Errors refuse. Warnings are printed and signing goes on.
+    // 1. Lint the buffer with the whole of `rdy spec lint`: parse, expiry and every check entry. Errors
+    // refuse, before the key is opened or a password is asked for. Warnings are printed and signing
+    // goes on.
     let spec =
         parse_unverified(&bytes).map_err(|source| CliError::spec(spec_name.clone(), source))?;
-    let findings = spec.lint_checks();
-    let errors = print_findings(out, &spec_name, &findings);
-    if errors > 0 {
+    let report = lint_bytes(&escape_untrusted(&spec_name), &bytes);
+    if report.has_errors() {
+        // An expired spec has its own code and message, said once. Loading it for the loader finds it.
+        if let Err(source @ SpecError::Expired { .. }) =
+            load(&bytes, None, &TrustStore::new(), Policy::AllowUnsigned)
+        {
+            return Err(CliError::spec_in(spec_name, source, &bytes));
+        }
+        let _ = out.write_all(lint::text(&report).as_bytes());
+        let errors = report.errors;
         let plural = if errors == 1 { "" } else { "s" };
         return Err(CliError::usage(
             format!(
@@ -356,6 +367,8 @@ pub fn sign<T: Terminal>(
             "correct the errors above and run rdy spec sign again",
         ));
     }
+    // Warnings only: the finding lines, with no summary (07 C.9). Signing goes on.
+    let _ = out.write_all(lint::findings_text(&report).as_bytes());
 
     // 2. The place for the signature. Refuse an existing file before asking for a password.
     let sig_path = args
@@ -385,8 +398,14 @@ pub fn sign<T: Terminal>(
     let public = PublicKey::from_base64(&key.public_key_base64()).map_err(|_| CliError::bug())?;
     let mut trust = TrustStore::new();
     trust.pin(product.clone(), public.clone(), TrustSource::User);
-    let loaded = load(&bytes, Some(text.as_bytes()), &trust, Policy::RequireSigned)
-        .map_err(|_| CliError::bug())?;
+    let loaded =
+        load(&bytes, Some(text.as_bytes()), &trust, Policy::RequireSigned).map_err(|source| {
+            match source {
+                // The clock passed `expires` between the lint and the check.
+                SpecError::Expired { .. } => CliError::spec_in(spec_name.clone(), source, &bytes),
+                _ => CliError::bug(),
+            }
+        })?;
     let verified = matches!(
         loaded.signature(),
         SignatureState::Verified { key_id, fingerprint, signed_at: at, .. }
@@ -412,47 +431,6 @@ pub fn sign<T: Terminal>(
         &public,
     );
     Ok(())
-}
-
-/// Reads the spec once, at most one byte over the cap, from a regular file.
-fn read_spec(path: &Path) -> Result<Vec<u8>, CliError> {
-    let name = path.display().to_string();
-    let mut file = File::open(path).map_err(|e| CliError::spec_unreadable(name.clone(), &e))?;
-    let meta = file
-        .metadata()
-        .map_err(|e| CliError::spec_unreadable(name.clone(), &e))?;
-    if !meta.is_file() {
-        let not_a_file = io::Error::from(io::ErrorKind::IsADirectory);
-        return Err(CliError::spec_unreadable(name, &not_a_file));
-    }
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take(MAX_SPEC_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| CliError::spec_unreadable(name, &e))?;
-    Ok(bytes)
-}
-
-/// Prints each finding as two lines and returns how many are errors.
-///
-/// Positions (line and column) come with `rdy spec lint` (M1-031). Until then a finding names its
-/// check by id in the message.
-fn print_findings(out: &mut dyn Write, file: &str, findings: &[CheckLint]) -> usize {
-    let file = escape_untrusted(file);
-    for finding in findings {
-        let level = if finding.blocks_signing() {
-            "error"
-        } else {
-            "warning"
-        };
-        let _ = writeln!(
-            out,
-            "{file}: {level}: {}\n  fix: {}",
-            escape_untrusted(&finding.message),
-            escape_untrusted(&finding.fix)
-        );
-    }
-    findings.iter().filter(|f| f.blocks_signing()).count()
 }
 
 /// Reads the key file, refuses one that others can read, and opens it with the password.

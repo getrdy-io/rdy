@@ -101,7 +101,7 @@ pub struct Endpoint {
     pub target: Target,
     /// Unreachable gives a warning and not a block. The default is false.
     pub optional: bool,
-    /// The statuses that count as reachable, for a URL target. At most 16.
+    /// The statuses that count as reachable, for a URL target. At most 16. With none listed, 2xx, 3xx and 4xx count as reachable except 407; a 407 and any 5xx fail. A 3xx, 401, 404 and other 4xx get a note and a 403 warns, because a proxy's deny page looks the same.
     pub expect_status: Option<BoundedList<HttpStatus, 16, true, 1>>,
     /// The request method, for a URL target. The default is [`HttpMethod::Head`].
     pub method: HttpMethod,
@@ -229,6 +229,13 @@ impl TlsHost {
     #[must_use]
     pub fn host(&self) -> &Host {
         self.target.host()
+    }
+
+    /// The host and the port to use (the written one, or 443) as a [`Target`]. This is what a check
+    /// hands to the probe.
+    #[must_use]
+    pub fn target(&self) -> &Target {
+        &self.target
     }
 
     /// The port as written, or `None` when the spec has none and [`TlsHost::DEFAULT_PORT`] applies.

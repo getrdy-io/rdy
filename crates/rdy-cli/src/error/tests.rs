@@ -28,6 +28,9 @@ fn spec_at(error: SpecError, line: u32, column: u32) -> CliError {
     CliError::Spec {
         file: Some(s("acme-platform.yaml")),
         source: located(error, line, column),
+        crlf: false,
+        root: false,
+        key: false,
     }
 }
 
@@ -90,9 +93,11 @@ fn every_cli_error() -> Vec<CliError> {
             path: "acme-signing.key".into(),
             reason: IoReason::DiskFull,
         }),
-        CliError::Internal(InternalKind::NotImplemented { command: "run" }),
         CliError::Internal(InternalKind::SecretRefused {
             names: vec![s("API_TOKEN")],
+        }),
+        CliError::Internal(InternalKind::ProxySecretRefused {
+            var: s("HTTPS_PROXY"),
         }),
         CliError::Internal(InternalKind::Privilege(PrivilegeError::Refused(vec![
             Refusal::AtSecure,
@@ -585,6 +590,9 @@ fn control_characters_in_a_spec_string_never_reach_the_output() {
             2,
             1,
         ),
+        crlf: false,
+        root: false,
+        key: false,
     };
     let r = e.render();
     for part in [
@@ -636,6 +644,9 @@ fn json_for_a_parse_error_matches_the_sample_in_07_c_11() {
             14,
             11,
         ),
+        crlf: false,
+        root: false,
+        key: false,
     };
     let got = json_of(&e);
     assert_eq!(got["api_version"], "rdy/v1");
@@ -952,4 +963,204 @@ fn a_trust_path_with_control_characters_is_escaped_in_the_message_and_the_fix() 
     let r = err.render();
     assert!(!r.message.contains('\u{1b}') && !r.fix.contains('\u{1b}'));
     assert!(!r.text().contains('\u{1b}'));
+}
+
+// ---------------------------------------------------------------------------------------------
+// The first lines of 01 section 4.8 (M1-126)
+// ---------------------------------------------------------------------------------------------
+
+fn product(name: &str) -> ProductSlug {
+    ProductSlug::new(name).expect("slug")
+}
+
+fn signature_line(error: SignatureError, crlf: bool) -> String {
+    let cli = CliError::spec_in(
+        "acme-platform.yaml",
+        SpecError::Signature(error),
+        if crlf { b"a\r\nb" } else { b"a\nb" },
+    );
+    let r = cli.render();
+    // The JSON keeps the file (ADR 0008 decision 7). Only the terminal prefix is left out.
+    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
+    assert_eq!((r.line, r.column), (None, None));
+    r.text()
+        .lines()
+        .next()
+        .map(str::to_owned)
+        .unwrap_or_default()
+}
+
+const CRLF: &str =
+    " The file has Windows line endings. If it went through Git or email, ask for the original.";
+
+#[test]
+fn every_signature_refusal_has_the_first_line_of_the_4_8_table() {
+    assert_eq!(
+        signature_line(SignatureError::Missing, false),
+        "error: no signature found at acme-platform.yaml.minisig"
+    );
+    let key_id = KeyId::from_bytes([0x9F, 0x3A, 0x6C, 0x21, 0xD4, 0xE8, 0x7B, 0x05]);
+    assert_eq!(
+        signature_line(
+            SignatureError::UnknownKey {
+                key_id,
+                product: product("acme-platform"),
+            },
+            false
+        ),
+        format!(
+            "error: acme-platform.yaml is signed with key {key_id}, which you have not trusted for acme-platform"
+        )
+    );
+    let tampered = "error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.";
+    assert_eq!(
+        signature_line(SignatureError::Tampered { crlf: false }, false),
+        tampered
+    );
+    assert_eq!(
+        signature_line(SignatureError::CommentTampered, false),
+        tampered
+    );
+    let form = "error: the signature on acme-platform.yaml is not in the form rdy accepts.";
+    for error in [
+        SignatureError::LegacyAlgorithm,
+        SignatureError::Malformed { reason: "x" },
+        SignatureError::BadComment { reason: "x" },
+        SignatureError::SidecarTooLarge {
+            size: 5000,
+            limit: 4096,
+        },
+    ] {
+        assert_eq!(signature_line(error, false), form);
+    }
+    assert_eq!(
+        signature_line(
+            SignatureError::ProductMismatch {
+                signed: product("acme-edge"),
+                spec: product("acme-platform"),
+            },
+            false
+        ),
+        "error: acme-platform.yaml is signed for product 'acme-edge', but the spec says 'acme-platform'."
+    );
+}
+
+#[test]
+fn a_spec_with_windows_line_endings_adds_the_note_to_every_signature_error_but_a_missing_one() {
+    assert_eq!(
+        signature_line(SignatureError::Tampered { crlf: false }, true),
+        format!(
+            "error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.{CRLF}"
+        )
+    );
+    // The loader's own flag gives the same line, once.
+    assert_eq!(
+        signature_line(SignatureError::Tampered { crlf: true }, true),
+        signature_line(SignatureError::Tampered { crlf: false }, true)
+    );
+    assert!(
+        signature_line(SignatureError::Malformed { reason: "x" }, true).ends_with(CRLF),
+        "form"
+    );
+    assert!(!signature_line(SignatureError::Missing, true).contains("Windows"));
+    assert!(!signature_line(SignatureError::LegacyAlgorithm, false).contains("Windows"));
+}
+
+#[test]
+fn an_expired_spec_names_the_file_inside_the_sentence() {
+    let cli = CliError::spec(
+        "acme-platform.yaml",
+        SpecError::Expired {
+            expired_on: "2027-01-31".into(),
+            today: "2027-02-03".into(),
+        },
+    );
+    let r = cli.render();
+    assert_eq!(r.code, ErrorCode::SpecExpired);
+    assert_eq!(r.file.as_deref(), Some("acme-platform.yaml"));
+    assert_eq!(
+        r.text(),
+        "error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.\nfix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.\n"
+    );
+}
+
+#[test]
+fn a_file_name_with_control_characters_is_escaped_in_a_refusal() {
+    let cli = CliError::spec(
+        "\u{1b}[2J.yaml",
+        SpecError::Signature(SignatureError::Missing),
+    );
+    let r = cli.render();
+    assert!(!r.message.contains('\u{1b}'), "{}", r.message);
+}
+
+#[test]
+fn no_refusal_names_the_flag_that_allows_an_unsigned_spec() {
+    for error in [
+        SignatureError::Missing,
+        SignatureError::Tampered { crlf: true },
+        SignatureError::LegacyAlgorithm,
+    ] {
+        let text = signature_line(error.clone(), true);
+        let fix = CliError::spec("a.yaml", SpecError::Signature(error)).hint();
+        assert!(!text.contains("--allow-unsigned"), "{text}");
+        assert!(!fix.contains("--allow-unsigned"), "{fix}");
+    }
+}
+
+#[test]
+fn a_root_run_with_no_matching_key_says_which_store_it_read() {
+    let error = SignatureError::UnknownKey {
+        key_id: KeyId::from_bytes([1; 8]),
+        product: product("acme-platform"),
+    };
+    let user = CliError::spec("acme-platform.yaml", SpecError::Signature(error.clone()));
+    let root = CliError::spec("acme-platform.yaml", SpecError::Signature(error)).as_root();
+    assert!(!user.hint().contains("As root"), "{}", user.hint());
+    if cfg!(not(windows)) {
+        let hint = root.hint();
+        assert!(
+            hint.contains("As root, rdy reads only /etc/rdy/trust.yaml. If you pinned this key as a normal user, pin it for root too: sudo rdy trust add acme-platform --key <file>"),
+            "{hint}"
+        );
+        assert!(!hint.contains("--allow-unsigned"), "{hint}");
+    }
+}
+
+#[test]
+fn an_unknown_key_with_windows_line_endings_gets_a_full_stop_before_the_note() {
+    let line = signature_line(
+        SignatureError::UnknownKey {
+            key_id: KeyId::from_bytes([1; 8]),
+            product: product("acme-platform"),
+        },
+        true,
+    );
+    assert!(
+        line.ends_with(&format!("not trusted for acme-platform.{CRLF}"))
+            || line.contains(&format!("have not trusted for acme-platform.{CRLF}")),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_missing_signature_names_the_sidecar_in_the_fix_and_a_key_changes_both_lines() {
+    let missing = || {
+        CliError::spec(
+            "acme-platform.yaml",
+            SpecError::Signature(SignatureError::Missing),
+        )
+    };
+    assert_eq!(
+        missing().hint(),
+        "ask the vendor for acme-platform.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned"
+    );
+    let keyed = missing().with_key();
+    let r = keyed.render();
+    assert_eq!(
+        r.message,
+        "a key was given, but acme-platform.yaml has no signature. rdy looked for acme-platform.yaml.minisig"
+    );
+    assert!(!r.fix.contains("unsigned"), "{}", r.fix);
+    assert!(!r.text().contains("--allow-unsigned"), "{}", r.text());
 }

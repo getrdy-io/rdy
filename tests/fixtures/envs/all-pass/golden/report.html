@@ -108,6 +108,11 @@ nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; ma
 .label { font-weight: 700; }
 .muted { color: var(--muted); }
 dl { margin: 0; }
+.facts { margin: 0.5rem 0; }
+.facts p { margin: 0; }
+.facts dl { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0 1rem; margin: 0.25rem 0 0; }
+.facts dt { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.facts dd { grid-column: 2; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 dl.details { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.25rem 1rem; }
 dl.details dt { font-weight: 700; }
 dl.details dd { margin: 0; overflow-wrap: anywhere; }
@@ -116,7 +121,8 @@ caption { text-align: left; font-weight: 700; padding: 0.25rem 0; }
 th, td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); overflow-wrap: anywhere; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); }
 @media (max-width: 40rem) {
-  dl.details { grid-template-columns: 1fr; }
+  dl.details, .facts dl { grid-template-columns: 1fr; }
+  .facts dd { grid-column: 1; }
 }
 /* Print is black on white whatever the screen theme: this block comes after the dark palette and replaces
    every variable it sets. No backgrounds, so a printer spends no ink on them. */
@@ -136,9 +142,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     --banner-bg: #ffffff;
   }
   body { background: #ffffff; color: #000000; }
+  /* The banners stay in the flow in print, so they print once, at the top of page one, and cover nothing.
+     A fixed banner that repeats on every page was tried: headless Chrome puts a fixed box with a negative
+     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
+     template adds a top page-margin box with the banner titles, so every page carries the mark. */
   .check, tr { break-inside: avoid; }
-  #passed, #capabilities { break-before: page; }
+  #passed, #capabilities, #actions { break-before: page; }
 }
+@page { margin-top: 2cm; @top-center { content: "WARNING: UNSIGNED SPEC"; font: bold 10pt system-ui, sans-serif; color: #000000; } }
 </style>
 </head>
 <body>
@@ -155,6 +166,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="summary">0 blocks, 0 warnings, 15 passed</p>
 <p class="no-blocks">No blocks.</p>
 <p>Run <bdi>2026-11-02 09:00:00 UTC</bdi> with rdy <bdi>&#60;version&#62;</bdi> (root)</p>
+<p class="next">What to do next: Everything the spec asks for passed. To share this result, send the .json file from the same folder.</p>
 <p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
 <p class="rule">NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
@@ -174,38 +186,296 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-0">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.os</bdi></span></h3>
 <p class="text"><bdi>Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Arch</bdi></dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt><bdi>Container</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Fips</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Init</bdi></dt>
+<dd><bdi>systemd</bdi></dd>
+<dt><bdi>Kernel</bdi></dt>
+<dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
+<dt><bdi>OS</bdi></dt>
+<dd><bdi>ID</bdi>: <bdi>rhel</bdi></dd>
+<dd><bdi>ID like</bdi>: <bdi>fedora</bdi></dd>
+<dd><bdi>Name</bdi>: <bdi>Red Hat Enterprise Linux</bdi></dd>
+<dd><bdi>Pretty name</bdi>: <bdi>Red Hat Enterprise Linux 9.3 (Plow)</bdi></dd>
+<dd><bdi>Source</bdi>: <bdi>/etc/os-release</bdi></dd>
+<dd><bdi>Version ID</bdi>: <bdi>9.3</bdi></dd>
+<dt><bdi>Wsl</bdi></dt>
+<dd><bdi>no</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Fips</bdi></dt>
+<dd><bdi>any</bdi></dd>
+<dt><bdi>Supported</bdi></dt>
+<dd><bdi>ID</bdi>: <bdi>rhel</bdi>; <bdi>Versions</bdi>: <bdi>[truncated]</bdi></dd>
+<dd><bdi>ID</bdi>: <bdi>ubuntu</bdi>; <bdi>Versions</bdi>: <bdi>[truncated]</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-1">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.memory</bdi></span></h3>
 <p class="text"><bdi>31.3 GiB found, 32 GiB needed, inside the 5% tolerance</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Available</bdi></dt>
+<dd><bdi>28.5 GiB</bdi></dd>
+<dt><bdi>Available effective</bdi></dt>
+<dd><bdi>28.5 GiB</bdi></dd>
+<dt><bdi>Available estimated</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Cgroup hierarchy</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup limit at</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup limit</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup swap limit</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Effective</bdi></dt>
+<dd><bdi>31.3 GiB</bdi></dd>
+<dt><bdi>Swap total</bdi></dt>
+<dd><bdi>0 bytes</bdi></dd>
+<dt><bdi>Swap used</bdi></dt>
+<dd><bdi>0 bytes</bdi></dd>
+<dt><bdi>Total</bdi></dt>
+<dd><bdi>31.3 GiB</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Band</bdi></dt>
+<dd><bdi>1.6 GiB</bdi></dd>
+<dt><bdi>Min available</bdi></dt>
+<dd><bdi>16 GiB</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>32 GiB</bdi></dd>
+<dt><bdi>Swap</bdi></dt>
+<dd><bdi>any</bdi></dd>
+</dl>
+</div>
 <p class="text muted"><bdi>Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent).</bdi></p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-2">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.cpu</bdi></span></h3>
 <p class="text"><bdi>8 vCPUs found, 8 needed</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Allowed cores</bdi></dt>
+<dd><bdi>8</bdi></dd>
+<dt><bdi>Arch</bdi></dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt><bdi>Effective cores</bdi></dt>
+<dd><bdi>8.0</bdi></dd>
+<dt><bdi>Flags</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Hypervisor</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Logical cores</bdi></dt>
+<dd><bdi>8</bdi></dd>
+<dt><bdi>Physical cores</bdi></dt>
+<dd><bdi>4</bdi></dd>
+<dt><bdi>Quota cores</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Virtualization</bdi></dt>
+<dd><bdi>vm</bdi></dd>
+<dt><bdi>X86 64 level</bdi></dt>
+<dd><bdi>4</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>8</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-3">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.disk</bdi></span></h3>
 <p class="text"><bdi>`/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is needed.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Device</bdi></dt>
+<dd><bdi>253:1</bdi></dd>
+<dt><bdi>Free</bdi></dt>
+<dd><bdi>100 GiB</bdi></dd>
+<dt><bdi>Free inodes</bdi></dt>
+<dd><bdi>900000</bdi></dd>
+<dt><bdi>Filesystem type</bdi></dt>
+<dd><bdi>xfs</bdi></dd>
+<dt><bdi>Measured path</bdi></dt>
+<dd><bdi>/var/lib/acme</bdi></dd>
+<dt><bdi>Mount</bdi></dt>
+<dd><bdi>/var</bdi></dd>
+<dt><bdi>Network</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Nodev</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Noexec</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Nosuid</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Path</bdi></dt>
+<dd><bdi>/var/lib/acme</bdi></dd>
+<dt><bdi>Read only</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Total</bdi></dt>
+<dd><bdi>200 GiB</bdi></dd>
+<dt><bdi>Total inodes</bdi></dt>
+<dd><bdi>1000000</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Forbid fstypes</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Forbid options</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>21474836480</bdi></dd>
+<dt><bdi>Min inodes</bdi></dt>
+<dd><bdi>100000</bdi></dd>
+<dt><bdi>Recommended</bdi></dt>
+<dd><bdi>25769803776</bdi></dd>
+</dl>
+</div>
 <p class="text muted"><bdi>rdy runs as root. Free space is what other users can use. Blocks reserved for root are not counted.</bdi></p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-4">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.kernel</bdi></span></h3>
 <p class="text"><bdi>Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3 required modules are loaded or built in. BTF type information is present.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Base</bdi></dt>
+<dd><bdi>5.14.0</bdi></dd>
+<dt><bdi>Btf</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Build</bdi></dt>
+<dd><bdi>362</bdi></dd>
+<dt><bdi>Distro</bdi></dt>
+<dd><bdi>rhel</bdi></dd>
+<dt><bdi>Modules</bdi></dt>
+<dd><bdi>Br netfilter</bdi>: <bdi>built_in</bdi></dd>
+<dd><bdi>Nf conntrack</bdi>: <bdi>loaded</bdi></dd>
+<dd><bdi>Overlay</bdi>: <bdi>loaded</bdi></dd>
+<dt><bdi>Release</bdi></dt>
+<dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Applied</bdi></dt>
+<dd><bdi>Source</bdi>: <bdi>min</bdi></dd>
+<dd><bdi>Version</bdi>: <bdi>5.4</bdi></dd>
+<dt><bdi>Btf</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>5.4</bdi></dd>
+<dt><bdi>Modules</bdi></dt>
+<dd><bdi>overlay</bdi></dd>
+<dd><bdi>br_netfilter</bdi></dd>
+<dd><bdi>nf_conntrack</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-5">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.cgroups</bdi></span></h3>
 <p class="text"><bdi>cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids` available</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Cmdline</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Controllers</bdi></dt>
+<dd><bdi>CPU</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Io</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Memory</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Pids</bdi>: <bdi>ok</bdi></dd>
+<dt><bdi>Controllers available</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>cpuset</bdi></dd>
+<dd><bdi>hugetlb</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>misc</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dd><bdi>rdma</bdi></dd>
+<dt><bdi>Controllers enabled</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dt><bdi>Layout</bdi></dt>
+<dd><bdi>v2</bdi></dd>
+<dt><bdi>Proc cgroups</bdi></dt>
+<dd><bdi>CPU</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Io</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Memory</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Pids</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Controllers</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dt><bdi>Version</bdi></dt>
+<dd><bdi>v2</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-6">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.sysctl</bdi></span></h3>
 <p class="text"><bdi>4 kernel parameters have the wanted value and are set at boot. Services get an open files limit of 1048576 (`DefaultLimitNOFILE=1048576` in `/etc/systemd/system.conf.d/10-acme.conf`).</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Limits</bdi></dt>
+<dd><bdi>Nofile</bdi>: <bdi>Default limit nofile</bdi>: <bdi>1048576</bdi>; <bdi>File</bdi>: <bdi>/etc/systemd/system.conf.d/10-acme.conf</bdi>; <bdi>File max</bdi>: <bdi>9223372036854775807</bdi>; <bdi>Hard</bdi>: <bdi>1048576</bdi>; <bdi>Nr open</bdi>: <bdi>1048576</bdi>; <bdi>Shell limit</bdi>: <bdi>[truncated]</bdi>; <bdi>Soft</bdi>: <bdi>1048576</bdi></dd>
+<dt><bdi>Parameters</bdi></dt>
+<dd><bdi>Kernel.shmmax</bdi>: <bdi>Live</bdi>: <bdi>18446744073709551615</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Net.ipv4.ip forward</bdi>: <bdi>Live</bdi>: <bdi>1</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Net.ipv4.tcp rmem</bdi>: <bdi>Live</bdi>: <bdi>4096 131072 6291456</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Vm.max map count</bdi>: <bdi>Live</bdi>: <bdi>1048576</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Limits</bdi></dt>
+<dd><bdi>Nofile</bdi>: <bdi>&#62;=65536</bdi></dd>
+<dt><bdi>Parameters</bdi></dt>
+<dd><bdi>Kernel.shmmax</bdi>: <bdi>&#62;=4294967296</bdi></dd>
+<dd><bdi>Net.ipv4.ip forward</bdi>: <bdi>1</bdi></dd>
+<dd><bdi>Net.ipv4.tcp rmem</bdi>: <bdi>4096 131072 6291456</bdi></dd>
+<dd><bdi>Vm.max map count</bdi>: <bdi>&#62;=262144</bdi></dd>
+</dl>
+</div>
 <p class="text muted"><bdi>Read 2 sysctl configuration file(s), in boot order.</bdi></p>
 <p class="text muted"><bdi>rdy&#39;s own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services.</bdi></p>
 <p class="muted">Took 0 ms</p>
@@ -213,24 +483,146 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-7">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.lsm</bdi></span></h3>
 <p class="text"><bdi>SELinux is enforcing. AppArmor is off.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Apparmor</bdi></dt>
+<dd><bdi>State</bdi>: <bdi>disabled</bdi></dd>
+<dt><bdi>Selinux</bdi></dt>
+<dd><bdi>Configured</bdi>: <bdi>enforcing</bdi></dd>
+<dd><bdi>Denials</bdi>: <bdi>Count</bdi>: <bdi>0</bdi>; <bdi>Groups</bdi>: <bdi>[truncated]</bdi>; <bdi>Inspected</bdi>: <bdi>yes</bdi>; <bdi>Permissive</bdi>: <bdi>0</bdi>; <bdi>Watched</bdi>: <bdi>[truncated]</bdi>; <bdi>Window</bdi>: <bdi>24h</bdi>; <bdi>Window truncated</bdi>: <bdi>no</bdi></dd>
+<dd><bdi>State</bdi>: <bdi>enforcing</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Selinux</bdi></dt>
+<dd><bdi>Allow</bdi>: <bdi>enforcing</bdi></dd>
+<dd><bdi>Denials max</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Denials window</bdi>: <bdi>24h</bdi></dd>
+<dd><bdi>Watch</bdi>: <bdi>acme_t</bdi></dd>
+</dl>
+</div>
 <p>Requires: root (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-8">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.time_sync</bdi></span></h3>
 <p class="text"><bdi>Clock is synchronized, under 1 ms away from chrony&#39;s reference `192.0.2.30`.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Chrony</bdi></dt>
+<dd><bdi>Leap</bdi>: <bdi>Normal</bdi></dd>
+<dd><bdi>Offset seconds</bdi>: <bdi>0.000012</bdi></dd>
+<dd><bdi>Reference</bdi>: <bdi>192.0.2.30</bdi></dd>
+<dd><bdi>Stratum</bdi>: <bdi>3</bdi></dd>
+<dd><bdi>Synchronized</bdi>: <bdi>yes</bdi></dd>
+<dt><bdi>Chronyc</bdi></dt>
+<dd><bdi>ok</bdi></dd>
+<dt><bdi>NTP enabled</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Offset seconds</bdi></dt>
+<dd><bdi>0.000012</bdi></dd>
+<dt><bdi>Offset source</bdi></dt>
+<dd><bdi>chronyc</bdi></dd>
+<dt><bdi>Reference</bdi></dt>
+<dd><bdi>192.0.2.30</bdi></dd>
+<dt><bdi>Servers</bdi></dt>
+<dd><bdi>Detail</bdi>: <bdi>connection refused</bdi>; <bdi>Result</bdi>: <bdi>failed</bdi>; <bdi>Server</bdi>: <bdi>192.0.2.10</bdi></dd>
+<dt><bdi>State</bdi></dt>
+<dd><bdi>synchronized</bdi></dd>
+<dt><bdi>Timedatectl</bdi></dt>
+<dd><bdi>ok</bdi></dd>
+<dt><bdi>Timezone</bdi></dt>
+<dd><bdi>Etc/UTC</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Max skew seconds</bdi></dt>
+<dd><bdi>300.0</bdi></dd>
+<dt><bdi>Recommended skew seconds</bdi></dt>
+<dd><bdi>5.0</bdi></dd>
+<dt><bdi>Require sync</bdi></dt>
+<dd><bdi>no</bdi></dd>
+</dl>
+</div>
 <p class="text muted"><bdi>`192.0.2.10`: connection refused.</bdi></p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-9">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.ports</bdi></span></h3>
 <p class="text"><bdi>80/tcp, 443/tcp, 6443/tcp, 10250/tcp and 8472/udp are free.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Container</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Ephemeral range</bdi></dt>
+<dd><bdi>32768</bdi></dd>
+<dd><bdi>60999</bdi></dd>
+<dt><bdi>Netns</bdi></dt>
+<dd><bdi>net:[4026531992]</bdi></dd>
+<dt><bdi>Processes walked</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Reserved ports</bdi></dt>
+<dd><bdi>(empty)</bdi></dd>
+<dt><bdi>Tcp</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>80</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>443</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>6443</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>10250</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dt><bdi>Udp</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>8472</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Allow owner</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Free</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>80</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>443</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>6443</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>10250</bdi></dd>
+<dt><bdi>Udp free</bdi></dt>
+<dd><bdi>8472</bdi></dd>
+</dl>
+</div>
 <p>Requires: root (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-10">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.security_agents</bdi></span></h3>
 <p class="text"><bdi>No known security software process was found among 6 processes.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Detected</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Limited view</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>List cut</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Processes read</bdi></dt>
+<dd><bdi>6</bdi></dd>
+<dt><bdi>Processes unreadable</bdi></dt>
+<dd><bdi>0</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Allow</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Forbid</bdi></dt>
+<dd><bdi>none</bdi></dd>
+</dl>
+</div>
 <p>Requires: root (available)</p>
 <p class="text muted"><bdi>rdy sees the processes of the machine it runs on. In a container, host processes are not visible.</bdi></p>
 <p class="muted">Took 0 ms</p>
@@ -238,12 +630,50 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-11">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.container_runtime</bdi></span></h3>
 <p class="text"><bdi>containerd 1.7.13 is running (cgroup driver systemd, storage driver overlayfs).</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Kubelet</bdi></dt>
+<dd><bdi>Cgroup driver</bdi>: <bdi>systemd</bdi></dd>
+<dd><bdi>Config present</bdi>: <bdi>yes</bdi></dd>
+<dt><bdi>Runtimes</bdi></dt>
+<dd><bdi>API</bdi>: <bdi>not asked</bdi>; <bdi>Cgroup driver</bdi>: <bdi>systemd</bdi>; <bdi>Cgroup driver source</bdi>: <bdi>/etc/containerd/config.toml</bdi>; <bdi>Config version</bdi>: <bdi>2</bdi>; <bdi>D type</bdi>: <bdi>none</bdi>; <bdi>Installed</bdi>: <bdi>yes</bdi>; <bdi>Proxy</bdi>: <bdi>none</bdi>; <bdi>Rootless</bdi>: <bdi>none</bdi>; <bdi>Rootless socket</bdi>: <bdi>no</bdi>; <bdi>Runtime</bdi>: <bdi>containerd</bdi>; <bdi>Socket</bdi>: <bdi>/run/containerd/containerd.sock</bdi>; <bdi>Socket present</bdi>: <bdi>yes</bdi>; <bdi>Storage driver</bdi>: <bdi>overlayfs</bdi>; <bdi>Storage driver source</bdi>: <bdi>/etc/containerd/config.toml</bdi>; <bdi>Version</bdi>: <bdi>1.7.13</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Cgroup driver</bdi></dt>
+<dd><bdi>systemd</bdi></dd>
+<dt><bdi>Min version</bdi></dt>
+<dd><bdi>1.6</bdi></dd>
+<dt><bdi>Runtime</bdi></dt>
+<dd><bdi>containerd</bdi></dd>
+<dt><bdi>Storage driver</bdi></dt>
+<dd><bdi>overlay2</bdi></dd>
+</dl>
+</div>
 <p>Requires: root (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-12">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.firewall</bdi></span></h3>
 <p class="text"><bdi>firewalld zone public allows 6443/tcp and 10250/tcp inbound.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Active</bdi></dt>
+<dd><bdi>Interface</bdi>: <bdi>eth0</bdi>; <bdi>Manager</bdi>: <bdi>firewalld</bdi>; <bdi>Ports</bdi>: <bdi>[truncated]</bdi>; <bdi>Zone</bdi>: <bdi>public</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Open inbound</bdi></dt>
+<dd><bdi>6443</bdi></dd>
+<dd><bdi>10250</bdi></dd>
+</dl>
+</div>
 <p>Requires: root (available)</p>
 <p class="text muted"><bdi>firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read</bdi></p>
 <p class="muted">Took 0 ms</p>
@@ -251,12 +681,72 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-13">
 <h3><span class="status">PASS</span> <span class="id"><bdi>net.egress</bdi></span></h3>
 <p class="text"><bdi>1 of 1 endpoints reachable</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Endpoints</bdi></dt>
+<dd><bdi>Attempts</bdi>: <bdi>[truncated]</bdi>; <bdi>Connect</bdi>: <bdi>0 ms</bdi>; <bdi>Endpoint</bdi>: <bdi>web.acme.test:8080</bdi>; <bdi>Lookup</bdi>: <bdi>[truncated]</bdi>; <bdi>Optional</bdi>: <bdi>no</bdi>; <bdi>Result</bdi>: <bdi>reached</bdi>; <bdi>TLS</bdi>: <bdi>no</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Max latency</bdi></dt>
+<dd><bdi>2000 ms</bdi></dd>
+<dt><bdi>Trust</bdi></dt>
+<dd><bdi>system</bdi></dd>
+</dl>
+</div>
 <p>Requires: network access (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-14">
 <h3><span class="status">PASS</span> <span class="id"><bdi>net.mtu</bdi></span></h3>
 <p class="text"><bdi>`eth0` has MTU 1500.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Container interfaces</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Default family</bdi></dt>
+<dd><bdi>ipv4</bdi></dd>
+<dt><bdi>Default interface</bdi></dt>
+<dd><bdi>eth0</bdi></dd>
+<dt><bdi>Default MTU</bdi></dt>
+<dd><bdi>1500</bdi></dd>
+<dt><bdi>Interfaces</bdi></dt>
+<dd><bdi>Kind</bdi>: <bdi>ethernet</bdi>; <bdi>MTU</bdi>: <bdi>1500</bdi>; <bdi>Name</bdi>: <bdi>eth0</bdi>; <bdi>State</bdi>: <bdi>up</bdi></dd>
+<dt><bdi>Interfaces down</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Interfaces not read</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Interfaces not shown</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Overhead</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overlay</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Pod MTU</bdi></dt>
+<dd><bdi>none</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Clamp above</bdi></dt>
+<dd><bdi>1500</bdi></dd>
+<dt><bdi>Min MTU</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overhead</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overlay</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Underlay</bdi></dt>
+<dd><bdi>ipv4</bdi></dd>
+<dt><bdi>Warn below</bdi></dt>
+<dd><bdi>1400</bdi></dd>
+</dl>
+</div>
 <p class="muted">Took 0 ms</p>
 </article>
 </section>
@@ -396,7 +886,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">76</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/etc/selinux/config</bdi></td><td>Done, 96 bytes</td></tr>
 <tr><th scope="row">77</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/var/log/audit/audit.log</bdi></td><td>Done, 1070 bytes</td></tr>
 <tr><th scope="row">78</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/module/apparmor/parameters/enabled</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run</bdi></td></tr>
+<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run</bdi></td></tr>
 <tr><th scope="row">80</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>timedatectl</bdi> <bdi>show</bdi> <bdi>-p</bdi> <bdi>NTPSynchronized</bdi> <bdi>-p</bdi> <bdi>NTP</bdi> <bdi>-p</bdi> <bdi>Timezone</bdi></td><td>Done, exit code 0</td></tr>
 <tr><th scope="row">81</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>chronyc</bdi> <bdi>-n</bdi> <bdi>-c</bdi> <bdi>tracking</bdi></td><td>Done, exit code 0</td></tr>
 <tr><th scope="row">82</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp</bdi></td><td>Done, 484 bytes</td></tr>
@@ -445,9 +935,11 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </section>
 </main>
 <footer>
-<p>rdy <bdi>&#60;version&#62;</bdi></p>
+<p>Made with Rdy. Use Rdy for your product: <a href="https://getrdy.io/?ref=report&#38;product=acme-platform" rel="noopener noreferrer">https://getrdy.io/?ref=report&#38;product=acme-platform</a></p>
+<p>This link carries the product name and nothing else.</p>
+<p>rdy <bdi>&#60;version&#62;</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="6e1707a35b3756c3ca3427c75a8b57f0f8a492dea7897d7e282cf17c2e43d38d">{
+<script type="application/json" id="rdy-result" data-sha256="7b70911f3bb1c779ecfde9824059dc9621cc8252e23602be90244b5a2876f673">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -2152,7 +2644,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "connect",
       "outcome": "failed",
-      "error": "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run",
+      "error": "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run",
       "host": "192.0.2.10",
       "port": 123,
       "proto": "udp"

@@ -1,0 +1,6 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+secrets = []
+note = "A proxy value with no at sign has no userinfo: a host and port, and a no_proxy list."

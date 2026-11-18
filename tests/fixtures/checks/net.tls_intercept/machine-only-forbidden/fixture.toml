@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-machine-only-forbidden"
+summary = "The same chain, with the spec forbidding interception"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false
