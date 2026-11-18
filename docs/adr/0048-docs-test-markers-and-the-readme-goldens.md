@@ -19,7 +19,7 @@ ADR 0047 already defined `install-only` and `pending=<ticket>`.
    `exit=` defaults to `0`. `shape=` is required on `tested`. The regex has no spaces (write `\s`) and is matched with
    line-edge `^` and `$` against stdout then stderr. A block with no marker fails the test, so a new command
    cannot reach a page untested and unexplained. `skip=` takes a reason from a closed list: `placeholder`,
-   `builds` (a build from source), `network`, `needs-release-files` and `windows-only`. Another word fails the
+   `builds` (a build from source), `network`, `needs-release-files`, `windows-only` and `page-test` (a dedicated page test runs this block's commands as written). Another word fails the
    test, so the set only grows by a reviewed change. `pending=` takes a ticket id (`M<n>-<nnn>`) that has a `todo`
    row in `docs/plan/12-progress.md`, so a ticket that merged cannot keep a block pending. `install-only` blocks
    run as a user with no rights on a clean host, so a block that needs root (`--allow-root`) or a folder of
