@@ -287,7 +287,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-135 | todo | | Golden README transcripts from Replay envs (acme-quickstart refusal, NOT READY, READY; acme-platform skipped checks) | backlog corrected 2026-11-06 (correction-41): depends on M1-180, because its goldens show the header (PR #42 reviews)
 
-- M1-136 | todo | | docs-test runner for README and docs tested blocks
+- M1-136 | todo | | Stacked on PR #85 (M1-133). Runner is `crates/rdy-cli/tests/docs_test.rs`, run by the existing `test` job on every leg (in `ci-ok`), plus a named step; no new workflow (ADR 0048). Blocks are skipped on Windows (no verified POSIX shell); marker, golden and self tests run there. Every shell block now needs a marker (`tested`, `install-only`, `pending=` with a `todo` ticket, `skip=` with a reason from a closed list). The README transcript golden is hand-trimmed from a real run and is diffed against the README only; M1-137 replaces it. `rdy run` blocks get `--no-network` from a wrapper script at the front of `PATH`. Not done: `cargo xtask docs-test` (M2, 09), the sign and verify page's blocks (M1-134 is unmerged, its blocks need markers when it merges)
 
 - M1-137 | todo | | README draft from 10 section 1 | interim README landed ([#155](https://github.com/getrdy-io/rdy/pull/155)); M1-137 replaces transcripts with goldens
 

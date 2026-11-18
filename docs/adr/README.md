@@ -48,6 +48,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0041](0041-repository-recreated-pr-numbers-restarted.md) | Repository recreated on 2026-10-30; PR numbers restarted | Accepted, code-reviewed (PR #16) |
 | [0042](0042-guard-entry-for-every-resource-of-the-gatekeeper-constraints-group.md) | The read guard admits a list of every resource in `constraints.gatekeeper.sh/v1beta1` | Accepted, security-reviewed (PR #48) |
 | [0047](0047-install-only-blocks-and-the-redirect-of-unsigned.md) | Install-only blocks run against the newest published release, and the `/unsigned` redirect is a declared file | Accepted (M1-133, PR #85) |
+| [0048](0048-docs-test-markers-and-the-readme-goldens.md) | Docs-test markers, the run folder, and README transcript goldens | Proposed (M1-136) |
 | [0049](0049-k8s-family-namespace-from-a-spec-block.md) | The Kubernetes family namespace comes from a spec `k8s:` block in M2, and `rdy run` gets no `--namespace` | Proposed; cli-ux and security-reviewer review it in M2-142 |
 | [0050](0050-macos-ci-gate-arm64-tests-intel-nightly.md) | The PR gate runs macOS arm64 tests and an x86_64 macOS compile; the Intel tests run on main and nightly | Accepted, decided by the founder 2026-11-18 |
 
