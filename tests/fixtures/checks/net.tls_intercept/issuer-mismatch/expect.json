@@ -14,7 +14,9 @@
     "fix": "The chain of web.acme.test was not issued by the CA the spec expects (`expected_issuer`). A TLS-inspecting proxy that re-signs the connection is the usual cause. Ask the network team to bypass inspection for web.acme.test. If this issuer is right, ask the vendor to update `expected_issuer`.",
     "level": "fail",
     "message": "web.acme.test:443 (issuer does not match expected_issuer)",
-    "notes": [],
+    "notes": [
+      "no revocation check"
+    ],
     "observed": {
       "hosts": [
         {

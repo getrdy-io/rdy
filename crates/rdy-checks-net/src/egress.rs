@@ -65,6 +65,7 @@ use rdy_engine::check::{
 };
 use rdy_engine::probe::Exemption;
 use rdy_engine::probe::net::Route;
+use rdy_engine::probe::net::REVOCATION_NOTE;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
@@ -414,6 +415,11 @@ impl EgressCheck {
         let unreachable: Vec<&Probed> = failed.iter().chain(&optional_failed).copied().collect();
         if let Some(fix) = fixes(os, &unreachable) {
             finding = finding.with_fix(fix);
+        }
+        // A handshake that finished says nothing about revocation. Said once per result (SF-01), first, because a report keeps only the first
+        // notes and an endpoint list can fill the rest.
+        if probed.iter().any(|p| p.tls.is_some()) {
+            finding = finding.with_note(REVOCATION_NOTE);
         }
         for warn in &warns {
             finding = finding.with_note(warn.clone());

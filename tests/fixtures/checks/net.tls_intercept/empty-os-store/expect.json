@@ -13,7 +13,8 @@
     "level": "fail",
     "message": "web.acme.test:443 (no OS trust store found)",
     "notes": [
-      "no OS trust store found: only the public roots could judge the chains"
+      "no OS trust store found: only the public roots could judge the chains",
+      "no revocation check"
     ],
     "observed": {
       "hosts": [
