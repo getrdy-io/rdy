@@ -4,14 +4,16 @@
 //! out) under `strace -f -e trace=connect,sendto,sendmsg`, then reads the log. Every call that names a
 //! destination must name one of these, and nothing else:
 //!
-//! - a loopback address, IPv4 `127.0.0.0/8` or IPv6 `::1`, any port (the fixture endpoints, and UDP
-//!   `127.0.0.1:323` and `[::1]:323` for `chronyc`);
+//! - an exact loopback address and port pair: the fixture endpoints and NTP servers of the spec below,
+//!   and UDP `127.0.0.1:323` and `[::1]:323` for `chronyc`. A loopback address on any other port is
+//!   refused, so a lookup through a stub resolver such as `127.0.0.53:53` is a phone home;
 //! - a unix socket a check declares (INV-28): the container runtime sockets of `host.container_runtime`;
 //! - one of the local IPC sockets of INV-11's third exception: `/run/chrony/chronyd.sock` and
 //!   `/var/run/chrony/chronyd.sock`, and the D-Bus system bus at `/run/dbus/system_bus_socket` and
 //!   `/var/run/dbus/system_bus_socket`.
 //!
-//! `sendto` and `sendmsg` on a connected socket name no destination (`NULL`), so there is nothing to
+//! The test traces `connect`, `sendto`, `sendmsg` and `sendmmsg`, and flags any `io_uring_setup`, because
+//! a ring can send without any of those calls. `sendto`, `sendmsg` and `sendmmsg` on a connected socket name no destination (`NULL`), so there is nothing to
 //! judge there. Any other socket family (`AF_NETLINK`, `AF_PACKET`) is flagged, as is a connect call
 //! whose address the parser cannot read.
 //!
@@ -41,8 +43,8 @@ use serde_json::Value;
 const PROBE: &str = "strace_probe_connect_non_local";
 const PROBE_VAR: &str = "RDY_PROBE_CONNECT_NON_LOCAL";
 
-/// The fixture spec: every host check that exists, with loopback endpoints and NTP servers. IP
-/// literals only, so no resolver is asked.
+/// The fixture spec: every check this build registers (13 `host` and 3 `net`; `k8s` is not registered
+/// yet), with loopback endpoints and NTP servers. IP literals only, so no resolver is asked.
 const SPEC: &str = r#"apiVersion: rdy/v1
 kind: Readiness
 metadata:
@@ -59,6 +61,11 @@ checks:
   - {id: host.firewall, severity: warn, fix: "Open the ports."}
   - {id: host.container_runtime, severity: warn, fix: "Install a runtime."}
   - {id: host.time_sync, max_skew: 5s, ntp_servers: ["127.0.0.1:12123", "[::1]:12123"], severity: warn, fix: "Sync the clock."}
+  - {id: host.os, fips: forbid, severity: warn, fix: "Disable FIPS mode."}
+  - {id: host.sysctl, expect: {vm.max_map_count: ">=262144"}, severity: warn, fix: "Raise the limit."}
+  - {id: host.security_agents, forbid: [acme-agent], severity: warn, fix: "Remove the agent."}
+  - {id: net.tls_intercept, hosts: ["127.0.0.1:18445"], severity: warn, fix: "Trust the proxy CA."}
+  - {id: net.mtu, min_mtu: 1400, severity: warn, fix: "Raise the MTU."}
   - {id: net.egress, endpoints: ["127.0.0.1:18443", "[::1]:18444"], via_proxy: direct, severity: warn, fix: "Open the endpoint."}
 "#;
 
@@ -78,31 +85,58 @@ const IPC_UNIX: [&str; 4] = [
     "/var/run/dbus/system_bus_socket",
 ];
 
+/// The loopback (address, port) pairs the fixture spec and the `chronyc` exception allow: the
+/// `net.egress` endpoints, the `host.time_sync` NTP servers, the `net.tls_intercept` host and 323.
+const LOOPBACK_V4: [u16; 4] = [18443, 12123, 18445, 323];
+const LOOPBACK_V6: [u16; 3] = [18444, 12123, 323];
+
+/// The number after `marker`, up to the next `)`.
+fn port(text: &str, marker: &str) -> Option<u16> {
+    text.split(marker).nth(1)?.split(')').next()?.parse().ok()
+}
+
 /// Why a call is not allowed, or `None` when it is.
 fn verdict(line: &str) -> Option<String> {
     let body = line.split_once(' ').map_or(line, |(_, rest)| rest).trim();
-    let is_call = ["connect(", "sendto(", "sendmsg("]
+    if body.starts_with("io_uring_setup(") {
+        return Some(format!("an io_uring ring, which can send unseen: {line}"));
+    }
+    let is_call = ["connect(", "sendto(", "sendmsg(", "sendmmsg("]
         .iter()
         .any(|name| body.starts_with(name));
     // Signals, exits and the second half of an interrupted call carry no destination.
     if !is_call || body.contains("resumed>") {
         return None;
     }
-    let Some(addr) = body.split("{sa_family=").nth(1) else {
+    let mut addrs = body.split("{sa_family=").skip(1).peekable();
+    if addrs.peek().is_none() {
         // A connected socket: `sendto(7, "\1", 1, MSG_NOSIGNAL, NULL, 0)`. A connect must name one.
         return body
             .starts_with("connect(")
             .then(|| format!("a connect with no readable address: {line}"));
-    };
+    }
+    // Every address on the line must be allowed (a `sendmmsg` carries several).
+    addrs
+        .any(|addr| !allowed(addr))
+        .then(|| format!("a destination that is not local IPC or a fixture pair: {line}"))
+}
+
+/// True when the socket address that starts at `addr` (the text after `{sa_family=`) is allowed.
+fn allowed(addr: &str) -> bool {
     let family = addr.split([',', '}']).next().unwrap_or_default();
-    let allowed = match family {
-        "AF_INET" => quoted(addr, "inet_addr(\"").is_some_and(|ip| ip.starts_with("127.")),
-        "AF_INET6" => quoted(addr, "inet_pton(AF_INET6, \"").is_some_and(|ip| ip == "::1"),
+    match family {
+        "AF_INET" => {
+            quoted(addr, "inet_addr(\"").is_some_and(|ip| ip == "127.0.0.1")
+                && port(addr, "sin_port=htons(").is_some_and(|p| LOOPBACK_V4.contains(&p))
+        }
+        "AF_INET6" => {
+            quoted(addr, "inet_pton(AF_INET6, \"").is_some_and(|ip| ip == "::1")
+                && port(addr, "sin6_port=htons(").is_some_and(|p| LOOPBACK_V6.contains(&p))
+        }
         "AF_UNIX" => quoted(addr, "sun_path=")
             .is_some_and(|path| DECLARED_UNIX.contains(&path) || IPC_UNIX.contains(&path)),
         _ => false,
-    };
-    (!allowed).then(|| format!("a destination that is not local IPC or loopback: {line}"))
+    }
 }
 
 /// The text of the quoted string that follows `marker` in `text`.
@@ -122,8 +156,10 @@ fn classifier_allows_loopback_declared_sockets_and_the_ipc_exception() {
     let allowed = [
         r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(18443), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 ENETUNREACH (Network is unreachable)"#,
         r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(323), sin_addr=inet_addr("127.0.0.1")}, 16) = 0"#,
+        r#"10 connect(15, {sa_family=AF_INET6, sin6_port=htons(18444), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0"#,
         r#"10 connect(15, {sa_family=AF_INET6, sin6_port=htons(323), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0"#,
-        r#"10 sendto(5, "x", 1, 0, {sa_family=AF_INET, sin_port=htons(123), sin_addr=inet_addr("127.0.0.1")}, 16) = 1"#,
+        r#"10 sendto(5, "x", 1, 0, {sa_family=AF_INET, sin_port=htons(12123), sin_addr=inet_addr("127.0.0.1")}, 16) = 1"#,
+        r"10 sendmmsg(3, [{msg_hdr={msg_name=NULL, msg_namelen=0}, msg_len=1}], 1, 0) = 1",
         r#"10 connect(3, {sa_family=AF_UNIX, sun_path="/run/chrony/chronyd.sock"}, 110) = 0"#,
         r#"10 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/chrony/chronyd.sock"}, 110) = 0"#,
         r#"10 connect(3, {sa_family=AF_UNIX, sun_path="/run/dbus/system_bus_socket"}, 110) = 0"#,
@@ -143,6 +179,12 @@ fn classifier_allows_loopback_declared_sockets_and_the_ipc_exception() {
 #[test]
 fn classifier_refuses_everything_else() {
     let refused_lines = [
+        r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.53")}, 16) = 0"#,
+        r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.1")}, 16) = 0"#,
+        r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(18444), sin_addr=inet_addr("127.0.0.1")}, 16) = 0"#,
+        r#"10 connect(15, {sa_family=AF_INET6, sin6_port=htons(18443), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0"#,
+        r#"10 sendmmsg(3, [{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(18443), sin_addr=inet_addr("127.0.0.1")}, msg_namelen=16}, msg_len=1}, {msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("198.51.100.7")}, msg_namelen=16}, msg_len=1}], 2, 0) = 2"#,
+        r"10 io_uring_setup(8, {flags=0}) = 5",
         r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.1")}, 16) = 0"#,
         r#"10 connect(15, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("8.8.8.8")}, 16) = 0"#,
         r#"10 sendto(5, "x", 1, 0, {sa_family=AF_INET, sin_port=htons(123), sin_addr=inet_addr("203.0.113.9")}, 16) = 1"#,
@@ -169,6 +211,18 @@ fn strace_probe_connect_non_local() {
     }
     let socket = std::net::UdpSocket::bind("0.0.0.0:0");
     drop(socket.and_then(|s| s.connect("192.0.2.1:9")));
+}
+
+/// The child side of the DNS control. It is `#[ignore]`, so no normal run executes it.
+#[test]
+#[ignore = "run by the control test under strace"]
+fn strace_probe_resolve_name() {
+    if std::env::var_os(PROBE_VAR).is_none() {
+        return;
+    }
+    drop(std::net::ToSocketAddrs::to_socket_addrs(
+        &"phone-home.acme.example:80",
+    ));
 }
 
 fn require() -> bool {
@@ -218,7 +272,7 @@ fn traced(argv: &[&OsStr], envs: &[(&str, &OsStr)], log: &Path) -> Traced {
             "-f",
             "-qq",
             "-e",
-            "trace=connect,sendto,sendmsg",
+            "trace=connect,sendto,sendmsg,sendmmsg,io_uring_setup",
             "-o",
         ])
         .arg(log)
@@ -320,7 +374,7 @@ fn root_run_contacts_only_loopback_and_local_ipc() {
     assert_eq!(report["run"]["options"]["network"], true, "{report}");
     assert_eq!(
         report["checks"].as_array().map(Vec::len),
-        Some(11),
+        Some(16),
         "not every fixture check ran:\n{}",
         done.stdout
     );
@@ -338,5 +392,35 @@ fn root_run_contacts_only_loopback_and_local_ipc() {
         bad.is_empty(),
         "rdy contacted a non-local destination:\n{}",
         bad.join("\n")
+    );
+}
+
+/// The DNS control: a name lookup shows as a connect to the resolver. Whatever address the resolver
+/// has (a stub on `127.0.0.53` included), the destination is not a fixture pair, so it is flagged.
+#[test]
+fn root_control_a_name_lookup_is_seen_and_flagged() {
+    if !usable() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let me = std::env::current_exe().expect("the test binary");
+    let name = "strace_probe_resolve_name";
+    let argv = [
+        me.as_os_str(),
+        OsStr::new("--ignored"),
+        OsStr::new("--exact"),
+        OsStr::new(name),
+        OsStr::new("--nocapture"),
+    ];
+    let seen = traced(
+        &argv,
+        &[(PROBE_VAR, OsStr::new("1"))],
+        &dir.path().join("dns.log"),
+    );
+    let flagged = refused(&seen.log);
+    assert!(
+        flagged.iter().any(|line| line.contains("htons(53)")),
+        "the lookup did not show as a refused connect to port 53:\n{}",
+        seen.log
     );
 }
