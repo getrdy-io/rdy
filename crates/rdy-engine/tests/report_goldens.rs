@@ -403,9 +403,10 @@ fn secrets() -> Vec<Secret> {
 
 /// Filler lines of 63 `x` and a newline, `n` bytes of them.
 fn filler(n: usize) -> Vec<u8> {
-    (0..n)
-        .map(|i| if i % 64 == 63 { b'\n' } else { b'x' })
-        .collect()
+    // Ordinary English in 64 byte lines, so a page that shows it is not read as another language by the
+    // HTML validator's language check. The length and the line breaks are the same as before.
+    const LINE: &[u8; 64] = b"The quick brown fox jumps over the lazy dog by the river banks.\n";
+    (0..n).map(|i| LINE[i % 64]).collect()
 }
 
 /// A file in which `secret` starts `back` bytes before the read cap, so the cap cuts it, followed by

@@ -10,9 +10,18 @@
 //! 3. **TLS** for port 443, an `https` URL or `tls: true`: one handshake, the protocol, the ALPN the
 //!    server chose, the handshake time, the chain depth, and a verdict against the roots the spec chose.
 //!
-//! What this version does not do yet: the HTTP request and `expect_status` (M1-096), the proxy path
-//! (M1-097), redirect and `Date` evidence. An endpoint whose `via_proxy` is `proxy_only` is not tried,
-//! and the result says so and is partial.
+//! 4. **HTTP** for a URL endpoint (`http://` or `https://`) that connected and, for https, that the
+//!    roots accepted: one `HEAD` (or `GET`, by the spec) with no redirect followed. The status is judged
+//!    against `expect_status`. With none listed, 2xx, 3xx and 4xx count as reachable except 407 (an
+//!    intercepting proxy on the direct route), which fails, and a 5xx, which fails, both as `http_status`.
+//!    A 3xx, 401, 404 and any other 4xx get a note, and a 403 warns, because a transparent proxy's deny
+//!    page looks the same. A reply that is not HTTP is `http_failed`. A `host:port` endpoint gets no
+//!    request, and an `expect_status` on it is noted as ignored. The URL's path and query go to the
+//!    facade and never into the finding; the action log keeps the path and never the query.
+//!
+//! What this version does not do yet: the proxy path (M1-097), redirect and `Date` evidence, issuer
+//! names (M1-099). An endpoint whose `via_proxy` is `proxy_only` is not tried, and the result says so
+//! and is partial.
 //!
 //! **Levels.** An endpoint that cannot be reached fails the check, or warns when it is `optional`. A
 //! connect slower than `max_latency` (2 s by default) warns. A dead address of one family in front of a
@@ -32,6 +41,7 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
     Os, OsSupport, PeerClass, Support,
 };
+use rdy_engine::probe::net::REVOCATION_NOTE;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
@@ -59,7 +69,7 @@ const FIXES: usize = 3;
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "net.egress",
     family: "net",
-    summary: "Each endpoint resolves, connects on every address family, and completes TLS",
+    summary: "Each endpoint resolves, connects on every address family, completes TLS and answers HTTP",
     meta: CheckMeta {
         title: "Egress",
         remediation: "Ask the network team to allow the endpoint from this machine: the TCP port to the host named in the result. If the name does not resolve, fix DNS or add a temporary hosts file entry. If the certificate is not trusted, a TLS-inspecting proxy is the usual cause: bypass inspection for the host, or install the proxy's CA in the OS trust store. Where openssl is installed, run `openssl s_client -connect <host>:<port> -servername <host>` to see what the server sends.",
@@ -181,9 +191,19 @@ impl EgressCheck {
                     }
                     for (family, took) in p.slow() {
                         notes.push(format!(
-                            "{}: the {family} address did not answer within {took} ms, so another family connected first",
+                            "{}: the {family} address had no reply within {took} ms, so another family connected first",
                             p.label()
                         ));
+                    }
+                    if let Some(http) = &p.http
+                        && let Some((why, warn)) = http.default_judgement()
+                    {
+                        let text = format!("{} answered {}: {why}", p.label(), http.status);
+                        if warn {
+                            warns.push(text);
+                        } else {
+                            notes.push(text);
+                        }
                     }
                     let fell = p.fell_through();
                     if let Some((family, why)) = fell.first() {
@@ -193,8 +213,20 @@ impl EgressCheck {
                         ));
                     }
                 }
-                Ending::Failed(..) if p.optional => optional_failed.push(p),
-                Ending::Failed(..) => failed.push(p),
+                Ending::Failed(class, ip) => {
+                    if matches!(class, Class::Blackhole) {
+                        notes.push(format!(
+                            "{}: no reply within 3 s from {}",
+                            p.label(),
+                            ip.as_deref().unwrap_or("any address")
+                        ));
+                    }
+                    if p.optional {
+                        optional_failed.push(p);
+                    } else {
+                        failed.push(p);
+                    }
+                }
                 Ending::NotTried(_) => not_tried.push(p),
             }
         }
@@ -219,19 +251,22 @@ impl EgressCheck {
                 Finding::pass(format!("{tried} of {total} endpoints reachable"))
             }
         } else if failed.is_empty() {
-            let mut parts = names(&optional_failed, "optional, unreachable");
+            let optional_tag = format!("optional, {}", word(&optional_failed));
+            let mut parts = names(&optional_failed, &optional_tag);
             parts.extend(warns.iter().cloned());
             Finding::warn(parts.join("; "))
         } else {
             let mut message = format!(
-                "{} of {total} endpoints unreachable: {}",
+                "{} of {total} endpoints {}: {}",
                 failed.len(),
+                word(&failed),
                 names(&failed, "").join(", ")
             );
             if !optional_failed.is_empty() {
                 message.push_str(&format!(
-                    "; {} optional also unreachable",
-                    optional_failed.len()
+                    "; {} optional also {}",
+                    optional_failed.len(),
+                    word(&optional_failed)
                 ));
             }
             Finding::fail(message)
@@ -242,6 +277,11 @@ impl EgressCheck {
         let unreachable: Vec<&Probed> = failed.iter().chain(&optional_failed).copied().collect();
         if let Some(fix) = fixes(os, &unreachable) {
             finding = finding.with_fix(fix);
+        }
+        // A handshake that finished says nothing about revocation. Said once per result (SF-01), first, because a report keeps only the first
+        // notes and an endpoint list can fill the rest.
+        if probed.iter().any(|p| p.tls.is_some()) {
+            finding = finding.with_note(REVOCATION_NOTE);
         }
         for warn in &warns {
             finding = finding.with_note(warn.clone());
@@ -267,18 +307,31 @@ impl EgressCheck {
                 .join("; ");
             finding = finding.with_partial(rdy_engine::check::Partial::new(Vec::new(), note));
         }
-        if self
+        let ignored = self
             .params
             .endpoints
             .iter()
-            .any(|e| e.expect_status.is_some())
-        {
-            finding = finding.with_note(
-                "expect_status is not checked yet: this version of rdy stops after the TLS handshake and sends no HTTP request",
-            );
+            .filter(|e| e.expect_status.is_some() && !e.target.is_url())
+            .count();
+        if ignored > 0 {
+            finding = finding.with_note(format!(
+                "expect_status is ignored for {ignored} endpoint(s) written as host:port: rdy sends an HTTP request only to an http:// or https:// URL"
+            ));
         }
         finding
     }
+}
+
+/// "failed" when every endpoint in the list got an answer that was wrong (an HTTP status or a reply that is
+/// not HTTP), else "unreachable": an endpoint that answered HTTP was reached.
+fn word(list: &[&Probed]) -> &'static str {
+    let answered = list.iter().all(|p| {
+        matches!(
+            p.ending,
+            Ending::Failed(Class::HttpStatus | Class::HttpFailed, _)
+        )
+    });
+    if answered { "failed" } else { "unreachable" }
 }
 
 /// `host:port (class)` for up to [`NAMED`] endpoints, then "and N more". `tag` is added to each when
@@ -289,8 +342,12 @@ fn names(list: &[&Probed], tag: &str) -> Vec<String> {
         .take(NAMED)
         .map(|p| {
             let class = match &p.ending {
-                Ending::Failed(class, _) => class.id(),
-                _ => "not tried",
+                Ending::Failed(Class::HttpStatus, _) => match &p.http {
+                    Some(http) => format!("http_status {}", http.status),
+                    None => Class::HttpStatus.id().to_owned(),
+                },
+                Ending::Failed(class, _) => class.id().to_owned(),
+                _ => "not tried".to_owned(),
             };
             if tag.is_empty() {
                 format!("{} ({class})", p.label())

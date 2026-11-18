@@ -62,9 +62,9 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `verify/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (17 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (37 cases), `host.cgroups/` (13 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
+`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (42 cases), `host.cgroups/` (13 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -94,9 +94,10 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
-`checks/net.egress/` holds six scripted `net.json` cases (M1-095): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
-`refused` and `nxdomain`. They have no `expect.json` yet: the tests register the `web` server in code (a `serve` entry needs one), which
-`assert_cases` cannot do, so the check's own tests assert the results (the completeness rule for `net` comes with M1-117).
+`checks/net.egress/` holds eleven scripted `net.json` cases, each with a reviewed `expect.json` (M1-095, M1-096): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
+`refused`, `nxdomain`, and the HTTP cases `http-ok`, `http-503`, `http-401-default`, `http-404-not-expected` and `not-http`. A `serve` entry names a server that
+code registers, so `crates/rdy-checks-net/src/expect_cases.rs` runs them through `rdy_engine::testing::assert_cases_with`, which takes the replay servers and the hosts the family builds. The TLS cases need real sockets and are in the check's own tests.
+`checks/net.tls_intercept/` holds 16 cases (M1-100), each with a reviewed `expect.json`: the generated-chain cases `public`, `machine-only`, `machine-only-forbidden`, `unknown-ca`, `expired-pinned-clock`, `expired-inside-window`, `empty-os-store`, `env-store-canary-user`, `issuer-match`, `issuer-mismatch`, `pin-match`, `pin-ca-only`, `pin-mismatch`, `pin-root-not-sent` and `handshake-never-completes` (an in-memory peer that never reads or answers the ClientHello, run on a paused clock so the 5 s handshake limit costs nothing), and the scripted `refused`. A generated case names its chain in `chain.json` and holds no certificate: the env harness (`crates/rdy-cli/tests/env_harness/chains.rs`) builds a root, an issuing CA and a leaf with rcgen at test time, serves them from a loopback server and points the case's host at it. `chain` is `public`, `machine_only`, `unknown_ca`, `expired` (the last needs a pinned `clock`: after the leaf's notAfter it is `clock_or_expiry`, inside the window it is `machine_only`) or `silent`; `os_store: "empty"`, `sources` (where the OS roots were read from, with an optional `env`) and `home` are optional. An `expect.json` `entry` may list `<leaf>`, `<issuing>`, `<root>` or `<other>` in `pin_sha256`, which the rig swaps for that certificate's SHA-256, and the golden writes every 64 digit hash as `<sha256>`. `env-store-canary-user` holds a canary user name in its sources and a test proves it is in no golden. The `Timeout` class is still owed by M1-179 (PENDING row).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/all-pass/` (M1-117) is a RHEL 9.3 root run with 15 host and net checks passing (every registered check but the k8s ones), 31.3 GiB against `min: 32Gi` among them; it has `golden/report.html` too (08 section 3 gives HTML goldens to `all-pass`, `warnings-only` and `all-block` only, and the harness lists them in `HTML_ENVS`). Its `net.json` serves the `web` server of the env harness, an in-process duplex that says nothing. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
@@ -113,7 +114,8 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
-| `exit-codes/<row>.stderr.txt` | The stderr of the built `rdy` for an exit-code row that needs no fixture backend: `bad-flag`, `missing-file`, `too-many-hosts` and `unwritable-out-dir` (M1-087). The report folder stamp is `<stamp>`, `\` is `/`. Compared by `tests/exit_code_goldens.rs`, plain and with `--json` | `UPDATE_GOLDENS=1`, then read the diff |
+| `exit-codes/<row>.stderr.txt` | The stderr of the built `rdy` for an exit-code row that needs no fixture backend: `bad-flag`, `missing-file`, `unsigned`, `too-many-hosts` and `unwritable-out-dir` (M1-087, M1-126). The report folder stamp is `<stamp>`, `\` is `/`. Compared by `tests/exit_code_goldens.rs`, plain and with `--json` | `UPDATE_GOLDENS=1`, then read the diff |
+| `verify/<name>.stderr.txt` | The stderr of `rdy verify --key` on the signed fixture (07 C.4, the KEY NOT PINNED form) and of `rdy spec lint` for the two C.8 samples (M1-126). Compared by `tests/verify_command.rs` | `UPDATE_GOLDENS=1`, then read the diff |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
@@ -156,6 +158,7 @@ envs/all-pass/
   env.json           environment variables the process sees
   golden/            report.json, report.html, terminal.txt
   expect.json        (check cases) the reviewed expected result
+  chain.json         (net.tls_intercept cases) the certificate chain the env harness generates, see below
 ```
 
 The file tree is the machine: a path it does not hold is not found, as on a machine without that file, so a

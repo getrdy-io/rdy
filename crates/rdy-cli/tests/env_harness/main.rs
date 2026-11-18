@@ -10,15 +10,25 @@
 //! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
-//! `report.html` is rendered here from the normalised report for the envs in `HTML_ENVS` (the run does not
-//! write it with `--no-report`). `driver` says what else the run does not do.
+//! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
+//! so the page golden of each env in `HTML_ENVS` is rendered here from the normalised report. One test
+//! runs the host-min environment into a folder (exit 0) and checks the written page against the structure
+//! rules of M1-082. `driver` says what else the run does not do.
+//!
+//! Generated chains. `chains` runs every case of `net.tls_intercept` through `NetFamily` and the real
+//! scheduler, building the certificate chain a case's `chain.json` names with rcgen at test time (M1-100).
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
 
+mod chains;
 mod completeness;
 mod driver;
 mod families;
+// The structure rules of the HTML report (M1-082), run here over the page a run wrote (M1-181). Its own
+// tests run a second time in this binary, which costs milliseconds.
+#[path = "../../../rdy-engine/tests/html_structure.rs"]
+mod html_structure;
 
 use std::error::Error;
 use std::path::Path;
@@ -102,6 +112,71 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
         memory.notes.iter().any(|n| n.contains("tolerance_percent")),
         "{:?}",
         memory.notes
+    );
+    Ok(())
+}
+
+/// The one file of `folder` that ends in `.extension`.
+fn only_file(folder: &Path, extension: &str) -> TestResult<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(folder)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|e| e == extension) {
+            found.push(path);
+        }
+    }
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        _ => Err(format!(
+            "want one .{extension} in {}, found {found:?}",
+            folder.display()
+        )
+        .into()),
+    }
+}
+
+#[test]
+fn the_host_min_env_writes_a_page_that_passes_the_structure_rules() -> TestResult {
+    use sha2::{Digest as _, Sha256};
+
+    let fixture = Fixture::load(&fixtures_dir(), "envs/host-min")?;
+    if fixture.os() != current_os() {
+        eprintln!("env_harness: skipping the written page: host-min is another OS");
+        return Ok(());
+    }
+    let out = tempfile::tempdir()?;
+    let ran = driver::run_env_into("host-min", 1, Some(out.path()))?;
+    assert_eq!(ran.report.exit_code, 0, "{}", ran.terminal);
+
+    let folders: Vec<_> = std::fs::read_dir(out.path())?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    let [folder] = folders.as_slice() else {
+        return Err(format!("want one report folder, found {folders:?}").into());
+    };
+    let json = std::fs::read(only_file(folder, "json")?)?;
+    let html_path = only_file(folder, "html")?;
+    assert!(html_path.is_file());
+    let page = std::fs::read_to_string(&html_path)?;
+    assert!(only_file(folder, "yaml").is_ok());
+
+    // The page carries the bytes of the `.json` and their hash.
+    let hash: String = Sha256::digest(&json)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "hash");
+    assert!(page.contains(String::from_utf8(json)?.trim_end()), "json");
+
+    assert!(page.contains("WARNING: UNSIGNED SPEC"), "no banner title");
+    assert!(page.contains("This report is marked UNSIGNED SPEC."));
+
+    // The terminal lists the page.
+    assert!(ran.terminal.contains(".html\n"), "{}", ran.terminal);
+
+    assert_eq!(
+        html_structure::all_rules(&page, Some("acme-min")),
+        Vec::<String>::new()
     );
     Ok(())
 }
@@ -224,15 +299,21 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
+/// Every implemented check has its cases, each with a reviewed `expect.json`, except the Timeout class of the checks that cut a hang themselves (M1-179). A
 /// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
 /// forces the row out when they land.
 const PENDING: &[Pending] = &[
     Pending {
         check: "net.egress",
-        classes: &[Class::Pass, Class::NonPass, Class::Timeout],
-        owner: "M1-096",
-        why: "M1-095 merged the staged connector with six scripted net.json cases and no reviewed expect.json. M1-096 completes the result (HTTP stage and failure classes), so it adds the expect.json files and reviews the levels once",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-096 added the reviewed expect.json for Pass and NonPass (11 cases). By design no hang ends net.egress in a Timeout: every endpoint is cut to its own budget (10 s, then 15 s for HTTP) and leaves 2 s of the check's time for the result, so a blackhole or a stalled server gives a bounded finding with class `blackhole` or `timeout`, never `timed_out_ms`. M1-179 (PR #70) counts a hang the check survived, when a note names it (`no reply within`), as the Timeout class. The blackhole case has that note. The row is closed by the second of PRs #70 and #74 to merge",
+    },
+    Pending {
+        check: "net.tls_intercept",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-100 added the generated-chain cases and the handshake-never-completes case (an in-memory peer that never answers the ClientHello). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget (5 s for the handshake) and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class (correction-52 adds net.tls_intercept to its row; the case needs a hang marker M1-179 accepts), and the stale-row finding then forces this row out",
     },
     Pending {
         check: "host.time_sync",
@@ -241,6 +322,82 @@ const PENDING: &[Pending] = &[
         why: "M1-179 makes the harness accept a hang the check survived (a delay or blackhole at least the check timeout in the case files, and an expect.json that holds a finding) as the Timeout class. By design (correction-37) no hang ends host.time_sync in a Timeout: each step is cut to the budget left, so a hung timedatectl or chronyc gives a bounded finding. The hung-chronyc, hung-timedatectl and silent-server-and-hung-tools cases prove that",
     },
 ];
+
+/// The level each case of `net.tls_intercept` must end at. This is the review of the `expect.json` files
+/// in one place: a golden can be regenerated with `UPDATE_GOLDENS=1`, this table cannot.
+const TLS_LEVELS: &[(&str, &str)] = &[
+    ("empty-os-store", "fail"),
+    ("env-store-canary-user", "warn"),
+    ("expired-inside-window", "warn"),
+    ("expired-pinned-clock", "fail"),
+    ("handshake-never-completes", "warn"),
+    ("issuer-match", "pass"),
+    ("issuer-mismatch", "fail"),
+    ("machine-only", "warn"),
+    ("machine-only-forbidden", "fail"),
+    ("pin-ca-only", "warn"),
+    ("pin-match", "pass"),
+    ("pin-mismatch", "fail"),
+    ("pin-root-not-sent", "fail"),
+    ("public", "pass"),
+    ("refused", "warn"),
+    ("unknown-ca", "fail"),
+];
+
+#[test]
+fn every_tls_intercept_case_matches_its_expect_json_with_the_chain_it_names() -> TestResult {
+    let root = fixtures_dir();
+    let names = chains::case_names(&root)?;
+    let listed: Vec<&str> = TLS_LEVELS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names.iter().map(String::as_str).collect::<Vec<_>>(),
+        listed,
+        "a case was added or removed: list its level in TLS_LEVELS"
+    );
+    let mut failures = Vec::new();
+    for (case, level) in TLS_LEVELS {
+        let ran = std::panic::catch_unwind(|| chains::run_case(&root, case));
+        match ran {
+            Ok(Ok(result)) => {
+                if result["level"] != *level {
+                    failures.push(format!(
+                        "{case}: ended {}, expected {level}",
+                        result["level"]
+                    ));
+                }
+            }
+            Ok(Err(error)) => failures.push(format!("{case}: {error}")),
+            Err(payload) => {
+                let text = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("a panic with no message");
+                failures.push(format!("{case}: {text}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n---\n"));
+    Ok(())
+}
+
+#[test]
+fn the_canary_user_name_is_in_the_case_and_in_no_golden() -> TestResult {
+    let dir = fixtures_dir().join("checks/net.tls_intercept/env-store-canary-user");
+    let chain = std::fs::read_to_string(dir.join("chain.json"))?;
+    assert!(
+        chain.contains("canary-user-7f3a"),
+        "the case must hold the canary"
+    );
+    let golden = std::fs::read_to_string(dir.join("expect.json"))?;
+    assert!(
+        !golden.contains("canary-user"),
+        "the canary reached the golden:\n{golden}"
+    );
+    assert!(golden.contains("~/certs/inspection.pem"), "{golden}");
+    assert!(golden.contains("SSL_CERT_FILE"), "{golden}");
+    Ok(())
+}
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {

@@ -44,7 +44,10 @@ mod normalize;
 mod tests;
 
 #[cfg(feature = "runtime")]
-pub use expect::{assert_cases, assert_cases_in, expect_bytes, render, run_case, sorted};
+pub use expect::{
+    assert_cases, assert_cases_in, assert_cases_with, assert_cases_with_in, expect_bytes, render,
+    run_case, run_case_on, sorted,
+};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{
@@ -118,6 +121,20 @@ impl TestRun {
     pub fn offline(self) -> Self {
         self.hub.set_network(false);
         self
+    }
+
+    /// Pins the clock that every TLS verdict of this run sees, as time since the Unix epoch. See
+    /// `ProbeHub::pin_clock`. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn pin_clock(&self, since_epoch: std::time::Duration) {
+        self.hub.pin_clock(since_epoch);
+    }
+
+    /// Makes the bundled public roots hold `root_der` for this run (`ProbeHub::trust_as_public`), so a
+    /// generated CA can play a public one. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn trust_as_public(&self, root_der: &[u8]) {
+        self.hub.trust_as_public(root_der);
     }
 
     /// A run over the machine of a loaded fixture (08 section 2).

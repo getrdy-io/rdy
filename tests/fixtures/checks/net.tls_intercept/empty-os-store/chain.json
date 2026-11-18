@@ -1,0 +1,5 @@
+{
+  "host": "web.acme.test",
+  "chain": "unknown_ca",
+  "os_store": "empty"
+}
