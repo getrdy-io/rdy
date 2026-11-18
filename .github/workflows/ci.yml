@@ -284,17 +284,18 @@ jobs:
           docker run --rm -e CI=true -v "$PWD:/src:ro" "$ALPINE_IMAGE" \
             sh -c 'apk add --no-cache openssl perl-utils > /dev/null && sh /src/scripts/test-install-sh.sh busybox'
 
-  # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
-  # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
-  # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
-  # tests on the Intel runner without running them. The full macos-arm64 test job is in
-  # macos-arm64.yml, outside ci-ok, until the org has those runners. fail-fast is off so one red leg
-  # does not hide the others. There are no retries: a test that fails once in three runs is a bug.
+  # Four native test legs and one compile leg (docs/plan/06, ADR 0050). The Linux legs build and test
+  # the musl targets, so CI tests what ships. Both macOS legs run on the arm64 image, because the Intel
+  # runners queue for a long time and a merge queue is not available (personal account). `macos-arm64`
+  # runs the full tests. `macos-x64-build` cross-builds x86_64-apple-darwin and compiles its tests
+  # without running them, so every PR still compiles all five targets. The full x86_64-apple-darwin
+  # test job is in macos-intel.yml, outside ci-ok, on push to main and nightly. fail-fast is off so one
+  # red leg does not hide the others. There are no retries: a test that fails once in three runs is a bug.
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # macos-x64 is the slow leg (the nextest step alone ran about 18 minutes on 2026-11-17).
-    timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}
+    # macos-arm64 gets five more minutes than the rest (the macOS legs were the slow ones before ADR 0050).
+    timeout-minutes: ${{ matrix.name == 'macos-arm64' && 30 || 25 }}
     permissions:
       contents: read
     defaults:
@@ -307,8 +308,8 @@ jobs:
         include:
           - { name: linux-x64, os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
           - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
-          - { name: macos-x64, os: macos-15-intel, target: x86_64-apple-darwin }
-          - { name: macos-arm64-compile, os: macos-15-intel, target: aarch64-apple-darwin, compile_only: true }
+          - { name: macos-arm64, os: macos-15, target: aarch64-apple-darwin }
+          - { name: macos-x64-build, os: macos-15, target: x86_64-apple-darwin, compile_only: true }
           - { name: windows-x64, os: windows-2022, target: x86_64-pc-windows-msvc }
     env:
       TARGET: ${{ matrix.target }}
@@ -324,7 +325,7 @@ jobs:
       # install.sh under macOS /bin/sh (bash in POSIX mode) with the BSD tools. The dash and busybox
       # runs are in the install-sh job.
       - name: install.sh tests (macOS /bin/sh)
-        if: matrix.name == 'macos-x64'
+        if: matrix.name == 'macos-arm64'
         run: sh scripts/test-install-sh.sh sh
       - name: Install musl-tools
         if: runner.os == 'Linux'
@@ -353,8 +354,8 @@ jobs:
       - name: Build the rdy binary
         if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
-      # The compile leg cannot run aarch64 code on an Intel host. It proves every crate, binary and
-      # test still compiles for aarch64-apple-darwin.
+      # The compile leg builds x86_64-apple-darwin on the arm64 runner and runs none of it. It proves every
+      # crate, binary and test still compiles for that target. macos-intel.yml runs the tests.
       - name: Build the workspace and compile its tests (no run)
         if: ${{ matrix.compile_only }}
         run: |
@@ -403,6 +404,11 @@ jobs:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
           RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
+      # The docs-test runner (M1-136, ADR 0048) already ran in nextest above. This step runs it again by
+      # name, on the same build, so each leg's log shows how many tested blocks ran, or why Windows skipped them.
+      - name: docs-test (tested blocks of the README and the pages)
+        if: ${{ !matrix.compile_only }}
+        run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci -E 'binary(docs_test)' --no-capture
       # A golden file that no test compared is an orphan: its test was renamed or deleted (M1-052).
       - name: No orphaned golden files
         if: matrix.name == 'linux-x64'

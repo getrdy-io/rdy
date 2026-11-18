@@ -703,6 +703,10 @@ pub struct ProbeHub {
     /// only (feature `testing`), through `ProbeHub::pin_clock`.
     #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
     clock: Arc<std::sync::Mutex<Option<Duration>>>,
+    /// Certificates (DER) that the bundled public set also holds, so a test can play a public chain with a
+    /// generated CA. Set by tests only (feature `testing`), through `ProbeHub::trust_as_public`.
+    #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+    extra_public: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -726,6 +730,8 @@ impl ProbeHub {
             tls: Arc::default(),
             #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
             clock: Arc::default(),
+            #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+            extra_public: Arc::default(),
         }
     }
 

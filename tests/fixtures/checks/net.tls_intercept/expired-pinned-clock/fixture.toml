@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-expired-pinned-clock"
+summary = "An expired leaf, with the clock pinned after its notAfter"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

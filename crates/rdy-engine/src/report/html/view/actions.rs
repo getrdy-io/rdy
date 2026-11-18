@@ -33,7 +33,7 @@ pub(in crate::report::html) struct ActionLog {
 pub(in crate::report::html) struct ActionRow {
     pub number: u64,
     /// The check's key, or `None` for a probe made by the run itself.
-    pub check: Option<String>,
+    pub check: Option<super::Shown>,
     /// What kind of thing it was, in our words.
     pub what: Vec<Span>,
     /// The program and arguments, the path, the host: what it was done to.
@@ -99,7 +99,7 @@ fn dropped_note(report: &Report) -> Vec<Span> {
 fn row(action: &Action) -> ActionRow {
     ActionRow {
         number: action.seq,
-        check: action.check.clone(),
+        check: action.check.as_deref().map(super::shown),
         what: what(&action.kind),
         detail: detail(&action.kind, &action.fields),
         result: result(action),

@@ -1,22 +1,29 @@
-//! `k8s.admission`: what can reject the product's pods (03 section 4, M1 half: M1-114).
+//! `k8s.admission`: what can reject the product's pods (03 section 4: M1-114 and M1-160).
 //!
 //! What it reads, all read-only and all through the guard:
 //!
 //! - the target `Namespace` by name: the Pod Security labels (`pod-security.kubernetes.io/enforce`, `audit`,
-//!   `warn` and `enforce-version`) and, on OpenShift, the `openshift.io/sa.scc.uid-range` annotation. The
-//!   namespace is the spec's `namespace`, else the family's;
+//!   `warn` and `enforce-version`), every other label (for the selectors below) and, on OpenShift, the
+//!   `openshift.io/sa.scc.uid-range` annotation. The namespace is the spec's `namespace`, else the family's;
 //! - `GET /apis`, the group list: `security.openshift.io` means OpenShift, and the groups of Kyverno
 //!   (`kyverno.io`, `policies.kyverno.io`) and Gatekeeper (`templates.gatekeeper.sh`,
 //!   `constraints.gatekeeper.sh`) mean the engine is installed (see [`engines`]);
 //! - `GET /apis/<group>/<version>` for each engine group that is served, to name the kinds it serves
 //!   (at most four requests), and `GET /apis/kyverno.io/v1` when that group lists `v1`, `v1` is not the
 //!   preferred version and the preferred version did not show `ClusterPolicy` or `Policy` (one more
-//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds;
+//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds. When the
+//!   preferred version of a group may not be read, `v1` is not asked either: the answer would be the same
+//!   refusal, and the legacy kinds are left unknown;
 //! - on OpenShift, when the spec names an `scc`: the `SecurityContextConstraints` list, one page, for the
-//!   names only.
+//!   names only;
+//! - (M1-160) the validating and the mutating webhook configurations, one page each; for each `Fail`
+//!   webhook that applies, its Service and `EndpointSlice` list, at most eight Services; the
+//!   `ValidatingAdmissionPolicy` list and, when it holds a policy, the binding list; and the engines' own
+//!   policies: Kyverno `ClusterPolicy`, `ValidatingPolicy` and `ImageValidatingPolicy`, and one list per
+//!   Gatekeeper constraint kind (at most eight policy lists in all, ADR 0042).
 //!
-//! That is at most eight requests. Nothing is created and no pod is tried: the dry-run `POST` of 03 is an
-//! M2 mode behind its own ADR, and the guard refuses it.
+//! That is at most 36 requests, all `GET`. Nothing is created and no pod is tried: the dry-run `POST` of 03
+//! is an M2 mode behind its own ADR, and the guard refuses it.
 //!
 //! How the spec's bounds apply (`pod_security`, `uses`, `namespace`, `scc`):
 //!
@@ -31,19 +38,26 @@
 //!   bind it. Pod Security labels still apply on OpenShift, but only `warn` and `audit` are synced from the
 //!   SCCs, so the SCC is the real gate.
 //! - A policy engine group warns with the engine's name, the groups and the kinds. A group is evidence of
-//!   an install, not of an enforcing policy.
+//!   an install, not of an enforcing policy; the policy lists name the ones that reject.
+//! - A `Fail` webhook that applies to a pod create and has no ready endpoint blocks. What may exempt a pod
+//!   (`matchConditions`, an `objectSelector`) or what rdy cannot check (a URL backend) is "not evaluated".
+//!   A `ValidatingAdmissionPolicy` binding that denies and applies warns, by name.
 //!
 //! Anything the identity may not read is not evaluated, never a block: a namespace it may not get (grant
-//! `get namespaces`), a group list it may not get (grant `get /apis`).
-//!
-//! Not in this half (M1-160): admission webhooks, `ValidatingAdmissionPolicy`, and the policies themselves.
-//! Every result says so in a note.
+//! `get namespaces`), a group list it may not get (grant `get /apis`), a webhook, policy or endpoint list it
+//! may not make (the grant names the list).
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use k8s_openapi::api::core::v1::Namespace;
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
+use k8s_openapi::api::core::v1::{Namespace, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::api::ListParams;
+use kube::core::{ApiResource, GroupVersionKind};
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
     OsSupport, Support,
@@ -58,20 +72,41 @@ mod engines;
 mod fix;
 mod judge;
 mod level;
+mod matching;
+mod policies;
 mod scc;
+mod vap;
+mod webhooks;
 
+#[cfg(test)]
+mod late_unit_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unit_tests;
 
-use engines::{FoundGroup, Group, OPENSHIFT_GROUP};
+use engines::{Found, FoundGroup, Group, OPENSHIFT_GROUP};
 use judge::{Gathered, NsFacts, Openshift};
 use level::{Labels, need_of};
+use matching::NsLabels;
+use policies::{ApiKind, EnginePolicies, PolicyList, PolicyRead};
 use scc::Scc;
+use vap::Policies;
+use webhooks::{BackendState, ReadGrant, ServiceRead, Webhooks};
 
 /// The most SCCs one read asks for. A longer list is read as its first page.
 const PAGE: u32 = 500;
+
+/// The most requests one run makes: the namespace, `/apis`, up to four group versions and the legacy
+/// Kyverno one, the SCC list (8 in all, M1-114); both webhook lists and both admission policy lists; a
+/// Service list and a slice list for each of [`webhooks::MAX_SERVICES`] Services; and the policy lists.
+#[cfg(test)]
+const MAX_REQUESTS: usize = 8 + 2 + 2 + 2 * webhooks::MAX_SERVICES + policies::MAX_LISTS;
+#[cfg(test)]
+const _: () = assert!(MAX_REQUESTS == 36);
+
+/// The most names a sentence lists from one list.
+const LISTED: usize = 8;
 
 /// Below this much time left, the optional reads are skipped.
 const MIN_LEFT: Duration = Duration::from_millis(500);
@@ -80,10 +115,10 @@ const MIN_LEFT: Duration = Duration::from_millis(500);
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "k8s.admission",
     family: "k8s",
-    summary: "Pod Security labels, policy engines and OpenShift SCCs that can reject the product's pods",
+    summary: "Pod Security labels, policy engines, OpenShift SCCs, admission webhooks and admission policies that can reject the product's pods",
     meta: CheckMeta {
         title: "Admission",
-        remediation: "Set the Pod Security level of the install namespace to what the product needs: `kubectl label ns <namespace> pod-security.kubernetes.io/enforce=<level> --overwrite`. On OpenShift, grant the SCC the vendor documents: `oc adm policy add-scc-to-user <scc> -z <service-account> -n <namespace>`. If a policy engine is installed, ask the platform team which policies apply to the namespace.",
+        remediation: "Set the Pod Security level of the install namespace to what the product needs: `kubectl label ns <namespace> pod-security.kubernetes.io/enforce=<level> --overwrite`. On OpenShift, grant the SCC the vendor documents: `oc adm policy add-scc-to-user <scc> -z <service-account> -n <namespace>`. If a policy engine or a webhook is installed, ask the platform team which policies apply to the namespace, and whether every webhook that fails closed has a running backend.",
     },
     needs: &[Need::KubeContext],
     wants: &[],
@@ -176,7 +211,48 @@ pub(crate) enum Read<T> {
     OutOfTime,
 }
 
+/// One page of a list, and whether the server said there was more.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Listed<T> {
+    pub(crate) items: Vec<T>,
+    /// True when the list has a next page that was not read.
+    pub(crate) cut: bool,
+}
+
+impl<T> Default for Listed<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            cut: false,
+        }
+    }
+}
+
+/// A list cut to what a sentence names, and the tail that says how many were left out.
+pub(crate) fn cut_list(mut names: Vec<String>) -> (Vec<String>, String) {
+    let more = names.len().saturating_sub(LISTED);
+    names.truncate(LISTED);
+    let tail = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    (names, tail)
+}
+
 impl<T> Read<T> {
+    /// The same answer with the value changed.
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Read<U> {
+        match self {
+            Self::Ok(value) => Read::Ok(f(value)),
+            Self::Forbidden => Read::Forbidden,
+            Self::Missing => Read::Missing,
+            Self::Unreadable(code) => Read::Unreadable(code),
+            Self::Cut => Read::Cut,
+            Self::OutOfTime => Read::OutOfTime,
+        }
+    }
+
     /// Why the read gave nothing, as a phrase.
     pub(crate) fn why(&self) -> String {
         match self {
@@ -288,6 +364,24 @@ impl AdmissionCheck {
             _ => None,
         };
 
+        // Webhooks, admission policies and the engines' policies (M1-160). The selectors of all three match
+        // on the labels of the namespace.
+        let labels: NsLabels = match &ns {
+            Some(Read::Ok(facts)) => Some(facts.all_labels.clone()),
+            _ => None,
+        };
+        let webhooks = self.read_webhooks(&mapper, &client, ctx, &labels).await?;
+        let policies = read_admission_policies(&mapper, &client, ctx).await?;
+        let engine_policies = read_engine_policies(
+            &mapper,
+            &client,
+            ctx,
+            &engines,
+            &labels,
+            namespace.as_deref(),
+        )
+        .await?;
+
         Ok(Gathered {
             namespace,
             ns,
@@ -296,6 +390,74 @@ impl AdmissionCheck {
             engines,
             scc,
             rke2: self.cluster.server_version().git_version.contains("+rke2"),
+            webhooks,
+            policies,
+            engine_policies,
+        })
+    }
+
+    /// Both webhook configuration lists, then the Service and endpoints of each `Fail` webhook that applies.
+    async fn read_webhooks(
+        &self,
+        mapper: Mapper<'_>,
+        client: &ReadOnlyClient,
+        ctx: &CheckContext,
+        labels: &NsLabels,
+    ) -> Result<Webhooks, CheckError> {
+        let validating = list_page(
+            mapper,
+            ctx,
+            client.all::<ValidatingWebhookConfiguration>(),
+            ListParams::default(),
+        )
+        .await?
+        .map(|listed| Listed {
+            cut: listed.cut,
+            items: webhooks::from_validating(listed.items),
+        });
+        let mutating = list_page(
+            mapper,
+            ctx,
+            client.all::<MutatingWebhookConfiguration>(),
+            ListParams::default(),
+        )
+        .await?
+        .map(|listed| Listed {
+            cut: listed.cut,
+            items: webhooks::from_mutating(listed.items),
+        });
+        let mut wanted: Vec<(String, String)> = Vec::new();
+        for read in [&validating, &mutating] {
+            if let Read::Ok(listed) = read {
+                for hook in &listed.items {
+                    if let Some((namespace, name)) = hook.service_to_read(labels) {
+                        let key = (namespace.to_owned(), name.to_owned());
+                        if !wanted.contains(&key) {
+                            wanted.push(key);
+                        }
+                    }
+                }
+            }
+        }
+        let mut services = Vec::new();
+        for (index, (namespace, name)) in wanted.into_iter().enumerate() {
+            let state = if index >= webhooks::MAX_SERVICES || out_of_time(ctx) {
+                BackendState::NotAsked
+            } else if !(webhooks::safe_name(&namespace) && webhooks::safe_name(&name)) {
+                BackendState::BadName
+            } else {
+                read_backend(mapper, client, ctx, &namespace, &name).await?
+            };
+            services.push(ServiceRead {
+                namespace,
+                name,
+                state,
+            });
+        }
+        Ok(Webhooks {
+            validating,
+            mutating,
+            services,
         })
     }
 
@@ -319,8 +481,13 @@ impl AdmissionCheck {
                 _ => Read::OutOfTime,
             };
             let preferred_forbidden = matches!(kinds, Read::Forbidden);
+            let mut lists: Vec<PolicyList> = Vec::new();
             let (mut kinds, mut legacy_policies) = match kinds {
-                Read::Ok(kinds) => {
+                Read::Ok(resources) => {
+                    if let Some(version) = &version {
+                        lists.extend(policies::plan(group, version, &resources));
+                    }
+                    let kinds: Vec<String> = resources.into_iter().map(|r| r.kind).collect();
                     let legacy = engines::has_legacy_policies(&kinds);
                     (kinds, Some(legacy))
                 }
@@ -341,6 +508,8 @@ impl AdmissionCheck {
                 };
                 match more_kinds {
                     Read::Ok(extra) => {
+                        lists.extend(policies::plan(group, other, &extra));
+                        let extra: Vec<String> = extra.into_iter().map(|r| r.kind).collect();
                         if engines::has_legacy_policies(&extra) {
                             legacy_policies = Some(true);
                         }
@@ -358,6 +527,7 @@ impl AdmissionCheck {
                     kinds,
                     more,
                     legacy_policies,
+                    lists,
                 },
             ));
         }
@@ -365,13 +535,13 @@ impl AdmissionCheck {
     }
 }
 
-/// `GET /apis/<group>/<version>`: the kinds it serves, subresources left out.
+/// `GET /apis/<group>/<version>`: the resources it serves, subresources left out.
 async fn read_kinds(
     mapper: Mapper<'_>,
     client: &ReadOnlyClient,
     group: &str,
     version: &str,
-) -> Result<Read<Vec<String>>, CheckError> {
+) -> Result<Read<Vec<ApiKind>>, CheckError> {
     read(
         mapper,
         client.group_resources(group, version).await,
@@ -380,10 +550,231 @@ async fn read_kinds(
             list.resources
                 .into_iter()
                 .filter(|resource| !resource.name.contains('/'))
-                .map(|resource| resource.kind)
-                .collect::<Vec<String>>()
+                .map(|resource| ApiKind {
+                    plural: resource.name,
+                    kind: resource.kind,
+                    namespaced: resource.namespaced,
+                })
+                .collect::<Vec<ApiKind>>()
         },
     )
+}
+
+/// One page of a list. Asked for only when there is time left.
+async fn list_page<K>(
+    mapper: Mapper<'_>,
+    ctx: &CheckContext,
+    api: kube::Api<K>,
+    params: ListParams,
+) -> Result<Read<Listed<K>>, CheckError>
+where
+    K: kube::Resource + Clone + std::fmt::Debug + serde::de::DeserializeOwned,
+{
+    if out_of_time(ctx) {
+        return Ok(Read::OutOfTime);
+    }
+    read(mapper, api.list(&params.limit(PAGE)).await, false, |list| {
+        Listed {
+            cut: list
+                .metadata
+                .continue_
+                .as_deref()
+                .is_some_and(|token| !token.is_empty()),
+            items: list.items,
+        }
+    })
+}
+
+/// The `Service` a webhook names, and the ready endpoints behind it.
+async fn read_backend(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    ctx: &CheckContext,
+    namespace: &str,
+    name: &str,
+) -> Result<BackendState, CheckError> {
+    let unread = |read: &Read<()>, grant: ReadGrant| BackendState::Unread {
+        why: read.why(),
+        grant: matches!(read, Read::Forbidden).then_some(grant),
+    };
+    let services = read(
+        mapper,
+        client
+            .namespaced::<Service>(namespace)
+            .list(
+                &ListParams::default()
+                    .fields(&format!("metadata.name={name}"))
+                    .limit(2),
+            )
+            .await,
+        false,
+        |list| list.items,
+    )?;
+    match services {
+        Read::Ok(items) => match items.first() {
+            None => return Ok(BackendState::ServiceMissing),
+            Some(service)
+                if service.spec.as_ref().and_then(|spec| spec.type_.as_deref())
+                    == Some("ExternalName") =>
+            {
+                return Ok(BackendState::External);
+            }
+            Some(_) => {}
+        },
+        other => return Ok(unread(&other.map(|_| ()), ReadGrant::Services)),
+    }
+    if out_of_time(ctx) {
+        return Ok(BackendState::NotAsked);
+    }
+    let slices = read(
+        mapper,
+        client
+            .namespaced::<EndpointSlice>(namespace)
+            .list(
+                &ListParams::default()
+                    .labels(&format!("kubernetes.io/service-name={name}"))
+                    .limit(PAGE),
+            )
+            .await,
+        false,
+        |list| {
+            let more = list
+                .metadata
+                .continue_
+                .as_deref()
+                .is_some_and(|token| !token.is_empty());
+            let (mut ready, mut total) = (0_usize, 0_usize);
+            for slice in &list.items {
+                for endpoint in slice.endpoints.iter().flatten() {
+                    total += 1;
+                    // `ready` unset means ready (the API says consumers must read it that way).
+                    let is_ready = endpoint
+                        .conditions
+                        .as_ref()
+                        .and_then(|conditions| conditions.ready)
+                        .unwrap_or(true);
+                    ready += usize::from(is_ready);
+                }
+            }
+            (ready, total, more)
+        },
+    )?;
+    Ok(match slices {
+        Read::Ok((ready, _, _)) if ready > 0 => BackendState::Ready(ready),
+        Read::Ok((_, _, true)) => unread(&Read::Cut, ReadGrant::EndpointSlices),
+        Read::Ok((_, total, false)) => BackendState::NoReady { total },
+        other => unread(&other.map(|_| ()), ReadGrant::EndpointSlices),
+    })
+}
+
+/// The `ValidatingAdmissionPolicy` list and, when it holds a policy, the binding list.
+async fn read_admission_policies(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    ctx: &CheckContext,
+) -> Result<Policies, CheckError> {
+    let policies = list_page(
+        mapper,
+        ctx,
+        client.all::<ValidatingAdmissionPolicy>(),
+        ListParams::default(),
+    )
+    .await?
+    .map(|listed| Listed {
+        cut: listed.cut,
+        items: listed.items.into_iter().map(vap::policy_of).collect(),
+    });
+    let bindings = match &policies {
+        Read::Ok(listed) if !listed.items.is_empty() => Some(
+            list_page(
+                mapper,
+                ctx,
+                client.all::<ValidatingAdmissionPolicyBinding>(),
+                ListParams::default(),
+            )
+            .await?
+            .map(|listed| Listed {
+                cut: listed.cut,
+                items: listed.items.into_iter().map(vap::binding_of).collect(),
+            }),
+        ),
+        _ => None,
+    };
+    Ok(Policies { policies, bindings })
+}
+
+/// The policy objects of the engines that discovery found: the lists the engine groups called for, at most
+/// [`policies::MAX_LISTS`].
+async fn read_engine_policies(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    ctx: &CheckContext,
+    engines: &[Found],
+    labels: &NsLabels,
+    namespace: Option<&str>,
+) -> Result<EnginePolicies, CheckError> {
+    let planned: Vec<&PolicyList> = engines
+        .iter()
+        .flat_map(|engine| &engine.groups)
+        .flat_map(|group| &group.lists)
+        .collect();
+    // The caps: constraint kinds first (the planner sorts real kinds first), then all lists. What is left
+    // out is counted, so the result says what it did not evaluate.
+    let mut skipped = 0;
+    let mut constraint_kinds = 0;
+    let mut chosen: Vec<&PolicyList> = Vec::new();
+    for list in planned {
+        if list.group == "constraints.gatekeeper.sh" {
+            if constraint_kinds >= policies::MAX_CONSTRAINT_KINDS {
+                skipped += 1;
+                continue;
+            }
+            constraint_kinds += 1;
+        }
+        if chosen.len() >= policies::MAX_LISTS {
+            skipped += 1;
+            continue;
+        }
+        chosen.push(list);
+    }
+    let mut found = EnginePolicies {
+        reads: Vec::new(),
+        skipped,
+    };
+    for list in chosen {
+        let resource = ApiResource::from_gvk_with_plural(
+            &GroupVersionKind::gvk(list.group, &list.version, &list.kind),
+            &list.plural,
+        );
+        let result = list_page(
+            mapper,
+            ctx,
+            client.all_dynamic(&resource),
+            ListParams::default(),
+        )
+        .await?
+        .map(|listed| Listed {
+            cut: listed.cut,
+            items: listed
+                .items
+                .iter()
+                .map(|object| {
+                    policies::fact(
+                        list,
+                        object.metadata.name.as_deref().unwrap_or("<unnamed>"),
+                        &object.data,
+                        labels,
+                        namespace,
+                    )
+                })
+                .collect(),
+        });
+        found.reads.push(PolicyRead {
+            list: list.clone(),
+            result,
+        });
+    }
+    Ok(found)
 }
 
 /// `GET` of the namespace: its Pod Security labels and, on OpenShift, its UID range.
@@ -409,6 +800,7 @@ async fn read_namespace(
                     .get("security.openshift.io/scc.podSecurityLabelSync")
                     .is_some_and(|value| value == "false"),
                 labels: Labels::from_map(&labels),
+                all_labels: labels,
                 uid_range,
             }
         },

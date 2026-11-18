@@ -1,0 +1,8 @@
+# Redirects for docs.getrdy.io while the docs are Markdown pages (M1). Not published.
+# Format: <path on docs.getrdy.io> <absolute URL of a file in getrdy-io/rdy>, one per line.
+#
+# The founder adds each line as a 301 redirect rule on the docs host (ADR 0047). The rdy binary prints
+# these paths in its fix lines, so each path must stay. The target is the page at `main` until 0.1.0
+# exists. After the tag, change the ref to the tag, for example v0.1.0, in the same edit.
+# Starlight (M3) serves the pages itself, and its redirects move to the site config then.
+/unsigned https://github.com/getrdy-io/rdy/blob/main/docs/src/content/docs/unsigned.md

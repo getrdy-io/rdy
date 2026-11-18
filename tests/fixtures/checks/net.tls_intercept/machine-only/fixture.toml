@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-machine-only"
+summary = "A chain only the OS store validates: an internal CA or an inspecting proxy"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

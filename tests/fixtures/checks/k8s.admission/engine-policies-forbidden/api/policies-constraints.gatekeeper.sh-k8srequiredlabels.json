@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/constraints.gatekeeper.sh/v1beta1/k8srequiredlabels",
+    "query": "limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "k8srequiredlabels.constraints.gatekeeper.sh is forbidden: User \"acme-reader\" cannot list resource \"k8srequiredlabels.constraints.gatekeeper.sh\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}
