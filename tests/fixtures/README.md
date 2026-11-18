@@ -63,8 +63,8 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `verify/`, `readme/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (17 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (42 cases), `host.cgroups/` (13 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (15 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), `host.kernel/` (20 cases), the fifteen machines of
+`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `host.container_runtime/` (42 cases), `host.cgroups/` (14 cases), `host.ports/` (16 cases), `host.time_sync/` (22 cases, each with an `expect.json`), `net.mtu/` (18 cases: `/sys/class/net` trees and route tables, no `native/`), `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -657,9 +657,9 @@ check, the classes and the ticket that owes them. A row for a class that is no l
 too. `PENDING` has been empty since M1-174. A new family adds its row in
 `crates/rdy-cli/tests/env_harness/families.rs`.
 
-**Known gaps.** Two cases bless behaviour that check-author found wrong against 03:
-`host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm`. Each has a `README.md` that says
-so. Both belong to M1-177. Whoever fixes the check regenerates the `expect.json` on purpose.
+**Known gaps.** None. `host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm` blessed behaviour that
+check-author found wrong against 03. M1-177 fixed both checks and regenerated their `expect.json` on purpose. Their
+`README.md` files say what each case now shows.
 
 **Reviewing an `expect.json`.** Read the level and the message of every new case before you accept it.
 The level must be the one the case is named for (a `pass` case that says `warn` is a bug in the check or

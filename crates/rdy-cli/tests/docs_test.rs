@@ -62,6 +62,7 @@ const SKIP_REASONS: &[&str] = &[
     "network",
     "needs-release-files",
     "windows-only",
+    "page-test",
 ];
 
 /// The repo root: two levels above this crate's manifest (`crates/rdy-cli`).
