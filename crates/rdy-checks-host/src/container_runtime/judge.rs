@@ -5,6 +5,8 @@
 //! has no issue, and the others' issues become notes. With no allowed runtime present the check fails.
 
 use rdy_engine::check::{Finding, Level, Need, Partial};
+use rdy_engine::probe::ProxyUrl;
+use rdy_engine::redact::evidence_url;
 use rdy_engine::text::escape_untrusted;
 use rdy_engine::units::version_at_least;
 use rdy_spec::check::{CgroupDriver, ContainerRuntime};
@@ -568,13 +570,54 @@ fn list_text(words: &[&str]) -> String {
     }
 }
 
+/// A proxy URL as the result stores it, never as it was read.
+struct StoredProxy {
+    /// `ProxyUrl::origin` (`http://host:port`), or the `evidence_url` of a value that `ProxyUrl` refuses,
+    /// or `None` when there is neither.
+    shown: Option<String>,
+    /// The URL carried userinfo. For a value `ProxyUrl` refuses, any `@` counts.
+    credentials: bool,
+    /// `ProxyUrl` refused the value.
+    refused: bool,
+}
+
+fn store_proxy(value: Option<&str>) -> Option<StoredProxy> {
+    let value = value?;
+    Some(match ProxyUrl::parse(value) {
+        Ok(url) => StoredProxy {
+            shown: Some(url.origin()),
+            credentials: url.has_credentials(),
+            refused: false,
+        },
+        Err(_) => StoredProxy {
+            shown: evidence_url(value),
+            credentials: value.contains('@'),
+            refused: true,
+        },
+    })
+}
+
 fn proxy_json(proxy: &(Proxy, &'static str)) -> Value {
+    let http = store_proxy(proxy.0.http.as_deref());
+    let https = store_proxy(proxy.0.https.as_deref());
     json!({
         "source": proxy.1,
-        "http": proxy.0.http,
-        "https": proxy.0.https,
+        "http": http.as_ref().and_then(|p| p.shown.as_deref()),
+        "http_credentials": http.as_ref().map(|p| p.credentials),
+        "https": https.as_ref().and_then(|p| p.shown.as_deref()),
+        "https_credentials": https.as_ref().map(|p| p.credentials),
         "no_proxy": proxy.0.no_proxy,
     })
+}
+
+/// The proxy values that `ProxyUrl` refuses, by field name. The note that follows names the source and
+/// never the text.
+fn refused_proxies(proxy: &Proxy) -> Vec<&'static str> {
+    [("http", &proxy.http), ("https", &proxy.https)]
+        .into_iter()
+        .filter(|(_, value)| store_proxy(value.as_deref()).is_some_and(|p| p.refused))
+        .map(|(name, _)| name)
+        .collect()
 }
 
 fn observed(seen: &[Seen], kubelet: &Kubelet) -> Value {
@@ -679,6 +722,11 @@ pub(super) fn judge(
                 "{} has a proxy set in {source}. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses.",
                 s.name()
             ));
+            for field in refused_proxies(proxy) {
+                notes.push(format!(
+                    "The {field} proxy in {source} is not an http://host:port address, so rdy shows only the parts of it that are safe to show."
+                ));
+            }
         }
     }
     // When a runtime's driver is known, an unreadable kubelet config is a warning of that runtime. Without
@@ -789,4 +837,49 @@ fn none_allowed(check: &ContainerRuntimeCheck, found: &[&Seen]) -> Finding {
         )
     };
     Finding::fail(message).with_fix(fix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proxy(http: &str, https: &str) -> (Proxy, &'static str) {
+        (
+            Proxy {
+                http: Some(http.to_owned()),
+                https: Some(https.to_owned()),
+                no_proxy: Some("localhost,.cluster.local".to_owned()),
+            },
+            "docker info",
+        )
+    }
+
+    #[test]
+    fn a_proxy_is_stored_as_its_origin_and_a_flag_even_when_the_text_was_not_redacted() {
+        let stored = proxy_json(&proxy(
+            "svc:pw-canary@proxy.acme.test:3128",
+            "http://proxy.acme.test:3128",
+        ));
+        assert_eq!(stored["http"], "http://proxy.acme.test:3128");
+        assert_eq!(stored["http_credentials"], true);
+        assert_eq!(stored["https"], "http://proxy.acme.test:3128");
+        assert_eq!(stored["https_credentials"], false);
+        assert_eq!(stored["no_proxy"], "localhost,.cluster.local");
+        assert!(!stored.to_string().contains("pw-canary"));
+    }
+
+    #[test]
+    fn a_proxy_that_proxy_url_refuses_keeps_only_its_evidence_url_or_nothing() {
+        let stored = proxy_json(&proxy(
+            "socks5://svc:pw-canary@proxy.acme.test:1080",
+            "svc:pw-canary@proxy.acme.test:3128/path",
+        ));
+        assert_eq!(stored["http"], "socks5://proxy.acme.test:1080");
+        assert_eq!(stored["http_credentials"], true);
+        assert!(stored["https"].is_null());
+        assert_eq!(stored["https_credentials"], true);
+        assert!(!stored.to_string().contains("pw-canary"));
+        let (refused, _) = proxy("socks5://h:1", "x://y:2");
+        assert_eq!(refused_proxies(&refused), ["http", "https"]);
+    }
 }
