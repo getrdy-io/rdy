@@ -215,6 +215,15 @@ all_good
 route "$R/rules/branches/main?per_page=100" 200 main-rules-ci-ok-other-app
 run
 expect "ci-ok from another app fails" '^FAIL +main ruleset: the active rules on main lack: required_status_checks\(ci-ok from GitHub Actions\)'
+all_good
+route "$R/rules/branches/main?per_page=100" 200 main-rules-queue-squash
+run
+expect "a squash merge queue rule passes" '^PASS +main ruleset:'
+all_good
+route "$R/rules/branches/main?per_page=100" 200 main-rules-queue-merge
+run
+expect "a merge-commit queue rule fails" '^FAIL +main ruleset: the merge queue rule on main uses merge method MERGE'
+expect "the queue failure has a fix hint" 'Set the merge queue method to Squash'
 # The emergency path in section 4: Repository admin "for pull requests" passes (all_good uses it),
 # but the same mode for a non-admin role fails, because it merges without ci-ok.
 all_good

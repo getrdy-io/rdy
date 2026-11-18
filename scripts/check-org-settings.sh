@@ -275,6 +275,13 @@ check_main() {
     return
   fi
 
+  # A merge queue that merges with merge commits breaks linear history, so merges would fail.
+  if jq -e 'any(.[]; .type == "merge_queue" and .parameters.merge_method == "MERGE")' "$tmp/main-rules" >/dev/null 2>&1; then
+    fail "$item" "the merge queue rule on main uses merge method MERGE, which conflicts with required linear history" \
+      "Set the merge queue method to Squash (or Rebase) in the main ruleset ($DOC, section 4)."
+    return
+  fi
+
   # An actor who may bypass "always" (or is "exempt") can push to main without a PR. A bypass
   # "for pull requests" is the documented emergency path (section 4): it passes for an admin role
   # only, because it lets the actor merge a PR without ci-ok.

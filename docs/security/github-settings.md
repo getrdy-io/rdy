@@ -104,6 +104,15 @@ This is the setting from `docs/plan/06-release-and-distribution.md`, "Repo setti
   Actions as its source so no other app can post that check. The script fails if `ci-ok` has any
   other source or none. Block force pushes.
 - [ ] Leave "Require review from Code Owners" off while there is one maintainer (section 9).
+- [ ] Optional: merge queue. Turn it on later with "Require merge queue" in this ruleset. Until then
+  nothing changes, because `ci.yml` only reacts to `merge_group` events the queue creates. When on:
+  merge method Squash (linear history is required), `ci-ok` stays the only required check, and
+  "Maximum builds to request" 2, "Status check timeout" 120 minutes, and grouping strategy "All green"
+  (the default). Each run has two macOS jobs, the org gets about 5 macOS jobs at once, and the slow leg
+  has a 45 minute timeout, so more builds wait for runners and pass the default 60 minute timeout.
+  `ci.yml` runs on `merge_group`. The DCO step skips there, as
+  on push to main, because each PR passed it before it was queued. The script passes a queue rule with
+  method Squash and fails one with method Merge, which conflicts with linear history.
 - [ ] How to verify: the script shows PASS for main ruleset, and a test direct push to `main` from a
   clean clone is rejected. Paste both into the Done log.
 
