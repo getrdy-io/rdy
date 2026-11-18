@@ -18,7 +18,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::io::Read;
-use std::net::{SocketAddr, TcpListener};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -122,23 +122,14 @@ fn sign(dir: &Path, name: &str, body: &str) -> PathBuf {
     dir.join("smoke.pub")
 }
 
-/// A port nothing listens on: a socket bound to it and never put into listening. The caller keeps it
-/// alive, so no other process can take the port, and a connect to it is refused.
-fn closed_port() -> (tokio::runtime::Runtime, tokio::net::TcpSocket, u16) {
-    // A tokio socket registers with a reactor on creation, so it needs a runtime that outlives it.
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .build()
-        .expect("runtime");
-    let (socket, port) = {
-        let _guard = runtime.enter();
-        let socket = tokio::net::TcpSocket::new_v4().expect("socket");
-        let addr: SocketAddr = ([127, 0, 0, 1], 0).into();
-        socket.bind(addr).expect("bind a loopback port");
-        let port = socket.local_addr().expect("local addr").port();
-        (socket, port)
-    };
-    (runtime, socket, port)
+/// A port nothing listens on: bind a loopback port, then close it. A connect to it is refused (RST) on
+/// every OS. Holding a bound socket that never listens does not work: macOS drops the SYN for it and
+/// the connect times out, which the check reports as `blackhole`. The caller holds another listener
+/// while this runs, so the two ports differ. Another process could take the freed port; a test on a
+/// shared machine accepts that.
+fn closed_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
+    listener.local_addr().expect("local addr").port()
 }
 
 /// Runs a spec with `--key`, `--json` and no report files. `extra` is added to the arguments.
@@ -179,7 +170,7 @@ fn live_exit_codes_0_1_2_and_64() {
     // handshake from the backlog, and a connect that completes is all the check measures.
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind a loopback port");
     let open = listener.local_addr().expect("local addr").port();
-    let (runtime, closed_socket, closed) = closed_port();
+    let closed = closed_port();
     assert_ne!(open, closed);
 
     let key = sign(dir, "open", &spec_text(open, "block"));
@@ -226,7 +217,5 @@ fn live_exit_codes_0_1_2_and_64() {
             "{extra:?}"
         );
     }
-    drop(closed_socket);
-    drop(runtime);
     drop(listener);
 }
