@@ -1012,3 +1012,33 @@ fn a_state_other_than_verified_or_unsigned_gets_a_banner_and_no_trust_words() {
     );
     assert!(out.contains("sig     NOT VERIFIED (odd\\x1b)"), "{out}");
 }
+
+#[test]
+fn a_130_character_message_wraps_at_100_with_a_hanging_indent() {
+    let mut report = sample("ready");
+    let message = format!("{}!", "word ".repeat(26).trim_end());
+    assert_eq!(message.len(), 130);
+    report
+        .checks
+        .get_mut(0)
+        .unwrap_or_else(|| panic!("cpu"))
+        .message
+        .clone_from(&message);
+    let out = full(&report, "x.yaml", "./f", false, Styler::new(false), 100);
+    let lines: Vec<&str> = out.lines().collect();
+    let first = lines
+        .iter()
+        .position(|line| line.contains("host.cpu"))
+        .unwrap_or_else(|| panic!("{out}"));
+    let (head, tail) = (lines[first], lines[first + 1]);
+    assert!(head.len() <= 100, "{head:?}");
+    assert!(tail.len() <= 100, "{tail:?}");
+    // The continuation sits under the message column, which starts after the key.
+    let column = head.find("word").unwrap_or_else(|| panic!("{head:?}"));
+    assert!(tail.starts_with(&" ".repeat(column)), "{tail:?}");
+    assert_eq!(tail.as_bytes().get(column), Some(&b'w'), "{tail:?}");
+    // Nothing is lost.
+    let joined = format!("{} {}", head[column..].trim(), tail.trim());
+    assert!(joined.ends_with("word!"), "{joined}");
+    assert_eq!(joined.matches("word").count(), 26, "{joined}");
+}
