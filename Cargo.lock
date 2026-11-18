@@ -1856,6 +1856,7 @@ dependencies = [
  "rdy-checks-net",
  "rdy-engine",
  "rdy-spec",
+ "regex",
  "rexpect",
  "rpassword",
  "rustix",

@@ -24,7 +24,7 @@ const ACRONYMS: [&str; 22] = [
 #[derive(Clone)]
 pub(in crate::report::html) struct Fact {
     /// The humanised key. Untrusted: the template wraps it in `<bdi>`.
-    pub label: String,
+    pub label: super::Shown,
     /// One line per list item or member. Never empty.
     pub lines: Vec<Vec<Span>>,
 }
@@ -43,7 +43,7 @@ pub(in crate::report::html) fn facts(map: Option<&Map<String, Value>>) -> Vec<Fa
         .into_iter()
         .flatten()
         .map(|(key, value)| Fact {
-            label: label(key),
+            label: super::shown(&label(key)),
             lines: lines(key, value),
         })
         .collect()

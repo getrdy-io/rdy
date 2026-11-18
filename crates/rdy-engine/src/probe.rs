@@ -91,6 +91,7 @@ pub use proxy::{
     PROXY_ENV, ProxyChallenge, ProxyEnvError, ProxyError, ProxyUrl, ProxyUrlError, env_conflicts,
 };
 
+pub use addr::is_unusable_peer;
 pub use attempt::AttemptOutcome;
 pub use trust::{NoRoots, TrustFailure};
 
@@ -177,9 +178,10 @@ pub enum ProbeError {
         "permission denied. Fix: run rdy as a user who may read it, or accept the limited result"
     )]
     PermissionDenied,
-    /// Nothing listens at the address: the socket file is there and the service behind it is not.
+    /// Nothing listens at the address (TCP, UDP or TLS), or, for a Unix socket, the file is there and
+    /// the service behind it is not.
     #[error(
-        "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run"
+        "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run"
     )]
     ConnectionRefused,
     /// The call ran out of time.

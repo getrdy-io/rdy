@@ -23,7 +23,7 @@ A required check that did not run exits 2. So a gate that accepts 0 and 1 never 
 
 This script stops on the first failure, so it reads the code with `|| code=$?`:
 
-```sh
+```sh tested shape=^input\serror
 code=0
 rdy run acme-platform.yaml || code=$?
 case $code in
