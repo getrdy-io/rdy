@@ -62,6 +62,7 @@ pub mod terminal;
 
 mod spec_cmds;
 mod spec_load;
+mod static_line;
 
 #[doc(hidden)]
 pub mod trust;
@@ -256,6 +257,9 @@ where
                                 hooks,
                                 registry,
                                 color: cli.global.color,
+                                progress: cli.global.progress,
+                                quiet: cli.global.quiet,
+                                verbose: cli.global.verbose,
                                 rig,
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
