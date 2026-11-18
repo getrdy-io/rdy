@@ -99,7 +99,7 @@ mod version;
 
 // The scripted cluster of the env harness (M1-185). Only with the `testing` feature, which the shipped
 // binary never enables (the module holds the release-build guard).
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,

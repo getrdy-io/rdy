@@ -32,8 +32,7 @@ cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
   BLOCK    k8s.version             Server v1.24.9 is older than the 1.27 minimum
                                    fix from the spec file (not verified): Upgrade the cluster to
                                    Kubernetes 1.27 or newer.
-  BLOCK    k8s.rbac                `system:serviceaccount:acme-system:installer` cannot `create
-                                   namespaces`: not allowed
+  BLOCK    k8s.rbac                The kubeconfig identity cannot `create namespaces`: not allowed
                                    fix from the spec file (not verified): Run the install with an
                                    identity that can create namespaces.
   WARN     k8s.storageclass        not verified: could not read the CSINode list

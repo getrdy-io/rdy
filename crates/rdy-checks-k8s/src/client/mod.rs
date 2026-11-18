@@ -691,7 +691,7 @@ impl Loaded {
 
 /// What a scripted cluster says about its connection: a context, a server and a user that name nothing
 /// real, no credential, no proxy. The cluster line shows it before the first request, as it shows a real one.
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn scripted_facts() -> ConnectionFacts {
     ConnectionFacts {
         source: Source::Flag(PathBuf::from("scripted-cluster")),
@@ -709,7 +709,7 @@ pub(crate) fn scripted_facts() -> ConnectionFacts {
     }
 }
 
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 impl Connected {
     /// The run's attempt over a scripted cluster (M1-185): what [`Loaded::connect_with`] does after the
     /// client is built, with `mock` where the socket would be. No kubeconfig is read, no plugin runs and no

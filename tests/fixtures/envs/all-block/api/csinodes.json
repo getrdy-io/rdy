@@ -10,7 +10,7 @@
     "apiVersion": "v1",
     "metadata": {},
     "status": "Failure",
-    "message": "csinodes.storage.k8s.io is forbidden: User \"acme-reader\" cannot list resource \"csinodes.storage.k8s.io\" at the cluster scope",
+    "message": "csinodes.storage.k8s.io is forbidden: User \"system:serviceaccount:acme-system:installer\" cannot list resource \"csinodes.storage.k8s.io\" at the cluster scope",
     "reason": "Forbidden",
     "details": {},
     "code": 403

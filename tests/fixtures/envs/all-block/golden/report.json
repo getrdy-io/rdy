@@ -1622,12 +1622,13 @@
       "at_ms": 0,
       "check": "k8s.rbac",
       "duration_ms": 0,
+      "error": "the server answered with an error status",
       "kind": "kube",
       "method": "POST",
-      "outcome": "ok",
+      "outcome": "failed",
       "path": "/apis/authentication.k8s.io/v1/selfsubjectreviews",
       "seq": 151,
-      "status": 201,
+      "status": 404,
       "via_proxy": null
     },
     {
@@ -2546,7 +2547,7 @@
     },
     {
       "bucket": "blocker",
-      "builtin_fix": "Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --serviceaccount=acme-system:installer`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. A binding to one of the identity's groups works too (`--group=<name>`). On a throwaway test cluster only, `cluster-admin` works.",
+      "builtin_fix": "Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --user=<user>`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. On a throwaway test cluster only, `cluster-admin` works.",
       "duration_ms": 0,
       "expected": {
         "can": [
@@ -2559,7 +2560,7 @@
       "fix_source": "spec",
       "id": "k8s.rbac",
       "key": "k8s.rbac",
-      "message": "`system:serviceaccount:acme-system:installer` cannot `create namespaces`: not allowed",
+      "message": "The kubeconfig identity cannot `create namespaces`: not allowed",
       "name": null,
       "needs": [
         {
@@ -2571,18 +2572,13 @@
       ],
       "notes": [
         "`create namespaces`: not allowed, no rule grants it. The server said: no RBAC policy matched",
+        "The identity is not verified by the API server: SelfSubjectReview needs Kubernetes 1.28",
         "rdy sent 1 access review (one entry each in the cluster's audit log, up to 100). A review creates nothing."
       ],
       "observed": {
         "allowed": 0,
         "identity": {
-          "groups": [
-            "system:serviceaccounts",
-            "system:serviceaccounts:acme-system",
-            "system:authenticated"
-          ],
-          "user": "system:serviceaccount:acme-system:installer",
-          "verified": true
+          "verified": false
         },
         "missing": [
           {
@@ -2592,7 +2588,7 @@
           }
         ],
         "reviews": 1,
-        "tested": "system:serviceaccount:acme-system:installer"
+        "tested": "The kubeconfig identity"
       },
       "partial": null,
       "severity": "block",
@@ -2674,8 +2670,8 @@
     "file_name": "spec.yaml",
     "product": "acme-platform",
     "serial": null,
-    "sha256": "2da4eeaeae48b919525a511ca59ef8abc3ab7db408c093fd65a3e8b0f47c145a",
-    "size_bytes": 2013,
+    "sha256": "40357cd797350353f6fee5dc556bf4aba8c91d9f7c4be30a0f06a1db8bdb189f",
+    "size_bytes": 2012,
     "version": ">=1.0"
   },
   "summary": {

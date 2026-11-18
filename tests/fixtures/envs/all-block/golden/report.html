@@ -389,24 +389,22 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </article>
 <article class="check status-block" id="check-17">
 <h3><span class="status">BLOCK</span> <span class="id"><bdi>k8s.rbac</bdi></span></h3>
-<p class="text"><bdi>`system:serviceaccount:acme-system:installer` cannot `create namespaces`: not allowed</bdi></p>
+<p class="text"><bdi>The kubeconfig identity cannot `create namespaces`: not allowed</bdi></p>
 <p class="text"><span class="label">From the spec file (not verified):</span> <bdi>Run the install with an identity that can create namespaces.</bdi></p>
-<p class="text"><span class="label">More from rdy:</span> <bdi>Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --serviceaccount=acme-system:installer`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. A binding to one of the identity&#39;s groups works too (`--group=&#60;name&#62;`). On a throwaway test cluster only, `cluster-admin` works.</bdi></p>
+<p class="text"><span class="label">More from rdy:</span> <bdi>Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --user=&#60;user&#62;`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. On a throwaway test cluster only, `cluster-admin` works.</bdi></p>
 <div class="facts">
 <p class="label">Found</p>
 <dl>
 <dt><bdi>Allowed</bdi></dt>
 <dd><bdi>0</bdi></dd>
 <dt><bdi>Identity</bdi></dt>
-<dd><bdi>Groups</bdi>: <bdi>system:serviceaccounts</bdi>, <bdi>system:serviceaccounts:acme-system</bdi>, <bdi>system:authenticated</bdi></dd>
-<dd><bdi>User</bdi>: <bdi>system:serviceaccount:acme-system:installer</bdi></dd>
-<dd><bdi>Verified</bdi>: <bdi>yes</bdi></dd>
+<dd><bdi>Verified</bdi>: <bdi>no</bdi></dd>
 <dt><bdi>Missing</bdi></dt>
 <dd><bdi>Answer</bdi>: <bdi>not_allowed</bdi>; <bdi>Permission</bdi>: <bdi>create namespaces</bdi>; <bdi>Reason</bdi>: <bdi>no RBAC policy matched</bdi></dd>
 <dt><bdi>Reviews</bdi></dt>
 <dd><bdi>1</bdi></dd>
 <dt><bdi>Tested</bdi></dt>
-<dd><bdi>system:serviceaccount:acme-system:installer</bdi></dd>
+<dd><bdi>The kubeconfig identity</bdi></dd>
 </dl>
 </div>
 <div class="facts">
@@ -420,6 +418,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </div>
 <p>Requires: a Kubernetes context (available)</p>
 <p class="text muted"><bdi>`create namespaces`: not allowed, no rule grants it. The server said: no RBAC policy matched</bdi></p>
+<p class="text muted"><bdi>The identity is not verified by the API server: SelfSubjectReview needs Kubernetes 1.28</bdi></p>
 <p class="text muted"><bdi>rdy sent 1 access review (one entry each in the cluster&#39;s audit log, up to 100). A review creates nothing.</bdi></p>
 <p class="muted">Took 0 ms</p>
 </article>
@@ -907,7 +906,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dt>Spec file</dt>
 <dd><bdi>spec.yaml</bdi></dd>
 <dt>Spec SHA-256</dt>
-<dd><bdi>2da4eeaeae48b919525a511ca59ef8abc3ab7db408c093fd65a3e8b0f47c145a</bdi></dd>
+<dd><bdi>40357cd797350353f6fee5dc556bf4aba8c91d9f7c4be30a0f06a1db8bdb189f</bdi></dd>
 <dt>Signature</dt>
 <dd><bdi>Not signed</bdi></dd>
 <dt>Hostname</dt>
@@ -1090,7 +1089,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">148</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/storageclasses</bdi></td><td>Done, reply code 200</td></tr>
 <tr><th scope="row">149</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/csinodes</bdi></td><td>Failed: <bdi>the server answered with an error status</bdi>, reply code 403</td></tr>
 <tr><th scope="row">150</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/csidrivers</bdi></td><td>Done, reply code 200</td></tr>
-<tr><th scope="row">151</th><td><bdi>k8s.rbac</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>POST</bdi> <bdi>/apis/authentication.k8s.io/v1/selfsubjectreviews</bdi></td><td>Done, reply code 201</td></tr>
+<tr><th scope="row">151</th><td><bdi>k8s.rbac</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>POST</bdi> <bdi>/apis/authentication.k8s.io/v1/selfsubjectreviews</bdi></td><td>Failed: <bdi>the server answered with an error status</bdi>, reply code 404</td></tr>
 <tr><th scope="row">152</th><td><bdi>k8s.rbac</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>POST</bdi> <bdi>/apis/authorization.k8s.io/v1/selfsubjectaccessreviews</bdi></td><td>Done, reply code 201</td></tr>
 </tbody>
 </table>
@@ -1101,7 +1100,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p>This link carries the product name and nothing else.</p>
 <p>rdy <bdi>&#60;version&#62;</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="7f0bb35799a4491e767c26cae4c8fcb6038ce691bdcd8352bb1f6e7bedcd6628">{
+<script type="application/json" id="rdy-result" data-sha256="c8568be677e66c595d8bf981de4b21dbe29ca771e7b49b3620b240b1a4a0d170">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -1127,9 +1126,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   "spec": {
     "product": "acme-platform",
     "version": "\u003e=1.0",
-    "sha256": "2da4eeaeae48b919525a511ca59ef8abc3ab7db408c093fd65a3e8b0f47c145a",
+    "sha256": "40357cd797350353f6fee5dc556bf4aba8c91d9f7c4be30a0f06a1db8bdb189f",
     "file_name": "spec.yaml",
-    "size_bytes": 2013,
+    "size_bytes": 2012,
     "serial": null,
     "expires": null,
     "contact": null,
@@ -2093,20 +2092,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "severity": "block",
       "status": "block",
       "bucket": "blocker",
-      "message": "`system:serviceaccount:acme-system:installer` cannot `create namespaces`: not allowed",
+      "message": "The kubeconfig identity cannot `create namespaces`: not allowed",
       "fix": "Run the install with an identity that can create namespaces.",
       "fix_source": "spec",
-      "builtin_fix": "Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --serviceaccount=acme-system:installer`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. A binding to one of the identity's groups works too (`--group=\u003cname\u003e`). On a throwaway test cluster only, `cluster-admin` works.",
+      "builtin_fix": "Ask the cluster admin to bind a role that grants the missing permissions to this identity. For `create namespaces`: `kubectl create clusterrole rdy-installer --verb=create --resource=namespaces`, then `kubectl create clusterrolebinding rdy-installer --clusterrole=rdy-installer --user=\u003cuser\u003e`. For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole. On a throwaway test cluster only, `cluster-admin` works.",
       "observed": {
         "allowed": 0,
         "identity": {
-          "groups": [
-            "system:serviceaccounts",
-            "system:serviceaccounts:acme-system",
-            "system:authenticated"
-          ],
-          "user": "system:serviceaccount:acme-system:installer",
-          "verified": true
+          "verified": false
         },
         "missing": [
           {
@@ -2116,7 +2109,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
           }
         ],
         "reviews": 1,
-        "tested": "system:serviceaccount:acme-system:installer"
+        "tested": "The kubeconfig identity"
       },
       "expected": {
         "can": [
@@ -2136,6 +2129,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false,
       "notes": [
         "`create namespaces`: not allowed, no rule grants it. The server said: no RBAC policy matched",
+        "The identity is not verified by the API server: SelfSubjectReview needs Kubernetes 1.28",
         "rdy sent 1 access review (one entry each in the cluster's audit log, up to 100). A review creates nothing."
       ],
       "started_ms": 0,
@@ -3767,10 +3761,11 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "at_ms": 0,
       "duration_ms": 0,
       "kind": "kube",
-      "outcome": "ok",
+      "outcome": "failed",
+      "error": "the server answered with an error status",
       "method": "POST",
       "path": "/apis/authentication.k8s.io/v1/selfsubjectreviews",
-      "status": 201,
+      "status": 404,
       "via_proxy": null
     },
     {

@@ -33,11 +33,6 @@ WRITTEN = set()
 DEFAULT = "storageclass.kubernetes.io/is-default-class"
 EBS = "ebs.csi.aws.com"
 USER = "system:serviceaccount:acme-system:installer"
-GROUPS = [
-    "system:serviceaccounts",
-    "system:serviceaccounts:acme-system",
-    "system:authenticated",
-]
 
 
 def write(env, name, value):
@@ -159,18 +154,11 @@ def reviews(env, access):
 
 
 def identity(env):
-    put(env, "self-subject-review", "/apis/authentication.k8s.io/v1/selfsubjectreviews", {
-        "apiVersion": "authentication.k8s.io/v1",
-        "kind": "SelfSubjectReview",
-        "metadata": {"creationTimestamp": None},
-        "status": {
-            "userInfo": {
-                "username": USER,
-                "uid": "00000000-0000-4000-8000-000000000001",
-                "groups": GROUPS,
-            }
-        },
-    }, 201, method="POST")
+    # A 1.24 server has no SelfSubjectReview (GA in 1.28): the API answers 404 and the user is not verified.
+    put(env, "self-subject-review", "/apis/authentication.k8s.io/v1/selfsubjectreviews", status(
+        404, "NotFound",
+        "the server could not find the requested resource",
+    ), 404, method="POST")
 
 
 def storage_class(name, provisioner, default):
@@ -218,7 +206,7 @@ identity(env)
 classes(env, [storage_class("acme-gp3", EBS, True)])
 put(env, "csinodes", "/apis/storage.k8s.io/v1/csinodes", status(
     403, "Forbidden",
-    'csinodes.storage.k8s.io is forbidden: User "acme-reader" cannot list resource "csinodes.storage.k8s.io" at the cluster scope',
+    'csinodes.storage.k8s.io is forbidden: User "%s" cannot list resource "csinodes.storage.k8s.io" at the cluster scope' % USER,
 ), 403, "limit=500")
 put(env, "csidrivers", "/apis/storage.k8s.io/v1/csidrivers", listing("CSIDriverList", "storage.k8s.io/v1", [
     {"metadata": {"name": EBS}, "spec": {"attachRequired": True, "podInfoOnMount": False}},

@@ -104,7 +104,7 @@ impl K8sFamily {
     }
 
     /// The family's answer as a [`Dial`], for tests that read what `k8s.access` would.
-    #[cfg(all(test, feature = "testing"))]
+    #[cfg(test)]
     pub(crate) fn dial(&self) -> Arc<dyn Dial> {
         Arc::clone(&self.holder) as Arc<dyn Dial>
     }
@@ -122,7 +122,7 @@ impl K8sFamily {
     /// The probe runs the steps of the module text from the cluster line on, with the mock where the
     /// connection would be, and the read-only guard stays in front of it. Only the `testing` feature has
     /// this constructor (M1-185).
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub(crate) fn over_mock(mock: crate::client::mock::Mock) -> Self {
         let mut holder = Holder::new(None);
@@ -160,7 +160,7 @@ pub(crate) struct Holder {
     plugin: Mutex<Option<(Probe, String, Vec<String>)>>,
     /// The scripted cluster that stands in for the kubeconfig and the socket (M1-185). Only a build with
     /// the `testing` feature has the field, so the shipped family has no way to name a mock.
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     scripted: Option<crate::client::mock::Mock>,
 }
 
@@ -179,7 +179,7 @@ impl Holder {
             dialed: OnceLock::new(),
             facts: Mutex::new(None),
             plugin: Mutex::new(None),
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             scripted: None,
         }
     }
@@ -223,7 +223,7 @@ impl Holder {
                 "run rdy again without --no-network to check the cluster".to_owned(),
             )]);
         }
-        #[cfg(feature = "testing")]
+        #[cfg(any(test, feature = "testing"))]
         if let Some(mock) = self.scripted.clone() {
             return Ok(self.attempt_scripted(mock, &ctx, started).await);
         }
@@ -286,7 +286,7 @@ impl Holder {
     /// The probe over a scripted cluster: the cluster line, `GET /version` through the guard, and what
     /// follows a real attempt. The mock holds no credential, so there is no secret to register and no
     /// plugin to record.
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     async fn attempt_scripted(
         &self,
         mock: crate::client::mock::Mock,

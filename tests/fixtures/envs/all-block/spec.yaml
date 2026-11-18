@@ -1,4 +1,4 @@
-# Synthetic. The all-pass spec, run on a machine that fails five required checks.
+# Synthetic. The all-pass spec, run on a machine that fails six required checks.
 apiVersion: rdy/v1
 kind: Readiness
 metadata:

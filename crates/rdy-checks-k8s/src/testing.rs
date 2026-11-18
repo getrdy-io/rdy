@@ -9,6 +9,11 @@
 //! After the run, [`ScriptedCluster::audit`] proves INV-14 over it, the same audit the check tests run (see
 //! `client::mock`): every request the mock saw passes the guard's rules and pairs with one sent entry of
 //! the run's action log, cited by the check that sent it, and the fixture answered every request.
+//!
+//! Two limits of the scripted cluster. The audit passes no `as:` user (`as_user` is `None`), so an env that
+//! impersonates gets a false violation: it fails closed, and no env impersonates today. The scripted
+//! client skips the `limit()` of the kube client, so the client's own timeouts are not exercised here; the
+//! slow `/version` proof is the family probe limit (`FAMILY_PROBE_LIMIT`) only.
 
 // A release build with the feature does not compile, the same rule as the `testing` feature of rdy-engine. A
 // debug build is allowed so `cargo test` and `cargo clippy --features testing` work. CI also keeps the
