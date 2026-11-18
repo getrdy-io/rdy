@@ -1,0 +1,3159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>rdy report: READY, ⁨acme-platform⁩</title>
+<style>:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #1f2328;
+  --muted: #59636e;
+  --rule: #6b6b6b;
+  --panel: #f6f8fa;
+  --block: #b3261e;
+  --warn: #8a4b00;
+  --pass: #1a7f37;
+  --link: #0b5cad;
+  --banner-fg: #8a1c14;
+  --banner-bg: #fff1f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --text: #e6edf3;
+    --muted: #9da7b3;
+    --rule: #8c8c8c;
+    --panel: #161b22;
+    --block: #ff8b84;
+    --warn: #e3b341;
+    --pass: #56d364;
+    --link: #79b8ff;
+    --banner-fg: #ffb4ae;
+    --banner-bg: #3b1214;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 100%; }
+body {
+  margin: 0;
+  padding: 1rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+header, nav, main, footer, .banner {
+  max-width: 60rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+a { color: var(--link); }
+a:focus-visible { outline: 0.1875rem solid var(--link); outline-offset: 0.125rem; }
+h1, h2, h3 { line-height: 1.25; }
+h1 { font-size: 2rem; margin: 0.5rem 0; }
+h2 { font-size: 1.5rem; margin: 2rem 0 0.75rem; }
+h3 { font-size: 1.125rem; margin: 0 0 0.5rem; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.banner {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 0.25rem solid var(--block);
+  color: var(--banner-fg);
+  background: var(--banner-bg);
+}
+.banner p { margin: 0.25rem 0; }
+.banner-title { font-weight: 700; }
+.verdict-ready { color: var(--pass); }
+.verdict-warnings { color: var(--warn); }
+.verdict-not-ready { color: var(--block); }
+.summary { font-weight: 600; }
+.no-blocks { font-weight: 600; }
+.legend, .rule { margin: 0.25rem 0; }
+.privacy { padding: 0.5rem 0.75rem; border: 1px solid var(--rule); background: var(--panel); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; margin: 1rem auto; padding: 0; }
+.check {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  break-inside: avoid;
+}
+.check p { margin: 0.25rem 0; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { font-weight: 700; margin-right: 0.5rem; }
+.id { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.status-block { border-left: 0.5rem solid var(--block); }
+.status-block .status { color: var(--block); }
+.status-timeout, .status-error { border-left: 0.5rem double var(--block); }
+.status-timeout .status, .status-error .status { color: var(--block); }
+.status-skip { border-left: 0.5rem dashed var(--warn); }
+.status-skip .status { color: var(--warn); }
+.status-warn { border-left: 0.25rem dashed var(--warn); }
+.status-warn .status { color: var(--warn); }
+.status-pass { border-left: 1px solid var(--pass); }
+.status-pass .status { color: var(--pass); }
+.label { font-weight: 700; }
+.muted { color: var(--muted); }
+dl { margin: 0; }
+.facts { margin: 0.5rem 0; }
+.facts p { margin: 0; }
+.facts dl { display: grid; grid-template-columns: minmax(8rem, 14rem) 1fr; gap: 0 1rem; margin: 0.25rem 0 0; }
+.facts dt { grid-column: 1; color: var(--muted); overflow-wrap: anywhere; }
+.facts dd { grid-column: 2; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+dl.details { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.25rem 1rem; }
+dl.details dt { font-weight: 700; }
+dl.details dd { margin: 0; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; }
+caption { text-align: left; font-weight: 700; padding: 0.25rem 0; }
+th, td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); overflow-wrap: anywhere; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); }
+@media (max-width: 40rem) {
+  dl.details, .facts dl { grid-template-columns: 1fr; }
+  .facts dd { grid-column: 1; }
+}
+/* Print is black on white whatever the screen theme: this block comes after the dark palette and replaces
+   every variable it sets. No backgrounds, so a printer spends no ink on them. */
+@media print {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --text: #000000;
+    --muted: #59636e;
+    --rule: #6b6b6b;
+    --panel: #ffffff;
+    --block: #b3261e;
+    --warn: #8a4b00;
+    --pass: #1a7f37;
+    --link: #0b5cad;
+    --banner-fg: #8a1c14;
+    --banner-bg: #ffffff;
+  }
+  body { background: #ffffff; color: #000000; }
+  /* The banners stay in the flow in print, so they print once, at the top of page one, and cover nothing.
+     A fixed banner that repeats on every page was tried: headless Chrome puts a fixed box with a negative
+     offset at the bottom of the page and one at `top: 0` over the first lines, so it is not used. The
+     template adds a top page-margin box with the banner titles, so every page carries the mark. */
+  .check, tr { break-inside: avoid; }
+  #passed, #capabilities, #actions { break-before: page; }
+}
+@page { margin-top: 2cm; @top-center { content: "WARNING: UNSIGNED SPEC"; font: bold 10pt system-ui, sans-serif; color: #000000; } }
+</style>
+</head>
+<body>
+<div class="banner">
+<p class="banner-title">WARNING: UNSIGNED SPEC</p>
+<p><bdi>spec.yaml</bdi> has no signature. rdy cannot tell who wrote it or whether it was changed.</p>
+<p>The spec decides which files rdy reads and which hosts it contacts.</p>
+<p>Run it only if you wrote it yourself or got it from the vendor in a way you trust.</p>
+<p>This report is marked UNSIGNED SPEC.</p>
+</div>
+<header>
+<h1><span class="visually-hidden">Verdict: </span><span class="verdict-ready">READY</span></h1>
+<p>For <bdi>acme-platform</bdi> <bdi>&#62;=1.0</bdi>, on <bdi>all-pass.example</bdi></p>
+<p class="summary">0 blocks, 0 warnings, 15 passed</p>
+<p class="no-blocks">No blocks.</p>
+<p>Run <bdi>2026-11-02 09:00:00 UTC</bdi> with rdy <bdi>&#60;version&#62;</bdi> (root)</p>
+<p class="next">What to do next: Everything the spec asks for passed. To share this result, send the .json file from the same folder.</p>
+<p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
+<p class="rule">NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.</p>
+<p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
+</header>
+<nav aria-label="Sections">
+<p class="label">Jump to:</p>
+<ul>
+<li><a href="#passed">Passed (15)</a></li>
+<li><a href="#capabilities">What rdy could use on this machine</a></li>
+<li><a href="#details">Run and spec details</a></li>
+<li><a href="#actions">What rdy read and contacted</a></li>
+</ul>
+</nav>
+<main>
+<section aria-labelledby="passed">
+<h2 id="passed">Passed</h2>
+<article class="check status-pass" id="check-0">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.os</bdi></span></h3>
+<p class="text"><bdi>Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Arch</bdi></dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt><bdi>Container</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Fips</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Init</bdi></dt>
+<dd><bdi>systemd</bdi></dd>
+<dt><bdi>Kernel</bdi></dt>
+<dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
+<dt><bdi>OS</bdi></dt>
+<dd><bdi>ID</bdi>: <bdi>rhel</bdi></dd>
+<dd><bdi>ID like</bdi>: <bdi>fedora</bdi></dd>
+<dd><bdi>Name</bdi>: <bdi>Red Hat Enterprise Linux</bdi></dd>
+<dd><bdi>Pretty name</bdi>: <bdi>Red Hat Enterprise Linux 9.3 (Plow)</bdi></dd>
+<dd><bdi>Source</bdi>: <bdi>/etc/os-release</bdi></dd>
+<dd><bdi>Version ID</bdi>: <bdi>9.3</bdi></dd>
+<dt><bdi>Wsl</bdi></dt>
+<dd><bdi>no</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Fips</bdi></dt>
+<dd><bdi>any</bdi></dd>
+<dt><bdi>Supported</bdi></dt>
+<dd><bdi>ID</bdi>: <bdi>rhel</bdi>; <bdi>Versions</bdi>: <bdi>[truncated]</bdi></dd>
+<dd><bdi>ID</bdi>: <bdi>ubuntu</bdi>; <bdi>Versions</bdi>: <bdi>[truncated]</bdi></dd>
+</dl>
+</div>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-1">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.memory</bdi></span></h3>
+<p class="text"><bdi>31.3 GiB found, 32 GiB needed, inside the 5% tolerance</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Available</bdi></dt>
+<dd><bdi>28.5 GiB</bdi></dd>
+<dt><bdi>Available effective</bdi></dt>
+<dd><bdi>28.5 GiB</bdi></dd>
+<dt><bdi>Available estimated</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Cgroup hierarchy</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup limit at</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup limit</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Cgroup swap limit</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Effective</bdi></dt>
+<dd><bdi>31.3 GiB</bdi></dd>
+<dt><bdi>Swap total</bdi></dt>
+<dd><bdi>0 bytes</bdi></dd>
+<dt><bdi>Swap used</bdi></dt>
+<dd><bdi>0 bytes</bdi></dd>
+<dt><bdi>Total</bdi></dt>
+<dd><bdi>31.3 GiB</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Band</bdi></dt>
+<dd><bdi>1.6 GiB</bdi></dd>
+<dt><bdi>Min available</bdi></dt>
+<dd><bdi>16 GiB</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>32 GiB</bdi></dd>
+<dt><bdi>Swap</bdi></dt>
+<dd><bdi>any</bdi></dd>
+</dl>
+</div>
+<p class="text muted"><bdi>Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent).</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-2">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.cpu</bdi></span></h3>
+<p class="text"><bdi>8 vCPUs found, 8 needed</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Allowed cores</bdi></dt>
+<dd><bdi>8</bdi></dd>
+<dt><bdi>Arch</bdi></dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt><bdi>Effective cores</bdi></dt>
+<dd><bdi>8.0</bdi></dd>
+<dt><bdi>Flags</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Hypervisor</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Logical cores</bdi></dt>
+<dd><bdi>8</bdi></dd>
+<dt><bdi>Physical cores</bdi></dt>
+<dd><bdi>4</bdi></dd>
+<dt><bdi>Quota cores</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Virtualization</bdi></dt>
+<dd><bdi>vm</bdi></dd>
+<dt><bdi>X86 64 level</bdi></dt>
+<dd><bdi>4</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>8</bdi></dd>
+</dl>
+</div>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-3">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.disk</bdi></span></h3>
+<p class="text"><bdi>`/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is needed.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Device</bdi></dt>
+<dd><bdi>253:1</bdi></dd>
+<dt><bdi>Free</bdi></dt>
+<dd><bdi>100 GiB</bdi></dd>
+<dt><bdi>Free inodes</bdi></dt>
+<dd><bdi>900000</bdi></dd>
+<dt><bdi>Filesystem type</bdi></dt>
+<dd><bdi>xfs</bdi></dd>
+<dt><bdi>Measured path</bdi></dt>
+<dd><bdi>/var/lib/acme</bdi></dd>
+<dt><bdi>Mount</bdi></dt>
+<dd><bdi>/var</bdi></dd>
+<dt><bdi>Network</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Nodev</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Noexec</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Nosuid</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Path</bdi></dt>
+<dd><bdi>/var/lib/acme</bdi></dd>
+<dt><bdi>Read only</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Total</bdi></dt>
+<dd><bdi>200 GiB</bdi></dd>
+<dt><bdi>Total inodes</bdi></dt>
+<dd><bdi>1000000</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Forbid fstypes</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Forbid options</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>21474836480</bdi></dd>
+<dt><bdi>Min inodes</bdi></dt>
+<dd><bdi>100000</bdi></dd>
+<dt><bdi>Recommended</bdi></dt>
+<dd><bdi>25769803776</bdi></dd>
+</dl>
+</div>
+<p class="text muted"><bdi>rdy runs as root. Free space is what other users can use. Blocks reserved for root are not counted.</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-4">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.kernel</bdi></span></h3>
+<p class="text"><bdi>Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3 required modules are loaded or built in. BTF type information is present.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Base</bdi></dt>
+<dd><bdi>5.14.0</bdi></dd>
+<dt><bdi>Btf</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Build</bdi></dt>
+<dd><bdi>362</bdi></dd>
+<dt><bdi>Distro</bdi></dt>
+<dd><bdi>rhel</bdi></dd>
+<dt><bdi>Modules</bdi></dt>
+<dd><bdi>Br netfilter</bdi>: <bdi>built_in</bdi></dd>
+<dd><bdi>Nf conntrack</bdi>: <bdi>loaded</bdi></dd>
+<dd><bdi>Overlay</bdi>: <bdi>loaded</bdi></dd>
+<dt><bdi>Release</bdi></dt>
+<dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Applied</bdi></dt>
+<dd><bdi>Source</bdi>: <bdi>min</bdi></dd>
+<dd><bdi>Version</bdi>: <bdi>5.4</bdi></dd>
+<dt><bdi>Btf</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>5.4</bdi></dd>
+<dt><bdi>Modules</bdi></dt>
+<dd><bdi>overlay</bdi></dd>
+<dd><bdi>br_netfilter</bdi></dd>
+<dd><bdi>nf_conntrack</bdi></dd>
+</dl>
+</div>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-5">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.cgroups</bdi></span></h3>
+<p class="text"><bdi>cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids` available</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Cmdline</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Controllers</bdi></dt>
+<dd><bdi>CPU</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Io</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Memory</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Pids</bdi>: <bdi>ok</bdi></dd>
+<dt><bdi>Controllers available</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>cpuset</bdi></dd>
+<dd><bdi>hugetlb</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>misc</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dd><bdi>rdma</bdi></dd>
+<dt><bdi>Controllers enabled</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dt><bdi>Layout</bdi></dt>
+<dd><bdi>v2</bdi></dd>
+<dt><bdi>Proc cgroups</bdi></dt>
+<dd><bdi>CPU</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Io</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Memory</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Pids</bdi>: <bdi>Enabled</bdi>: <bdi>yes</bdi>; <bdi>Hierarchy</bdi>: <bdi>0</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Controllers</bdi></dt>
+<dd><bdi>cpu</bdi></dd>
+<dd><bdi>memory</bdi></dd>
+<dd><bdi>io</bdi></dd>
+<dd><bdi>pids</bdi></dd>
+<dt><bdi>Version</bdi></dt>
+<dd><bdi>v2</bdi></dd>
+</dl>
+</div>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-6">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.sysctl</bdi></span></h3>
+<p class="text"><bdi>4 kernel parameters have the wanted value and are set at boot. Services get an open files limit of 1048576 (`DefaultLimitNOFILE=1048576` in `/etc/systemd/system.conf.d/10-acme.conf`).</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Limits</bdi></dt>
+<dd><bdi>Nofile</bdi>: <bdi>Default limit nofile</bdi>: <bdi>1048576</bdi>; <bdi>File</bdi>: <bdi>/etc/systemd/system.conf.d/10-acme.conf</bdi>; <bdi>File max</bdi>: <bdi>9223372036854775807</bdi>; <bdi>Hard</bdi>: <bdi>1048576</bdi>; <bdi>Nr open</bdi>: <bdi>1048576</bdi>; <bdi>Shell limit</bdi>: <bdi>[truncated]</bdi>; <bdi>Soft</bdi>: <bdi>1048576</bdi></dd>
+<dt><bdi>Parameters</bdi></dt>
+<dd><bdi>Kernel.shmmax</bdi>: <bdi>Live</bdi>: <bdi>18446744073709551615</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Net.ipv4.ip forward</bdi>: <bdi>Live</bdi>: <bdi>1</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Net.ipv4.tcp rmem</bdi>: <bdi>Live</bdi>: <bdi>4096 131072 6291456</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+<dd><bdi>Vm.max map count</bdi>: <bdi>Live</bdi>: <bdi>1048576</bdi>; <bdi>Persisted</bdi>: <bdi>[truncated]</bdi>; <bdi>State</bdi>: <bdi>ok</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Limits</bdi></dt>
+<dd><bdi>Nofile</bdi>: <bdi>&#62;=65536</bdi></dd>
+<dt><bdi>Parameters</bdi></dt>
+<dd><bdi>Kernel.shmmax</bdi>: <bdi>&#62;=4294967296</bdi></dd>
+<dd><bdi>Net.ipv4.ip forward</bdi>: <bdi>1</bdi></dd>
+<dd><bdi>Net.ipv4.tcp rmem</bdi>: <bdi>4096 131072 6291456</bdi></dd>
+<dd><bdi>Vm.max map count</bdi>: <bdi>&#62;=262144</bdi></dd>
+</dl>
+</div>
+<p class="text muted"><bdi>Read 2 sysctl configuration file(s), in boot order.</bdi></p>
+<p class="text muted"><bdi>rdy&#39;s own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services.</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-7">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.lsm</bdi></span></h3>
+<p class="text"><bdi>SELinux is enforcing. AppArmor is off.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Apparmor</bdi></dt>
+<dd><bdi>State</bdi>: <bdi>disabled</bdi></dd>
+<dt><bdi>Selinux</bdi></dt>
+<dd><bdi>Configured</bdi>: <bdi>enforcing</bdi></dd>
+<dd><bdi>Denials</bdi>: <bdi>Count</bdi>: <bdi>0</bdi>; <bdi>Groups</bdi>: <bdi>[truncated]</bdi>; <bdi>Inspected</bdi>: <bdi>yes</bdi>; <bdi>Permissive</bdi>: <bdi>0</bdi>; <bdi>Watched</bdi>: <bdi>[truncated]</bdi>; <bdi>Window</bdi>: <bdi>24h</bdi>; <bdi>Window truncated</bdi>: <bdi>no</bdi></dd>
+<dd><bdi>State</bdi>: <bdi>enforcing</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Selinux</bdi></dt>
+<dd><bdi>Allow</bdi>: <bdi>enforcing</bdi></dd>
+<dd><bdi>Denials max</bdi>: <bdi>0</bdi></dd>
+<dd><bdi>Denials window</bdi>: <bdi>24h</bdi></dd>
+<dd><bdi>Watch</bdi>: <bdi>acme_t</bdi></dd>
+</dl>
+</div>
+<p>Requires: root (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-8">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.time_sync</bdi></span></h3>
+<p class="text"><bdi>Clock is synchronized, under 1 ms away from chrony&#39;s reference `192.0.2.30`.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Chrony</bdi></dt>
+<dd><bdi>Leap</bdi>: <bdi>Normal</bdi></dd>
+<dd><bdi>Offset seconds</bdi>: <bdi>0.000012</bdi></dd>
+<dd><bdi>Reference</bdi>: <bdi>192.0.2.30</bdi></dd>
+<dd><bdi>Stratum</bdi>: <bdi>3</bdi></dd>
+<dd><bdi>Synchronized</bdi>: <bdi>yes</bdi></dd>
+<dt><bdi>Chronyc</bdi></dt>
+<dd><bdi>ok</bdi></dd>
+<dt><bdi>NTP enabled</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Offset seconds</bdi></dt>
+<dd><bdi>0.000012</bdi></dd>
+<dt><bdi>Offset source</bdi></dt>
+<dd><bdi>chronyc</bdi></dd>
+<dt><bdi>Reference</bdi></dt>
+<dd><bdi>192.0.2.30</bdi></dd>
+<dt><bdi>Servers</bdi></dt>
+<dd><bdi>Detail</bdi>: <bdi>connection refused</bdi>; <bdi>Result</bdi>: <bdi>failed</bdi>; <bdi>Server</bdi>: <bdi>192.0.2.10</bdi></dd>
+<dt><bdi>State</bdi></dt>
+<dd><bdi>synchronized</bdi></dd>
+<dt><bdi>Timedatectl</bdi></dt>
+<dd><bdi>ok</bdi></dd>
+<dt><bdi>Timezone</bdi></dt>
+<dd><bdi>Etc/UTC</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Max skew seconds</bdi></dt>
+<dd><bdi>300.0</bdi></dd>
+<dt><bdi>Recommended skew seconds</bdi></dt>
+<dd><bdi>5.0</bdi></dd>
+<dt><bdi>Require sync</bdi></dt>
+<dd><bdi>no</bdi></dd>
+</dl>
+</div>
+<p class="text muted"><bdi>`192.0.2.10`: connection refused.</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-9">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.ports</bdi></span></h3>
+<p class="text"><bdi>80/tcp, 443/tcp, 6443/tcp, 10250/tcp and 8472/udp are free.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Container</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Ephemeral range</bdi></dt>
+<dd><bdi>32768</bdi></dd>
+<dd><bdi>60999</bdi></dd>
+<dt><bdi>Netns</bdi></dt>
+<dd><bdi>net:[4026531992]</bdi></dd>
+<dt><bdi>Processes walked</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Reserved ports</bdi></dt>
+<dd><bdi>(empty)</bdi></dd>
+<dt><bdi>Tcp</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>80</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>443</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>6443</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>10250</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+<dt><bdi>Udp</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Ephemeral</bdi>: <bdi>no</bdi>; <bdi>Holders</bdi>: <bdi>[truncated]</bdi>; <bdi>Holders not shown</bdi>: <bdi>0</bdi>; <bdi>Port</bdi>: <bdi>8472</bdi>; <bdi>State</bdi>: <bdi>free</bdi>; <bdi>Unverified</bdi>: <bdi>none</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Allow owner</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Free</bdi></dt>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>80</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>443</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>6443</bdi></dd>
+<dd><bdi>Bind</bdi>: <bdi>public</bdi>; <bdi>Port</bdi>: <bdi>10250</bdi></dd>
+<dt><bdi>Udp free</bdi></dt>
+<dd><bdi>8472</bdi></dd>
+</dl>
+</div>
+<p>Requires: root (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-10">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.security_agents</bdi></span></h3>
+<p class="text"><bdi>No known security software process was found among 6 processes.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Detected</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Limited view</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>List cut</bdi></dt>
+<dd><bdi>no</bdi></dd>
+<dt><bdi>Processes read</bdi></dt>
+<dd><bdi>6</bdi></dd>
+<dt><bdi>Processes unreadable</bdi></dt>
+<dd><bdi>0</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Allow</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Forbid</bdi></dt>
+<dd><bdi>none</bdi></dd>
+</dl>
+</div>
+<p>Requires: root (available)</p>
+<p class="text muted"><bdi>rdy sees the processes of the machine it runs on. In a container, host processes are not visible.</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-11">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.container_runtime</bdi></span></h3>
+<p class="text"><bdi>containerd 1.7.13 is running (cgroup driver systemd, storage driver overlayfs).</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Kubelet</bdi></dt>
+<dd><bdi>Cgroup driver</bdi>: <bdi>systemd</bdi></dd>
+<dd><bdi>Config present</bdi>: <bdi>yes</bdi></dd>
+<dt><bdi>Runtimes</bdi></dt>
+<dd><bdi>API</bdi>: <bdi>not asked</bdi>; <bdi>Cgroup driver</bdi>: <bdi>systemd</bdi>; <bdi>Cgroup driver source</bdi>: <bdi>/etc/containerd/config.toml</bdi>; <bdi>Config version</bdi>: <bdi>2</bdi>; <bdi>D type</bdi>: <bdi>none</bdi>; <bdi>Installed</bdi>: <bdi>yes</bdi>; <bdi>Proxy</bdi>: <bdi>none</bdi>; <bdi>Rootless</bdi>: <bdi>none</bdi>; <bdi>Rootless socket</bdi>: <bdi>no</bdi>; <bdi>Runtime</bdi>: <bdi>containerd</bdi>; <bdi>Socket</bdi>: <bdi>/run/containerd/containerd.sock</bdi>; <bdi>Socket present</bdi>: <bdi>yes</bdi>; <bdi>Storage driver</bdi>: <bdi>overlayfs</bdi>; <bdi>Storage driver source</bdi>: <bdi>/etc/containerd/config.toml</bdi>; <bdi>Version</bdi>: <bdi>1.7.13</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Cgroup driver</bdi></dt>
+<dd><bdi>systemd</bdi></dd>
+<dt><bdi>Min version</bdi></dt>
+<dd><bdi>1.6</bdi></dd>
+<dt><bdi>Runtime</bdi></dt>
+<dd><bdi>containerd</bdi></dd>
+<dt><bdi>Storage driver</bdi></dt>
+<dd><bdi>overlay2</bdi></dd>
+</dl>
+</div>
+<p>Requires: root (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-12">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.firewall</bdi></span></h3>
+<p class="text"><bdi>firewalld zone public allows 6443/tcp and 10250/tcp inbound.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Active</bdi></dt>
+<dd><bdi>Interface</bdi>: <bdi>eth0</bdi>; <bdi>Manager</bdi>: <bdi>firewalld</bdi>; <bdi>Ports</bdi>: <bdi>[truncated]</bdi>; <bdi>Zone</bdi>: <bdi>public</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Open inbound</bdi></dt>
+<dd><bdi>6443</bdi></dd>
+<dd><bdi>10250</bdi></dd>
+</dl>
+</div>
+<p>Requires: root (available)</p>
+<p class="text muted"><bdi>firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-13">
+<h3><span class="status">PASS</span> <span class="id"><bdi>net.egress</bdi></span></h3>
+<p class="text"><bdi>1 of 1 endpoints reachable</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Endpoints</bdi></dt>
+<dd><bdi>Attempts</bdi>: <bdi>[truncated]</bdi>; <bdi>Connect</bdi>: <bdi>0 ms</bdi>; <bdi>Endpoint</bdi>: <bdi>web.acme.test:8080</bdi>; <bdi>Lookup</bdi>: <bdi>[truncated]</bdi>; <bdi>Optional</bdi>: <bdi>no</bdi>; <bdi>Result</bdi>: <bdi>reached</bdi>; <bdi>TLS</bdi>: <bdi>no</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Max latency</bdi></dt>
+<dd><bdi>2000 ms</bdi></dd>
+<dt><bdi>Trust</bdi></dt>
+<dd><bdi>system</bdi></dd>
+</dl>
+</div>
+<p>Requires: network access (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-14">
+<h3><span class="status">PASS</span> <span class="id"><bdi>net.mtu</bdi></span></h3>
+<p class="text"><bdi>`eth0` has MTU 1500.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Container interfaces</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Default family</bdi></dt>
+<dd><bdi>ipv4</bdi></dd>
+<dt><bdi>Default interface</bdi></dt>
+<dd><bdi>eth0</bdi></dd>
+<dt><bdi>Default MTU</bdi></dt>
+<dd><bdi>1500</bdi></dd>
+<dt><bdi>Interfaces</bdi></dt>
+<dd><bdi>Kind</bdi>: <bdi>ethernet</bdi>; <bdi>MTU</bdi>: <bdi>1500</bdi>; <bdi>Name</bdi>: <bdi>eth0</bdi>; <bdi>State</bdi>: <bdi>up</bdi></dd>
+<dt><bdi>Interfaces down</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Interfaces not read</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Interfaces not shown</bdi></dt>
+<dd><bdi>0</bdi></dd>
+<dt><bdi>Overhead</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overlay</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Pod MTU</bdi></dt>
+<dd><bdi>none</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Clamp above</bdi></dt>
+<dd><bdi>1500</bdi></dd>
+<dt><bdi>Min MTU</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overhead</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Overlay</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Underlay</bdi></dt>
+<dd><bdi>ipv4</bdi></dd>
+<dt><bdi>Warn below</bdi></dt>
+<dd><bdi>1400</bdi></dd>
+</dl>
+</div>
+<p class="muted">Took 0 ms</p>
+</article>
+</section>
+<section aria-labelledby="capabilities">
+<h2 id="capabilities">What rdy could use on this machine</h2>
+<table>
+<caption>Things some checks need, and whether rdy had them</caption>
+<thead>
+<tr><th scope="col">Needs</th><th scope="col">Available</th><th scope="col">Detail</th><th scope="col">What to do</th></tr>
+</thead>
+<tbody>
+<tr><th scope="row"><bdi>root</bdi></th><td>available</td><td><bdi>uid 0</bdi></td><td><bdi></bdi></td></tr>
+<tr><th scope="row"><bdi>network access</bdi></th><td>available</td><td><bdi></bdi></td><td><bdi></bdi></td></tr>
+</tbody>
+</table>
+</section>
+<section aria-labelledby="details">
+<h2 id="details">Run and spec details</h2>
+<dl class="details">
+<dt>Run id</dt>
+<dd><bdi>00000000-0000-4000-8000-000000000002</bdi></dd>
+<dt>Started</dt>
+<dd><bdi>2026-11-02 09:00:00 UTC</bdi></dd>
+<dt>Finished</dt>
+<dd><bdi>2026-11-02 09:00:00 UTC</bdi></dd>
+<dt>Run time</dt>
+<dd><bdi>0 ms</bdi></dd>
+<dt>rdy</dt>
+<dd><bdi>&#60;version&#62; for &#60;target&#62;</bdi></dd>
+<dt>Parallel checks</dt>
+<dd><bdi>1</bdi></dd>
+<dt>Run time limit</dt>
+<dd><bdi>20000 ms</bdi></dd>
+<dt>Network checks</dt>
+<dd><bdi>allowed</bdi></dd>
+<dt>Spec file</dt>
+<dd><bdi>spec.yaml</bdi></dd>
+<dt>Spec SHA-256</dt>
+<dd><bdi>5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6</bdi></dd>
+<dt>Signature</dt>
+<dd><bdi>Not signed</bdi></dd>
+<dt>Hostname</dt>
+<dd><bdi>all-pass.example</bdi></dd>
+<dt>Operating system</dt>
+<dd><bdi>Red Hat Enterprise Linux 9.3 (Plow)</bdi></dd>
+<dt>Kernel</dt>
+<dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
+<dt>Architecture</dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt>Running as</dt>
+<dd><bdi>root</bdi></dd>
+</dl>
+</section>
+<section aria-labelledby="actions">
+<h2 id="actions">What rdy read and contacted</h2>
+<table>
+<caption>What rdy recorded, in order</caption>
+<thead>
+<tr><th scope="col">No.</th><th scope="col">Check</th><th scope="col">What</th><th scope="col">Detail</th><th scope="col">Result</th></tr>
+</thead>
+<tbody>
+<tr><th scope="row">1</th><td>the run itself</td><td>Read a file</td><td><bdi>/proc/self/status</bdi></td><td>Done, 172 bytes</td></tr>
+<tr><th scope="row">2</th><td>the run itself</td><td>Read a file</td><td><bdi>/proc/self/auxv</bdi></td><td>Done, 48 bytes</td></tr>
+<tr><th scope="row">3</th><td>the run itself</td><td>Made a system call</td><td><bdi>hostname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">4</th><td>the run itself</td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">5</th><td>the run itself</td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">6</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">7</th><td><bdi>host.os</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">8</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/osrelease</bdi></td><td>Done, 22 bytes</td></tr>
+<tr><th scope="row">9</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/crypto/fips_enabled</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">10</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/systemd/system</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">11</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">12</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">13</th><td><bdi>host.os</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
+<tr><th scope="row">14</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 442 bytes</td></tr>
+<tr><th scope="row">15</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">16</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">17</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">18</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">19</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">20</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">21</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">22</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">23</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">24</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">25</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td><td>Done, 8160 bytes</td></tr>
+<tr><th scope="row">26</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/devices/system/cpu/online</bdi></td><td>Done, 4 bytes</td></tr>
+<tr><th scope="row">27</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/status</bdi></td><td>Done, 172 bytes</td></tr>
+<tr><th scope="row">28</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">29</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">30</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">31</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">32</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">33</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">34</th><td><bdi>host.cpu</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">35</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib/acme</bdi></td><td>Done</td></tr>
+<tr><th scope="row">36</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">37</th><td><bdi>host.kernel</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">38</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">39</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/proc/modules</bdi></td><td>Done, 208 bytes</td></tr>
+<tr><th scope="row">40</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.dep</bdi></td><td>Done, 454 bytes</td></tr>
+<tr><th scope="row">41</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.builtin</bdi></td><td>Done, 59 bytes</td></tr>
+<tr><th scope="row">42</th><td><bdi>host.kernel</bdi></td><td>Looked at a path</td><td><bdi>/sys/kernel/btf/vmlinux</bdi></td><td>Done, 26 bytes</td></tr>
+<tr><th scope="row">43</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">44</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">45</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.controllers</bdi></td><td>Done, 44 bytes</td></tr>
+<tr><th scope="row">46</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.subtree_control</bdi></td><td>Done, 19 bytes</td></tr>
+<tr><th scope="row">47</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers</bdi></td><td>Done, 19 bytes</td></tr>
+<tr><th scope="row">48</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control</bdi></td><td>Done, 1 bytes</td></tr>
+<tr><th scope="row">49</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cgroups</bdi></td><td>Done, 226 bytes</td></tr>
+<tr><th scope="row">50</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cmdline</bdi></td><td>Done, 143 bytes</td></tr>
+<tr><th scope="row">51</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">52</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/device-tree/model</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">53</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/shmmax</bdi></td><td>Done, 21 bytes</td></tr>
+<tr><th scope="row">54</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_forward</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">55</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/tcp_rmem</bdi></td><td>Done, 20 bytes</td></tr>
+<tr><th scope="row">56</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/vm/max_map_count</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">57</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">58</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">59</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">60</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">61</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">62</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/usr/lib/sysctl.d/50-acme-net.conf</bdi></td><td>Done, 78 bytes</td></tr>
+<tr><th scope="row">63</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.d/90-acme.conf</bdi></td><td>Done, 92 bytes</td></tr>
+<tr><th scope="row">64</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">65</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf</bdi></td><td>Done, 31 bytes</td></tr>
+<tr><th scope="row">66</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system.conf.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">67</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">68</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">69</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">70</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">71</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf.d/10-acme.conf</bdi></td><td>Done, 37 bytes</td></tr>
+<tr><th scope="row">72</th><td><bdi>host.sysctl</bdi></td><td>Made a system call</td><td><bdi>rlimit</bdi></td><td>Done</td></tr>
+<tr><th scope="row">73</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/nr_open</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">74</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/file-max</bdi></td><td>Done, 20 bytes</td></tr>
+<tr><th scope="row">75</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/fs/selinux/enforce</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">76</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/etc/selinux/config</bdi></td><td>Done, 96 bytes</td></tr>
+<tr><th scope="row">77</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/var/log/audit/audit.log</bdi></td><td>Done, 1070 bytes</td></tr>
+<tr><th scope="row">78</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/module/apparmor/parameters/enabled</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run</bdi></td></tr>
+<tr><th scope="row">80</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>timedatectl</bdi> <bdi>show</bdi> <bdi>-p</bdi> <bdi>NTPSynchronized</bdi> <bdi>-p</bdi> <bdi>NTP</bdi> <bdi>-p</bdi> <bdi>Timezone</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">81</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>chronyc</bdi> <bdi>-n</bdi> <bdi>-c</bdi> <bdi>tracking</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">82</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp</bdi></td><td>Done, 484 bytes</td></tr>
+<tr><th scope="row">83</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp6</bdi></td><td>Done, 322 bytes</td></tr>
+<tr><th scope="row">84</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp</bdi></td><td>Done, 245 bytes</td></tr>
+<tr><th scope="row">85</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp6</bdi></td><td>Done, 163 bytes</td></tr>
+<tr><th scope="row">86</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_port_range</bdi></td><td>Done, 12 bytes</td></tr>
+<tr><th scope="row">87</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_reserved_ports</bdi></td><td>Done, 1 bytes</td></tr>
+<tr><th scope="row">88</th><td><bdi>host.ports</bdi></td><td>Read where a link points</td><td><bdi>/proc/self/ns/net</bdi></td><td>Done</td></tr>
+<tr><th scope="row">89</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">90</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">91</th><td><bdi>host.ports</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
+<tr><th scope="row">92</th><td><bdi>host.security_agents</bdi></td><td>Listed a folder</td><td><bdi>/proc</bdi></td><td>Done, 14 entries</td></tr>
+<tr><th scope="row">93</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/1/comm</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">94</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/612/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">95</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/640/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">96</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/733/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">97</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/901/comm</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">98</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/902/comm</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">99</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/var/lib/kubelet/config.yaml</bdi></td><td>Done, 120 bytes</td></tr>
+<tr><th scope="row">100</th><td><bdi>host.container_runtime</bdi></td><td>Checked an environment variable name</td><td><bdi>XDG_RUNTIME_DIR</bdi></td><td>Done</td></tr>
+<tr><th scope="row">101</th><td><bdi>host.container_runtime</bdi></td><td>Looked at a path</td><td><bdi>/run/containerd/containerd.sock</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">102</th><td><bdi>host.container_runtime</bdi></td><td>Ran a command</td><td><bdi>containerd</bdi> <bdi>--version</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">103</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/etc/containerd/config.toml</bdi></td><td>Done, 536 bytes</td></tr>
+<tr><th scope="row">104</th><td><bdi>host.container_runtime</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system/containerd.service.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">105</th><td><bdi>host.firewall</bdi></td><td>Looked at a path</td><td><bdi>/run/firewalld</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">106</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--state</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">107</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--get-active-zones</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">108</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">109</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">110</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--list-all</bdi> <bdi>--zone=public</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">111</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/services/ssh.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">112</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/usr/lib/firewalld/services/ssh.xml</bdi></td><td>Done, 217 bytes</td></tr>
+<tr><th scope="row">113</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/direct.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">114</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/ufw/ufw.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">115</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>web.acme.test</bdi></td><td>Done</td></tr>
+<tr><th scope="row">116</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>web.acme.test</bdi>:<bdi>8080</bdi></td><td>Done</td></tr>
+<tr><th scope="row">117</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">118</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">119</th><td><bdi>net.mtu</bdi></td><td>Listed a folder</td><td><bdi>/sys/class/net</bdi></td><td>Done, 2 entries</td></tr>
+<tr><th scope="row">120</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/mtu</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">121</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/operstate</bdi></td><td>Done, 3 bytes</td></tr>
+<tr><th scope="row">122</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/type</bdi></td><td>Done, 2 bytes</td></tr>
+</tbody>
+</table>
+</section>
+</main>
+<footer>
+<p>Made with Rdy. Use Rdy for your product: <a href="https://getrdy.io/?ref=report&#38;product=acme-platform" rel="noopener noreferrer">https://getrdy.io/?ref=report&#38;product=acme-platform</a></p>
+<p>This link carries the product name and nothing else.</p>
+<p>rdy <bdi>&#60;version&#62;</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
+</footer>
+<script type="application/json" id="rdy-result" data-sha256="7b70911f3bb1c779ecfde9824059dc9621cc8252e23602be90244b5a2876f673">{
+  "api_version": "rdy/v1",
+  "kind": "Report",
+  "producer": {
+    "name": "rdy",
+    "version": "\u003cversion\u003e",
+    "commit": "\u003ccommit\u003e",
+    "rdy_spec": "\u003crdy_spec\u003e",
+    "target": "\u003ctarget\u003e"
+  },
+  "run": {
+    "id": "00000000-0000-4000-8000-000000000002",
+    "started_at": "2026-11-02T09:00:00.000Z",
+    "finished_at": "2026-11-02T09:00:00.000Z",
+    "duration_ms": 0,
+    "options": {
+      "jobs": 1,
+      "deadline_ms": 20000,
+      "allow_unsigned": true,
+      "network": true,
+      "kube_context": null
+    }
+  },
+  "spec": {
+    "product": "acme-platform",
+    "version": "\u003e=1.0",
+    "sha256": "5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6",
+    "file_name": "spec.yaml",
+    "size_bytes": 1672,
+    "serial": null,
+    "expires": null,
+    "contact": null,
+    "annotations": {}
+  },
+  "signature": {
+    "state": "unsigned",
+    "key_id": null,
+    "key_fingerprint": null,
+    "product": null,
+    "signed_at": null,
+    "trust_note": null,
+    "trust_source": null,
+    "reason": null
+  },
+  "host": {
+    "hostname": "all-pass.example",
+    "host_id": null,
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "version": "9.3",
+      "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)"
+    },
+    "kernel": "5.14.0-362.el9.x86_64",
+    "arch": "x86_64",
+    "container": false
+  },
+  "identity": {
+    "euid": 0,
+    "user": null,
+    "elevated": true,
+    "kube": null
+  },
+  "proxy": null,
+  "capabilities": [
+    {
+      "need": "root",
+      "name": null,
+      "available": true,
+      "detail": "uid 0",
+      "hint": null
+    },
+    {
+      "need": "network",
+      "name": null,
+      "available": true,
+      "detail": null,
+      "hint": null
+    }
+  ],
+  "verdict": "ready",
+  "verdict_reason": null,
+  "exit_code": 0,
+  "summary": {
+    "total": 15,
+    "pass": 15,
+    "warn": 0,
+    "block": 0,
+    "skipped": 0,
+    "timeout": 0,
+    "error": 0,
+    "not_applicable": 0,
+    "required_not_run": 0,
+    "optional_not_run": 0
+  },
+  "checks": [
+    {
+      "key": "host.os",
+      "id": "host.os",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "arch": "x86_64",
+        "container": [],
+        "fips": false,
+        "init": "systemd",
+        "kernel": "5.14.0-362.el9.x86_64",
+        "os": {
+          "id": "rhel",
+          "id_like": [
+            "fedora"
+          ],
+          "name": "Red Hat Enterprise Linux",
+          "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
+          "source": "/etc/os-release",
+          "version_id": "9.3"
+        },
+        "wsl": false
+      },
+      "expected": {
+        "fips": "any",
+        "supported": [
+          {
+            "id": "rhel",
+            "versions": "[truncated]"
+          },
+          {
+            "id": "ubuntu",
+            "versions": "[truncated]"
+          }
+        ]
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": true,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.memory",
+      "id": "host.memory",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "31.3 GiB found, 32 GiB needed, inside the 5% tolerance",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "available_bytes": 30562426880,
+        "available_effective_bytes": 30562426880,
+        "available_estimated": false,
+        "cgroup_hierarchy": null,
+        "cgroup_limit_at": null,
+        "cgroup_limit_bytes": null,
+        "cgroup_swap_limit_bytes": null,
+        "effective_bytes": 33608118272,
+        "swap_total_bytes": 0,
+        "swap_used_bytes": 0,
+        "total_bytes": 33608118272
+      },
+      "expected": {
+        "band_bytes": 1717986918,
+        "min_available_bytes": 17179869184,
+        "min_bytes": 34359738368,
+        "swap": "any"
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [
+        "Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent)."
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.cpu",
+      "id": "host.cpu",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "8 vCPUs found, 8 needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "allowed_cores": 8,
+        "arch": "x86_64",
+        "effective_cores": 8.0,
+        "flags": {},
+        "hypervisor": true,
+        "logical_cores": 8,
+        "physical_cores": 4,
+        "quota_cores": null,
+        "virtualization": "vm",
+        "x86_64_level": 4
+      },
+      "expected": {
+        "min": 8
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.disk",
+      "id": "host.disk",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "`/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is needed.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "device": "253:1",
+        "free_bytes": 107374182400,
+        "free_inodes": 900000,
+        "fstype": "xfs",
+        "measured_path": "/var/lib/acme",
+        "mount": "/var",
+        "network": false,
+        "nodev": false,
+        "noexec": false,
+        "nosuid": false,
+        "path": "/var/lib/acme",
+        "read_only": false,
+        "total_bytes": 214748364800,
+        "total_inodes": 1000000
+      },
+      "expected": {
+        "forbid_fstypes": [],
+        "forbid_options": [],
+        "min": 21474836480,
+        "min_inodes": 100000,
+        "recommended": 25769803776
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [
+        "rdy runs as root. Free space is what other users can use. Blocks reserved for root are not counted."
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.kernel",
+      "id": "host.kernel",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3 required modules are loaded or built in. BTF type information is present.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "base": "5.14.0",
+        "btf": true,
+        "build": "362",
+        "distro": "rhel",
+        "modules": {
+          "br_netfilter": "built_in",
+          "nf_conntrack": "loaded",
+          "overlay": "loaded"
+        },
+        "release": "5.14.0-362.el9.x86_64"
+      },
+      "expected": {
+        "applied": {
+          "source": "min",
+          "version": "5.4"
+        },
+        "btf": true,
+        "min": "5.4",
+        "modules": [
+          "overlay",
+          "br_netfilter",
+          "nf_conntrack"
+        ]
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.cgroups",
+      "id": "host.cgroups",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids` available",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "cmdline": [],
+        "controllers": {
+          "cpu": "ok",
+          "io": "ok",
+          "memory": "ok",
+          "pids": "ok"
+        },
+        "controllers_available": [
+          "cpu",
+          "cpuset",
+          "hugetlb",
+          "io",
+          "memory",
+          "misc",
+          "pids",
+          "rdma"
+        ],
+        "controllers_enabled": [
+          "cpu",
+          "io",
+          "memory",
+          "pids"
+        ],
+        "layout": "v2",
+        "proc_cgroups": {
+          "cpu": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "io": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "memory": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "pids": {
+            "enabled": true,
+            "hierarchy": 0
+          }
+        }
+      },
+      "expected": {
+        "controllers": [
+          "cpu",
+          "memory",
+          "io",
+          "pids"
+        ],
+        "version": "v2"
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.sysctl",
+      "id": "host.sysctl",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "4 kernel parameters have the wanted value and are set at boot. Services get an open files limit of 1048576 (`DefaultLimitNOFILE=1048576` in `/etc/systemd/system.conf.d/10-acme.conf`).",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "limits": {
+          "nofile": {
+            "default_limit_nofile": "1048576",
+            "file": "/etc/systemd/system.conf.d/10-acme.conf",
+            "file_max": 9223372036854775807,
+            "hard": 1048576,
+            "nr_open": 1048576,
+            "shell_limit": "[truncated]",
+            "soft": 1048576
+          }
+        },
+        "parameters": {
+          "kernel.shmmax": {
+            "live": "18446744073709551615",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "net.ipv4.ip_forward": {
+            "live": "1",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "net.ipv4.tcp_rmem": {
+            "live": "4096 131072 6291456",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "vm.max_map_count": {
+            "live": "1048576",
+            "persisted": "[truncated]",
+            "state": "ok"
+          }
+        }
+      },
+      "expected": {
+        "limits": {
+          "nofile": "\u003e=65536"
+        },
+        "parameters": {
+          "kernel.shmmax": "\u003e=4294967296",
+          "net.ipv4.ip_forward": "1",
+          "net.ipv4.tcp_rmem": "4096 131072 6291456",
+          "vm.max_map_count": "\u003e=262144"
+        }
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": true,
+      "notes": [
+        "Read 2 sysctl configuration file(s), in boot order.",
+        "rdy's own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services."
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.lsm",
+      "id": "host.lsm",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "SELinux is enforcing. AppArmor is off.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "apparmor": {
+          "state": "disabled"
+        },
+        "selinux": {
+          "configured": "enforcing",
+          "denials": {
+            "count": 0,
+            "groups": "[truncated]",
+            "inspected": true,
+            "permissive": 0,
+            "watched": "[truncated]",
+            "window": "24h",
+            "window_truncated": false
+          },
+          "state": "enforcing"
+        }
+      },
+      "expected": {
+        "selinux": {
+          "allow": [
+            "enforcing"
+          ],
+          "denials_max": 0,
+          "denials_window": "24h",
+          "watch": [
+            "acme_t"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": true,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.time_sync",
+      "id": "host.time_sync",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Clock is synchronized, under 1 ms away from chrony's reference `192.0.2.30`.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "chrony": {
+          "leap": "Normal",
+          "offset_seconds": 0.000012,
+          "reference": "192.0.2.30",
+          "stratum": 3,
+          "synchronized": true
+        },
+        "chronyc": "ok",
+        "ntp_enabled": true,
+        "offset_seconds": 0.000012,
+        "offset_source": "chronyc",
+        "reference": "192.0.2.30",
+        "servers": [
+          {
+            "detail": "connection refused",
+            "result": "failed",
+            "server": "192.0.2.10"
+          }
+        ],
+        "state": "synchronized",
+        "timedatectl": "ok",
+        "timezone": "Etc/UTC"
+      },
+      "expected": {
+        "max_skew_seconds": 300.0,
+        "recommended_skew_seconds": 5.0,
+        "require_sync": false
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [
+        "`192.0.2.10`: connection refused."
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.ports",
+      "id": "host.ports",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "80/tcp, 443/tcp, 6443/tcp, 10250/tcp and 8472/udp are free.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "container": null,
+        "ephemeral_range": [
+          32768,
+          60999
+        ],
+        "netns": "net:[4026531992]",
+        "processes_walked": 0,
+        "reserved_ports": "",
+        "tcp": [
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 80,
+            "state": "free",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 443,
+            "state": "free",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 6443,
+            "state": "free",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 10250,
+            "state": "free",
+            "unverified": null
+          }
+        ],
+        "udp": [
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 8472,
+            "state": "free",
+            "unverified": null
+          }
+        ]
+      },
+      "expected": {
+        "allow_owner": [],
+        "free": [
+          {
+            "bind": "public",
+            "port": 80
+          },
+          {
+            "bind": "public",
+            "port": 443
+          },
+          {
+            "bind": "public",
+            "port": 6443
+          },
+          {
+            "bind": "public",
+            "port": 10250
+          }
+        ],
+        "udp_free": [
+          8472
+        ]
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": true,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.security_agents",
+      "id": "host.security_agents",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "No known security software process was found among 6 processes.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "detected": [],
+        "limited_view": false,
+        "list_cut": false,
+        "processes_read": 6,
+        "processes_unreadable": 0
+      },
+      "expected": {
+        "allow": [],
+        "forbid": []
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [
+        "rdy sees the processes of the machine it runs on. In a container, host processes are not visible."
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.container_runtime",
+      "id": "host.container_runtime",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "containerd 1.7.13 is running (cgroup driver systemd, storage driver overlayfs).",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "kubelet": {
+          "cgroup_driver": "systemd",
+          "config_present": true
+        },
+        "runtimes": [
+          {
+            "api": "not asked",
+            "cgroup_driver": "systemd",
+            "cgroup_driver_source": "/etc/containerd/config.toml",
+            "config_version": 2,
+            "d_type": null,
+            "installed": true,
+            "proxy": null,
+            "rootless": null,
+            "rootless_socket": false,
+            "runtime": "containerd",
+            "socket": "/run/containerd/containerd.sock",
+            "socket_present": true,
+            "storage_driver": "overlayfs",
+            "storage_driver_source": "/etc/containerd/config.toml",
+            "version": "1.7.13"
+          }
+        ]
+      },
+      "expected": {
+        "cgroup_driver": "systemd",
+        "min_version": "1.6",
+        "runtime": [
+          "containerd"
+        ],
+        "storage_driver": "overlay2"
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "host.firewall",
+      "id": "host.firewall",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "firewalld zone public allows 6443/tcp and 10250/tcp inbound.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "active": [
+          {
+            "interface": "eth0",
+            "manager": "firewalld",
+            "ports": "[truncated]",
+            "zone": "public"
+          }
+        ]
+      },
+      "expected": {
+        "open_inbound": [
+          6443,
+          10250
+        ]
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": true,
+      "notes": [
+        "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "net.egress",
+      "id": "net.egress",
+      "name": null,
+      "family": "net",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "1 of 1 endpoints reachable",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "endpoints": [
+          {
+            "attempts": "[truncated]",
+            "connect_ms": 0,
+            "endpoint": "web.acme.test:8080",
+            "lookup": "[truncated]",
+            "optional": false,
+            "result": "reached",
+            "tls": false
+          }
+        ]
+      },
+      "expected": {
+        "max_latency_ms": 2000,
+        "trust": "system"
+      },
+      "needs": [
+        {
+          "need": "network",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": true,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "net.mtu",
+      "id": "net.mtu",
+      "name": null,
+      "family": "net",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "`eth0` has MTU 1500.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "container_interfaces": 0,
+        "default_family": "ipv4",
+        "default_interface": "eth0",
+        "default_mtu": 1500,
+        "interfaces": [
+          {
+            "kind": "ethernet",
+            "mtu": 1500,
+            "name": "eth0",
+            "state": "up"
+          }
+        ],
+        "interfaces_down": 0,
+        "interfaces_not_read": 0,
+        "interfaces_not_shown": 0,
+        "overhead": null,
+        "overlay": null,
+        "pod_mtu": null
+      },
+      "expected": {
+        "clamp_above": 1500,
+        "min_mtu": null,
+        "overhead": null,
+        "overlay": null,
+        "underlay": "ipv4",
+        "warn_below": 1400
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    }
+  ],
+  "actions": [
+    {
+      "seq": 1,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 172,
+      "path": "/proc/self/status",
+      "truncated": false
+    },
+    {
+      "seq": 2,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 48,
+      "path": "/proc/self/auxv",
+      "truncated": false
+    },
+    {
+      "seq": 3,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "hostname"
+    },
+    {
+      "seq": 4,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "uname"
+    },
+    {
+      "seq": 5,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 192,
+      "path": "/etc/os-release",
+      "truncated": false
+    },
+    {
+      "seq": 6,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 192,
+      "path": "/etc/os-release",
+      "truncated": false
+    },
+    {
+      "seq": 7,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "uname"
+    },
+    {
+      "seq": 8,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 22,
+      "path": "/proc/sys/kernel/osrelease",
+      "truncated": false
+    },
+    {
+      "seq": 9,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2,
+      "path": "/proc/sys/crypto/fips_enabled",
+      "truncated": false
+    },
+    {
+      "seq": 10,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "bytes": 0,
+      "path": "/run/systemd/system"
+    },
+    {
+      "seq": 11,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/.dockerenv"
+    },
+    {
+      "seq": 12,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv"
+    },
+    {
+      "seq": 13,
+      "check": "host.os",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "env",
+      "outcome": "ok",
+      "name": "KUBERNETES_SERVICE_HOST"
+    },
+    {
+      "seq": 14,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 442,
+      "path": "/proc/meminfo",
+      "truncated": false
+    },
+    {
+      "seq": 15,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 45,
+      "path": "/proc/self/cgroup",
+      "truncated": false
+    },
+    {
+      "seq": 16,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 665,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 17,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max"
+    },
+    {
+      "seq": 18,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max"
+    },
+    {
+      "seq": 19,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/memory.max"
+    },
+    {
+      "seq": 20,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/memory.max"
+    },
+    {
+      "seq": 21,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max"
+    },
+    {
+      "seq": 22,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max"
+    },
+    {
+      "seq": 23,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/system.slice/memory.swap.max"
+    },
+    {
+      "seq": 24,
+      "check": "host.memory",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/memory.swap.max"
+    },
+    {
+      "seq": 25,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8160,
+      "path": "/proc/cpuinfo",
+      "truncated": false
+    },
+    {
+      "seq": 26,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 4,
+      "path": "/sys/devices/system/cpu/online",
+      "truncated": false
+    },
+    {
+      "seq": 27,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 172,
+      "path": "/proc/self/status",
+      "truncated": false
+    },
+    {
+      "seq": 28,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 45,
+      "path": "/proc/self/cgroup",
+      "truncated": false
+    },
+    {
+      "seq": 29,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 665,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 30,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 11,
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 31,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 11,
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 32,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 11,
+      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 33,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/fs/cgroup/cpu.max"
+    },
+    {
+      "seq": 34,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "uname"
+    },
+    {
+      "seq": 35,
+      "check": "host.disk",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "statvfs",
+      "path": "/var/lib/acme"
+    },
+    {
+      "seq": 36,
+      "check": "host.disk",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 665,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 37,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "uname"
+    },
+    {
+      "seq": 38,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 192,
+      "path": "/etc/os-release",
+      "truncated": false
+    },
+    {
+      "seq": 39,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 208,
+      "path": "/proc/modules",
+      "truncated": false
+    },
+    {
+      "seq": 40,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 454,
+      "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.dep",
+      "truncated": false
+    },
+    {
+      "seq": 41,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 59,
+      "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.builtin",
+      "truncated": false
+    },
+    {
+      "seq": 42,
+      "check": "host.kernel",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "bytes": 26,
+      "path": "/sys/kernel/btf/vmlinux"
+    },
+    {
+      "seq": 43,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 45,
+      "path": "/proc/self/cgroup",
+      "truncated": false
+    },
+    {
+      "seq": 44,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 665,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 45,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 44,
+      "path": "/sys/fs/cgroup/cgroup.controllers",
+      "truncated": false
+    },
+    {
+      "seq": 46,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 19,
+      "path": "/sys/fs/cgroup/cgroup.subtree_control",
+      "truncated": false
+    },
+    {
+      "seq": 47,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 19,
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers",
+      "truncated": false
+    },
+    {
+      "seq": 48,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 1,
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control",
+      "truncated": false
+    },
+    {
+      "seq": 49,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 226,
+      "path": "/proc/cgroups",
+      "truncated": false
+    },
+    {
+      "seq": 50,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 143,
+      "path": "/proc/cmdline",
+      "truncated": false
+    },
+    {
+      "seq": 51,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 192,
+      "path": "/etc/os-release",
+      "truncated": false
+    },
+    {
+      "seq": 52,
+      "check": "host.cgroups",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/proc/device-tree/model"
+    },
+    {
+      "seq": 53,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 21,
+      "path": "/proc/sys/kernel/shmmax",
+      "truncated": false
+    },
+    {
+      "seq": 54,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2,
+      "path": "/proc/sys/net/ipv4/ip_forward",
+      "truncated": false
+    },
+    {
+      "seq": 55,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 20,
+      "path": "/proc/sys/net/ipv4/tcp_rmem",
+      "truncated": false
+    },
+    {
+      "seq": 56,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8,
+      "path": "/proc/sys/vm/max_map_count",
+      "truncated": false
+    },
+    {
+      "seq": 57,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "entries": 1,
+      "path": "/etc/sysctl.d"
+    },
+    {
+      "seq": 58,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/run/sysctl.d"
+    },
+    {
+      "seq": 59,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/usr/local/lib/sysctl.d"
+    },
+    {
+      "seq": 60,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "entries": 1,
+      "path": "/usr/lib/sysctl.d"
+    },
+    {
+      "seq": 61,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/lib/sysctl.d"
+    },
+    {
+      "seq": 62,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 78,
+      "path": "/usr/lib/sysctl.d/50-acme-net.conf",
+      "truncated": false
+    },
+    {
+      "seq": 63,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 92,
+      "path": "/etc/sysctl.d/90-acme.conf",
+      "truncated": false
+    },
+    {
+      "seq": 64,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/sysctl.conf"
+    },
+    {
+      "seq": 65,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 31,
+      "path": "/etc/systemd/system.conf",
+      "truncated": false
+    },
+    {
+      "seq": 66,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "entries": 1,
+      "path": "/etc/systemd/system.conf.d"
+    },
+    {
+      "seq": 67,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/run/systemd/system.conf.d"
+    },
+    {
+      "seq": 68,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/usr/local/lib/systemd/system.conf.d"
+    },
+    {
+      "seq": 69,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/usr/lib/systemd/system.conf.d"
+    },
+    {
+      "seq": 70,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/lib/systemd/system.conf.d"
+    },
+    {
+      "seq": 71,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 37,
+      "path": "/etc/systemd/system.conf.d/10-acme.conf",
+      "truncated": false
+    },
+    {
+      "seq": 72,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "rlimit",
+      "resource": "nofile"
+    },
+    {
+      "seq": 73,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8,
+      "path": "/proc/sys/fs/nr_open",
+      "truncated": false
+    },
+    {
+      "seq": 74,
+      "check": "host.sysctl",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 20,
+      "path": "/proc/sys/fs/file-max",
+      "truncated": false
+    },
+    {
+      "seq": 75,
+      "check": "host.lsm",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2,
+      "path": "/sys/fs/selinux/enforce",
+      "truncated": false
+    },
+    {
+      "seq": 76,
+      "check": "host.lsm",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 96,
+      "path": "/etc/selinux/config",
+      "truncated": false
+    },
+    {
+      "seq": 77,
+      "check": "host.lsm",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 1070,
+      "path": "/var/log/audit/audit.log",
+      "truncated": false
+    },
+    {
+      "seq": 78,
+      "check": "host.lsm",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/sys/module/apparmor/parameters/enabled"
+    },
+    {
+      "seq": 79,
+      "check": "host.time_sync",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "connect",
+      "outcome": "failed",
+      "error": "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run",
+      "host": "192.0.2.10",
+      "port": 123,
+      "proto": "udp"
+    },
+    {
+      "seq": 80,
+      "check": "host.time_sync",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "show",
+        "-p",
+        "NTPSynchronized",
+        "-p",
+        "NTP",
+        "-p",
+        "Timezone"
+      ],
+      "exit": 0,
+      "form": "show",
+      "program": "timedatectl",
+      "stdout_bytes": 45,
+      "truncated": false
+    },
+    {
+      "seq": 81,
+      "check": "host.time_sync",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "-n",
+        "-c",
+        "tracking"
+      ],
+      "exit": 0,
+      "form": "tracking",
+      "program": "chronyc",
+      "stdout_bytes": 127,
+      "truncated": false
+    },
+    {
+      "seq": 82,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 484,
+      "path": "/proc/net/tcp",
+      "truncated": false
+    },
+    {
+      "seq": 83,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 322,
+      "path": "/proc/net/tcp6",
+      "truncated": false
+    },
+    {
+      "seq": 84,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 245,
+      "path": "/proc/net/udp",
+      "truncated": false
+    },
+    {
+      "seq": 85,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 163,
+      "path": "/proc/net/udp6",
+      "truncated": false
+    },
+    {
+      "seq": 86,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 12,
+      "path": "/proc/sys/net/ipv4/ip_local_port_range",
+      "truncated": false
+    },
+    {
+      "seq": 87,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 1,
+      "path": "/proc/sys/net/ipv4/ip_local_reserved_ports",
+      "truncated": false
+    },
+    {
+      "seq": 88,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/self/ns/net"
+    },
+    {
+      "seq": 89,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/.dockerenv"
+    },
+    {
+      "seq": 90,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv"
+    },
+    {
+      "seq": 91,
+      "check": "host.ports",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "env",
+      "outcome": "ok",
+      "name": "KUBERNETES_SERVICE_HOST"
+    },
+    {
+      "seq": 92,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "entries": 14,
+      "path": "/proc"
+    },
+    {
+      "seq": 93,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8,
+      "path": "/proc/1/comm",
+      "truncated": false
+    },
+    {
+      "seq": 94,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 5,
+      "path": "/proc/612/comm",
+      "truncated": false
+    },
+    {
+      "seq": 95,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 5,
+      "path": "/proc/640/comm",
+      "truncated": false
+    },
+    {
+      "seq": 96,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 5,
+      "path": "/proc/733/comm",
+      "truncated": false
+    },
+    {
+      "seq": 97,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 11,
+      "path": "/proc/901/comm",
+      "truncated": false
+    },
+    {
+      "seq": 98,
+      "check": "host.security_agents",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8,
+      "path": "/proc/902/comm",
+      "truncated": false
+    },
+    {
+      "seq": 99,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 120,
+      "path": "/var/lib/kubelet/config.yaml",
+      "truncated": false
+    },
+    {
+      "seq": 100,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "env",
+      "outcome": "ok",
+      "name": "XDG_RUNTIME_DIR"
+    },
+    {
+      "seq": 101,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "bytes": 0,
+      "path": "/run/containerd/containerd.sock"
+    },
+    {
+      "seq": 102,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--version"
+      ],
+      "exit": 0,
+      "form": "version",
+      "program": "containerd",
+      "stdout_bytes": 93,
+      "truncated": false
+    },
+    {
+      "seq": 103,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 536,
+      "path": "/etc/containerd/config.toml",
+      "truncated": false
+    },
+    {
+      "seq": 104,
+      "check": "host.container_runtime",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/systemd/system/containerd.service.d"
+    },
+    {
+      "seq": 105,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "bytes": 0,
+      "path": "/run/firewalld"
+    },
+    {
+      "seq": 106,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--state"
+      ],
+      "exit": 0,
+      "form": "state",
+      "program": "firewall-cmd",
+      "stdout_bytes": 8,
+      "truncated": false
+    },
+    {
+      "seq": 107,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--get-active-zones"
+      ],
+      "exit": 0,
+      "form": "active-zones",
+      "program": "firewall-cmd",
+      "stdout_bytes": 55,
+      "truncated": false
+    },
+    {
+      "seq": 108,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 227,
+      "path": "/proc/net/route",
+      "truncated": false
+    },
+    {
+      "seq": 109,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 144,
+      "path": "/proc/net/ipv6_route",
+      "truncated": false
+    },
+    {
+      "seq": 110,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--list-all",
+        "--zone=public"
+      ],
+      "exit": 0,
+      "form": "list-all",
+      "program": "firewall-cmd",
+      "stdout_bytes": 248,
+      "truncated": false
+    },
+    {
+      "seq": 111,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/firewalld/services/ssh.xml"
+    },
+    {
+      "seq": 112,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 217,
+      "path": "/usr/lib/firewalld/services/ssh.xml",
+      "truncated": false
+    },
+    {
+      "seq": 113,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/firewalld/direct.xml"
+    },
+    {
+      "seq": 114,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/ufw/ufw.conf"
+    },
+    {
+      "seq": 115,
+      "check": "net.egress",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "lookup",
+      "outcome": "ok",
+      "answers": 1,
+      "host": "web.acme.test"
+    },
+    {
+      "seq": 116,
+      "check": "net.egress",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "connect",
+      "outcome": "ok",
+      "addr": "192.0.2.1",
+      "host": "web.acme.test",
+      "port": 8080,
+      "via_proxy": null
+    },
+    {
+      "seq": 117,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 227,
+      "path": "/proc/net/route",
+      "truncated": false
+    },
+    {
+      "seq": 118,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 144,
+      "path": "/proc/net/ipv6_route",
+      "truncated": false
+    },
+    {
+      "seq": 119,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "entries": 2,
+      "path": "/sys/class/net"
+    },
+    {
+      "seq": 120,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 5,
+      "path": "/sys/class/net/eth0/mtu",
+      "truncated": false
+    },
+    {
+      "seq": 121,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 3,
+      "path": "/sys/class/net/eth0/operstate",
+      "truncated": false
+    },
+    {
+      "seq": 122,
+      "check": "net.mtu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2,
+      "path": "/sys/class/net/eth0/type",
+      "truncated": false
+    }
+  ],
+  "actions_truncated": false,
+  "actions_dropped": {},
+  "redaction": {
+    "ruleset": "report",
+    "total": 0,
+    "by_rule": {}
+  },
+  "complete": true,
+  "interrupted": false
+}
+</script>
+</body>
+</html>
