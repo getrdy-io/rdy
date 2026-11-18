@@ -310,6 +310,12 @@ const PENDING: &[Pending] = &[
         why: "M1-096 added the reviewed expect.json for Pass and NonPass (11 cases). By design no hang ends net.egress in a Timeout: every endpoint is cut to its own budget (10 s, then 15 s for HTTP) and leaves 2 s of the check's time for the result, so a blackhole or a stalled server gives a bounded finding with class `blackhole` or `timeout`, never `timed_out_ms`. M1-179 (PR #70) counts a hang the check survived, when a note names it (`no reply within`), as the Timeout class. The blackhole case has that note. The row is closed by the second of PRs #70 and #74 to merge",
     },
     Pending {
+        check: "net.proxy",
+        classes: &[Class::Timeout],
+        owner: "M1-179",
+        why: "M1-098 added the reviewed expect.json for the passing, warning and blocking cases (16). By design no hang ends net.proxy in a Timeout: the one connection to the proxy gets what is left of the check's time minus 0.5 s, and a black hole gives a bounded finding with class `blackhole` and the note `no reply within 3 s`, never `timed_out_ms`. M1-179 counts that hang the check survived as the Timeout class. The proxy-blackhole case has the note. The row is closed by the second of PR #70 and this PR to merge",
+    },
+    Pending {
         check: "net.tls_intercept",
         classes: &[Class::Timeout],
         owner: "M1-179",

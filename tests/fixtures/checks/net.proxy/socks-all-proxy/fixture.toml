@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-socks-all-proxy"
+summary = "ALL_PROXY is a SOCKS address, which rdy does not support"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

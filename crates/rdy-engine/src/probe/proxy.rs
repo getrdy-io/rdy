@@ -327,6 +327,50 @@ pub enum ProxyError {
 /// reads, in the order it tries them. Both cases are read, as tools do, and upper case wins.
 pub const PROXY_ENV: [&str; 4] = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
 
+/// The environment variables that carry the `NO_PROXY` list, in the order `ProbeHub::set_proxy_from_env`
+/// tries them. Upper case wins, as in Go. Neither name is secret.
+pub const NO_PROXY_ENV: [&str; 2] = ["NO_PROXY", "no_proxy"];
+
+/// The `ALL_PROXY` variables. A run does not use them (curl does, for every scheme), but `net.proxy`
+/// reports them, so `ProbeHub::set_proxy_from_env` hides the password of one that parses.
+pub const ALL_PROXY_ENV: [&str; 2] = ["ALL_PROXY", "all_proxy"];
+
+/// Two spellings of one proxy setting that are both set and differ. Tools do not agree on which wins
+/// (curl and Python read the lower-case name first, Go the upper-case one), so the product may use another
+/// value than rdy does. It holds the names and never a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnvConflict {
+    /// The upper-case name, such as `HTTPS_PROXY`.
+    pub upper: &'static str,
+    /// The lower-case name, such as `https_proxy`.
+    pub lower: &'static str,
+}
+
+/// The name pairs `env_conflicts` compares.
+const CONFLICT_PAIRS: [(&str, &str); 3] = [
+    ("HTTPS_PROXY", "https_proxy"),
+    ("HTTP_PROXY", "http_proxy"),
+    ("NO_PROXY", "no_proxy"),
+];
+
+/// The pairs of proxy variables that are both set to non-blank values and differ. `get` returns the value
+/// of a name. Values are compared after trimming and are never kept.
+#[must_use]
+pub fn env_conflicts(get: impl Fn(&str) -> Option<String>) -> Vec<EnvConflict> {
+    let value = |name: &str| {
+        get(name)
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    CONFLICT_PAIRS
+        .iter()
+        .filter_map(|&(upper, lower)| {
+            let (a, b) = (value(upper)?, value(lower)?);
+            (a != b).then_some(EnvConflict { upper, lower })
+        })
+        .collect()
+}
+
 /// The proxy of the process environment could not be set for the run. It names the variable and never
 /// holds any part of its value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

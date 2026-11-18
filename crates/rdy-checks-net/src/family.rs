@@ -8,21 +8,28 @@ use rdy_spec::spec::{CheckSpec, Spec};
 use crate::dns::{self, DnsCheck};
 use crate::egress::{self, EgressCheck};
 use crate::mtu::{self, MtuCheck};
+use crate::proxy::{self, ProxyCheck};
 use crate::tls_intercept::{self, TlsInterceptCheck};
 
 #[cfg(test)]
 mod tests;
 
 /// Every net check this build lists, in catalog order (03 section 3).
-static CHECKS: [&CheckInfo; 4] = [&egress::INFO, &mtu::INFO, &tls_intercept::INFO, &dns::INFO];
+static CHECKS: [&CheckInfo; 5] = [
+    &egress::INFO,
+    &proxy::INFO,
+    &mtu::INFO,
+    &tls_intercept::INFO,
+    &dns::INFO,
+];
 
 /// The `net` family.
 ///
-/// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.mtu` ([`MtuCheck`]) and
+/// It lists the checks that are written: `net.egress` ([`EgressCheck`]), `net.proxy` ([`ProxyCheck`]), `net.mtu` ([`MtuCheck`]),
 /// `net.tls_intercept` ([`TlsInterceptCheck`]) and `net.dns` ([`DnsCheck`]). A check gets the hosts its own spec entry lists and no
 /// others (INV-11): for `net.egress`, its `endpoints`; for `net.tls_intercept`, its `hosts`, or by
 /// default the TLS endpoints of the spec's `net.egress` entries; for `net.dns`, its `names`.
-/// `net.proxy`, `net.registry` and `net.bandwidth` are reserved ids that
+/// `net.registry` and `net.bandwidth` are reserved ids that
 /// no family lists yet, so the planner skips them with `not_in_build`. Each ticket that writes one adds
 /// its [`CheckInfo`] to the list and its arm to [`Family::build`]. There are no stubs, so the family may
 /// be registered in the CLI as it is.
@@ -43,6 +50,9 @@ impl Family for NetFamily {
             CheckParams::NetEgress(params) => {
                 let hosts = HostSet::new(params.endpoints.iter().map(|e| e.target.clone()));
                 Ok(Built::new(Box::new(EgressCheck::new(params))).with_hosts(hosts))
+            }
+            CheckParams::NetProxy(params) => {
+                Ok(Built::new(Box::new(ProxyCheck::from_params(&params))))
             }
             CheckParams::NetMtu(params) => Ok(Built::new(Box::new(MtuCheck::from_params(&params)))),
             CheckParams::NetTlsIntercept(params) => {
