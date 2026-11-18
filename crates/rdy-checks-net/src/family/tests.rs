@@ -43,7 +43,10 @@ fn skip_kind(plan: &RunPlan, key: &str) -> Option<SkipKind> {
 #[test]
 fn the_family_lists_its_checks_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
-    assert_eq!(ids, ["net.egress", "net.mtu", "net.tls_intercept", "net.dns"]);
+    assert_eq!(
+        ids,
+        ["net.egress", "net.mtu", "net.tls_intercept", "net.dns"]
+    );
     let mut twice = registry();
     assert_eq!(
         twice.register(NetFamily).map(|_| ()),
