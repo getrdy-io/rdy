@@ -52,7 +52,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0049](0049-k8s-family-namespace-from-a-spec-block.md) | The Kubernetes family namespace comes from a spec `k8s:` block in M2, and `rdy run` gets no `--namespace` | Proposed; cli-ux and security-reviewer review it in M2-142 |
 | [0050](0050-macos-ci-gate-arm64-tests-intel-nightly.md) | The PR gate runs macOS arm64 tests and an x86_64 macOS compile; the Intel tests run on main and nightly | Accepted, decided by the founder 2026-11-18 |
 | [0051](0051-nameserver-exchange-and-the-azure-door.md) | Direct nameserver queries go through a facade call that reads the OS list itself, and the Azure DNS address passes only from that list | Accepted |
-| [0052](0052-hickory-proto-codec-in-net-checks.md) | `hickory-proto` is a message codec inside `rdy-checks-net`, with no features | Accepted |
+| [0052](0052-hand-written-dns-reader-hickory-proto-test-only.md) | The `net.dns` query and reply reader are written by hand, and `hickory-proto` is only a test oracle | Accepted |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

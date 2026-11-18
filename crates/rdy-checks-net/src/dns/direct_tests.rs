@@ -18,7 +18,8 @@ use rdy_engine::testing::{DnsScript, Replay, TestRun};
 use rdy_spec::result::{ActionKind, ActionOutcome, Status};
 use serde_json::{Value, json};
 
-use super::tests::{NET, Ran, case, run_on, run_with};
+use super::split::SSS_WARNING;
+use super::tests::{NET, Ran, case, run_on, run_with, run_with_deadline};
 
 const NS1: &str = "192.0.2.53:53";
 const NS2: &str = "192.0.2.54:53";
@@ -532,5 +533,112 @@ async fn the_query_names_only_a_spec_host_over_the_wire() {
     assert_eq!(
         seen.as_slice(),
         [("web.acme.test.".to_owned(), RecordType::A)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn nameservers_that_overlap_the_system_answer_are_not_split_horizon() {
+    // A CDN or round-robin name: another resolver returns a different but overlapping set.
+    let replay = case("split-horizon")
+        .dns_server(
+            addr(NS1),
+            zone(&[("web.acme.test", &["192.0.2.10", "192.0.2.11"])]),
+        )
+        .dns_server(
+            addr(NS2),
+            zone(&[("web.acme.test", &["192.0.2.10", "198.51.100.7"])]),
+        );
+    let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
+    assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_checks_own_budget_running_out_is_not_a_nameserver_timeout() {
+    // 4 s left and 2 s kept for the result leave 2 s for the direct lookups. Nameserver 1 answers after
+    // 2.5 s, which is inside the facade's 3 s but past the check's budget.
+    let replay = case("slow-first-nameserver")
+        .dns_server(addr(NS1), zone(&[("web.acme.test", &["192.0.2.10"])]))
+        .dns_server(addr(NS2), zone(&[("web.acme.test", &["192.0.2.10"])]))
+        .dns_delay(addr(NS1), Duration::from_millis(2500));
+    let ran = run_with_deadline(
+        TestRun::new(replay),
+        names(&["web.acme.test"]),
+        json!({}),
+        Os::Linux,
+        NET,
+        Duration::from_secs(4),
+    )
+    .await;
+    let rows = positions(&ran, 0);
+    assert_eq!(rows[0]["status"], "not_tried", "{rows}");
+    assert!(
+        !ran.finding().message.contains("did not answer in time"),
+        "{}",
+        ran.finding().message
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn latency_is_the_first_question_only() {
+    // The second question (AAAA) of a nameserver that answers A at once must not add to its latency:
+    // nameserver 1 delays every answer by 400 ms, so A plus AAAA is 800 ms and the first question 400 ms.
+    let replay = Replay::for_os(Os::Linux)
+        .file("/etc/resolv.conf", "nameserver 192.0.2.53\n")
+        .file("/etc/nsswitch.conf", "hosts: files dns\n")
+        .command(
+            "getent",
+            &["ahosts", "--", "web.acme.test"],
+            0,
+            "2001:db8::10 STREAM web.acme.test\n192.0.2.10 STREAM\n",
+        )
+        .dns_server(
+            addr(NS1),
+            zone(&[("web.acme.test", &["192.0.2.10", "2001:db8::10"])]),
+        )
+        .dns_delay(addr(NS1), Duration::from_millis(400));
+    let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
+    assert_eq!(positions(&ran, 0)[0]["aaaa_asked"], true);
+    assert_eq!(positions(&ran, 0)[0]["ms"], 400);
+    assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_sss_text_is_fixed() {
+    assert_eq!(
+        SSS_WARNING,
+        "The `hosts:` line of `/etc/nsswitch.conf` lists `sss`: every lookup asks sssd first, and a stopped or slow sssd stalls them"
+    );
+    let replay = Replay::for_os(Os::Linux)
+        .file("/etc/resolv.conf", "nameserver 192.0.2.53\n")
+        .file("/etc/nsswitch.conf", "hosts: files sss dns\n")
+        .command("getent", &["ahosts", "--", "gone.acme.test"], 2, "")
+        .dns_server(addr(NS1), zone(&[]));
+    let ran = run_on(replay, names(&["gone.acme.test"]), json!({})).await;
+    let finding = ran.finding();
+    assert!(finding.message.is_empty() || !finding.message.contains("sss"));
+    assert!(
+        finding.notes.iter().any(|n| n == SSS_WARNING),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn off_linux_a_note_says_direct_lookups_were_skipped() {
+    let ran = run_with(
+        TestRun::new(case("getent-missing")),
+        names(&["web.acme.test"]),
+        json!({}),
+        Os::Macos,
+        NET,
+    )
+    .await;
+    assert!(
+        ran.finding()
+            .notes
+            .iter()
+            .any(|n| n.contains("rdy sent no direct nameserver queries") && n.contains("M2-010")),
+        "{:?}",
+        ran.finding().notes
     );
 }

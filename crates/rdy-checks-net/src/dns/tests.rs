@@ -98,11 +98,22 @@ pub(super) async fn run_with(
     os: Os,
     needs: &[Need],
 ) -> Ran {
+    run_with_deadline(run, names, extra, os, needs, Duration::from_secs(60)).await
+}
+
+pub(super) async fn run_with_deadline(
+    run: TestRun,
+    names: Value,
+    extra: Value,
+    os: Os,
+    needs: &[Need],
+    deadline: Duration,
+) -> Ran {
     let entry = entry(&names, &extra);
     let check = check_of(&entry);
     let ctx = run.with_deadline(
         run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts()),
-        Duration::from_secs(60),
+        deadline,
     );
     let outcome = check.run(&ctx).await;
     assert_within_manifest("net.dns", &INFO, &run.action_log());
@@ -288,7 +299,9 @@ async fn on_macos_the_facade_lookup_is_the_system_answer_and_no_command_runs() {
     let n = ran.name(0);
     assert_eq!(n["source"], "getaddrinfo");
     assert!(n.get("fallback").is_none());
-    assert!(finding.notes.is_empty(), "{:?}", finding.notes);
+    // The one note says no direct queries were sent (M2-010). There is no other.
+    assert_eq!(finding.notes.len(), 1, "{:?}", finding.notes);
+    assert!(finding.notes[0].contains("no direct nameserver queries"));
     assert_eq!(ran.execs(), 0);
 }
 

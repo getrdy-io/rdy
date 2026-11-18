@@ -118,6 +118,10 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         RESOLV_CONF,
         "/run/systemd/resolve/resolv.conf",
         "/run/systemd/resolve/stub-resolv.conf",
+        // The other files the facade's nameserver list may be a link to (`NAMESERVER_FILES`).
+        "/run/resolvconf/resolv.conf",
+        "/run/NetworkManager/resolv.conf",
+        "/run/NetworkManager/no-stub-resolv.conf",
         NSSWITCH_CONF,
     ],
     statfs: &[],
@@ -201,7 +205,12 @@ impl Check for DnsCheck {
                 None
             };
             let mut machine = split::Machine::default();
-            if linux {
+            if !linux {
+                machine.list_problem = Some(
+                    "this OS has no nameserver source yet (macOS and Windows: M2-010), so only the system answer is reported"
+                        .to_owned(),
+                );
+            } else {
                 machine.hosts = read_text(ctx, NSSWITCH_CONF)
                     .await?
                     .and_then(|t| parse::nsswitch_hosts(&t));

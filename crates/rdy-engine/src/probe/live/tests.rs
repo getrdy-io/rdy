@@ -1559,9 +1559,16 @@ mod dns_live {
     #[tokio::test]
     async fn a_closed_tcp_port_is_refused_and_an_empty_message_is_an_error() {
         let closed = crate::testing::loopback::closed_port().await.expect("port");
-        let error = netio::dns(closed, b"q", DnsTransport::Tcp, 4096, LIMIT)
-            .await
-            .expect_err("refused");
+        // A refused loopback connect takes about 2 s on Windows, so this call gets 5 s, not `LIMIT`.
+        let error = netio::dns(
+            closed,
+            b"q",
+            DnsTransport::Tcp,
+            4096,
+            Duration::from_secs(5),
+        )
+        .await
+        .expect_err("refused");
         assert!(matches!(error, ProbeError::ConnectionRefused), "{error:?}");
         let server = DnsServer::start(|_, _| Some(Vec::new()))
             .await

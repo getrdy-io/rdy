@@ -11,7 +11,8 @@
 //! opcode 0) with the expected ID and exactly one question that is ours (name compared without case, same
 //! type, class IN). Then the answer section is read, up to [`MAX_RECORDS`] records. A record of type A (4
 //! bytes), AAAA (16 bytes) or CNAME (a name) is kept; any other type is skipped by its RDLENGTH. The
-//! authority and additional sections are never read. A compression pointer must point strictly backwards
+//! authority and additional sections are never read. A reply with the TC bit is not read past the question: it is
+//! cut anywhere, and the caller asks again over TCP. A compression pointer must point strictly backwards
 //! (to an offset below the first byte of the pointer), and at most [`MAX_HOPS`] pointers are followed in one
 //! name, so a loop cannot run. A label with the top bits `01` or `10` is refused. A name longer than 255
 //! bytes is refused.
@@ -259,6 +260,15 @@ pub(super) fn parse_reply(
     if qname != asked || qtype_got != qtype.code() || qclass != 1 {
         return Err("the reply answers another question");
     }
+    let rcode = Rcode::of((flags & 0xf) as u8);
+    // A truncated reply is cut anywhere, so its answers are not read. The caller asks again over TCP.
+    if flags & 0x0200 != 0 {
+        return Ok(Reply {
+            rcode,
+            truncated: true,
+            addrs: Vec::new(),
+        });
+    }
     let mut records: Vec<(String, Data)> = Vec::new();
     for _ in 0..usize::from(an).min(MAX_RECORDS) {
         let owner = r.name().ok_or(BROKEN)?;
@@ -323,8 +333,8 @@ pub(super) fn parse_reply(
         }
     }
     Ok(Reply {
-        rcode: Rcode::of((flags & 0xf) as u8),
-        truncated: flags & 0x0200 != 0,
+        rcode,
+        truncated: false,
         addrs,
     })
 }
@@ -546,6 +556,15 @@ pub(super) mod tests {
                 "{end}"
             );
         }
+    }
+
+    #[test]
+    fn a_truncated_reply_is_not_read_past_the_question() {
+        // TC set, then bytes that would be a broken answer: the answer is not read, so it is not an error.
+        let mut bytes = with_tail(&[0xde, 0xad, 0xbe, 0xef]);
+        bytes[2] |= 0x02;
+        let reply = parse_reply(&bytes, false, 5, "a.acme.test", Qtype::A).expect("a reply");
+        assert!(reply.truncated && reply.addrs.is_empty());
     }
 
     #[test]

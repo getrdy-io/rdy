@@ -105,9 +105,15 @@ async fn ask_one(
     index: usize,
     name: &str,
     want_v6: bool,
+    first_took: &mut Duration,
 ) -> Result<NsAnswer, CheckError> {
     let mut over_tcp = false;
-    let mut first = match exchange(ctx, index, name, Qtype::A, DnsTransport::Udp).await? {
+    // Latency is the time of the first question only: the TCP retry and the AAAA question are not the
+    // nameserver's speed.
+    let before = ctx.remaining();
+    let first = exchange(ctx, index, name, Qtype::A, DnsTransport::Udp).await?;
+    *first_took = before.saturating_sub(ctx.remaining());
+    let mut first = match first {
         Exchange::Over(answer) => return Ok(answer),
         Exchange::Reply(reply) => reply,
     };
@@ -166,14 +172,19 @@ pub(super) async fn ask_all(
             });
             continue;
         }
-        let before = ctx.remaining();
-        let answer = match ctx.within(left, ask_one(ctx, index, name, want_v6)).await {
+        let mut took = Duration::ZERO;
+        // The check's own budget for this name ran out: that is `NotTried`, not a nameserver's timeout.
+        // A nameserver that does not answer is `Timeout` from the facade, inside `ask_one`.
+        let answer = match ctx
+            .within(left, ask_one(ctx, index, name, want_v6, &mut took))
+            .await
+        {
             Some(done) => done?,
-            None => NsAnswer::Timeout,
+            None => NsAnswer::NotTried,
         };
         out.push(NsResult {
             index,
-            took: before.saturating_sub(ctx.remaining()),
+            took,
             answer,
         });
     }

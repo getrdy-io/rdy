@@ -1,5 +1,5 @@
 {
   "symlinks": {
-    "etc/resolv.conf": "/run/NetworkManager/resolv.conf"
+    "etc/resolv.conf": "/run/dnsmasq/resolv.conf"
   }
 }

@@ -61,15 +61,19 @@ fn push_once(list: &mut Vec<String>, text: String) {
     }
 }
 
-/// Whether the addresses a nameserver gave are the system's, within the families that were asked.
-fn same_set(system: &[IpAddr], direct: &[IpAddr], asked_v6: bool) -> bool {
+/// Whether the addresses a nameserver gave share at least one address with the system answer, within the
+/// families that were asked. A CDN, a round-robin name or a geo name gives different but overlapping sets
+/// from different resolvers, and that is not split horizon. Two sets with nothing in common are.
+fn overlaps(system: &[IpAddr], direct: &[IpAddr], asked_v6: bool) -> bool {
     let keep = |ip: &&IpAddr| asked_v6 || ip.is_ipv4();
-    let mut a: Vec<&IpAddr> = system.iter().filter(keep).collect();
-    let mut b: Vec<&IpAddr> = direct.iter().filter(keep).collect();
-    a.sort();
-    b.sort();
-    a == b
+    system
+        .iter()
+        .filter(keep)
+        .any(|ip| direct.iter().filter(keep).any(|d| d == ip))
 }
+
+/// The text of the `sss` finding (03, net.dns). M1-154 builds on it, so the words are fixed here.
+pub(super) const SSS_WARNING: &str = "The `hosts:` line of `/etc/nsswitch.conf` lists `sss`: every lookup asks sssd first, and a stopped or slow sssd stalls them";
 
 /// The positions of the nameservers that said NXDOMAIN for this name.
 pub(super) fn nxdomain_positions(l: &Looked) -> Vec<usize> {
@@ -128,7 +132,7 @@ pub(super) fn assess(
             match rcode {
                 Rcode::NoError => {
                     replied_ok += 1;
-                    if !same_set(system, addrs, *asked_v6) {
+                    if !overlaps(system, addrs, *asked_v6) {
                         differing.push(r.index + 1);
                     }
                 }
@@ -140,7 +144,7 @@ pub(super) fn assess(
             push_once(
                 &mut out.warns,
                 format!(
-                    "{} resolves differently by nameserver (split horizon): {} gives other addresses than the system resolver",
+                    "{} resolves differently by nameserver (split horizon): {} gives no address the system resolver gives",
                     code(&l.name),
                     positions(&differing)
                 ),
@@ -296,19 +300,25 @@ pub(super) fn assess(
         ));
     }
 
-    nsswitch(&mut out, rules, looked, machine);
+    nsswitch(&mut out, rules, looked, machine, max_latency);
     out
 }
 
 /// The `nsswitch.conf` `hosts:` findings.
-fn nsswitch(out: &mut Assessment, rules: &[Rule], looked: &[Looked], machine: &Machine) {
+fn nsswitch(
+    out: &mut Assessment,
+    rules: &[Rule],
+    looked: &[Looked],
+    machine: &Machine,
+    max_latency: Duration,
+) {
     let Some(hosts) = machine.hosts else { return };
     let trouble = looked.iter().any(|l| {
         matches!(
             l.answer,
             Answer::NotFound | Answer::Timeout | Answer::Failed(_)
         )
-    }) || looked.iter().any(|l| l.took > Duration::from_millis(500));
+    }) || looked.iter().any(|l| l.took > max_latency);
     if !hosts.has_dns {
         let text = "The `hosts:` line of `/etc/nsswitch.conf` lists neither `dns` nor `resolve`, so no name is ever sent to a nameserver";
         if trouble {
@@ -335,7 +345,7 @@ fn nsswitch(out: &mut Assessment, rules: &[Rule], looked: &[Looked], machine: &M
         }
     }
     if hosts.has_sss {
-        let text = "The `hosts:` line of `/etc/nsswitch.conf` lists `sss`: every lookup asks sssd first, and a stopped or slow sssd stalls them";
+        let text = SSS_WARNING;
         if trouble {
             out.warns.push(text.to_owned());
             out.fixes.push("Check `systemctl status sssd`. If sssd does not serve hosts here, remove `sss` from the `hosts:` line of `/etc/nsswitch.conf`.".to_owned());
