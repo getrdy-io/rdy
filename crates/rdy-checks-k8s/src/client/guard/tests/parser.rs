@@ -1036,6 +1036,21 @@ fn decoded_selector_and_token_values_are_checked() {
 fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
     // The terms of a required field selector still count after decoding, and a bad extra term refuses
     // the whole selector instead of hiding behind the good one.
+    let pods = "/api/v1/pods";
+    assert_eq!(
+        judge_get(&format!("{pods}?fieldSelector=status.phase%21%3DFailed")),
+        Ok(())
+    );
+    assert_eq!(
+        judge_get(&format!(
+            "{pods}?fieldSelector=status.phase%21%3DFailed%2Cx"
+        )),
+        Err(RULE_QUERY)
+    );
+    assert_eq!(
+        judge_get(&format!("{pods}?fieldSelector=status.phase%21%3DFailed%0A")),
+        Err(RULE_QUERY)
+    );
     let pods = "/api/v1/namespaces/app/events";
     assert_eq!(
         judge_get(&format!(

@@ -13,7 +13,8 @@
 //! - Pods per node (`allocatable.pods`) is its own problem with its own fix.
 //! - Pressure conditions on a counted node warn.
 //! - `min_zones` blocks. Without a zone label on any counted node it is "not evaluated" (partial).
-//! - `free` is not evaluated here (it needs the pod list, M1-159), so a spec that holds it is partial.
+//! - `free` is judged by [`super::free`]: the counted nodes' allocatable minus the pods' requests. Short is a
+//!   block, below the 120% margin a warn, and a Pod list that could not be read is partial, never a pass.
 //!
 //! The 120% margin of 03 belongs to `free`. It is not applied to `per_node`: `cpu: 7` must pass on a node
 //! that shows 7910m.
@@ -26,6 +27,7 @@ use serde_json::{Value, json};
 
 use super::facts::{Excluded, NodeFacts, Platform, RESOURCES, Resource, command_arg, shown};
 use super::fix;
+use super::free::{self, FreeRead};
 use crate::namespace::amount::{Amount, show};
 
 /// The most nodes listed in the result.
@@ -117,7 +119,7 @@ impl Needs {
 
 /// An amount for a sentence: sizes in bytes are rounded to a tenth of a Gi (or whole Mi), so `29567452Ki`
 /// reads `28.2Gi`. The result keeps the exact text ([`show`]).
-fn human(amount: Amount, bytes: bool) -> String {
+pub(super) fn human(amount: Amount, bytes: bool) -> String {
     const GI: i128 = 1 << 30;
     const MI: i128 = 1 << 20;
     if !bytes {
@@ -269,6 +271,7 @@ pub(super) fn finish(
     found: &Assessment<'_>,
     scaler: Option<&Scaler>,
     cut: bool,
+    pods: &FreeRead,
 ) -> Finding {
     let mut problems: Vec<Problem> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
@@ -298,11 +301,26 @@ pub(super) fn finish(
     pressure(found, &mut problems);
     zones(params, found, cut, &mut problems, &mut unverified);
 
-    if params.free.is_some() {
-        unverified.push(
-            "free capacity was not evaluated: it needs the pod requests, which this check does not read yet"
-                .to_owned(),
-        );
+    let mut grants: Vec<String> = Vec::new();
+    let mut free_observed = Value::Null;
+    let mut free_fix: Option<String> = None;
+    if let Some(free_need) = &params.free {
+        let verdict = free::judge(free_need, &found.counted, pods);
+        for short in verdict.short {
+            problems.push(Problem {
+                level: if short.warn_only {
+                    Level::Warn
+                } else {
+                    Level::Fail
+                },
+                text: short.text,
+                fix: free::fix_short(),
+            });
+        }
+        unverified.extend(verdict.unverified);
+        grants = verdict.grants;
+        free_fix = verdict.fix;
+        free_observed = verdict.observed;
     }
     if cut {
         unverified.push(format!(
@@ -339,10 +357,17 @@ pub(super) fn finish(
         finding = finding.with_note(note);
     }
     if !unverified.is_empty() {
-        finding = finding.with_partial(Partial::new(Vec::new(), unverified.join("; ")));
+        finding = finding.with_partial(
+            Partial::new(Vec::new(), unverified.join("; ")).with_missing_grants(grants),
+        );
+    }
+    if problems.is_empty()
+        && let Some(fix) = free_fix
+    {
+        finding = finding.with_fix(fix);
     }
     finding
-        .with_observed(observed(params, found, scaler, cut))
+        .with_observed(observed(found, scaler, cut, free_observed))
         .with_expected(expected(params))
 }
 
@@ -649,12 +674,7 @@ fn amount_pair(node: &NodeFacts, resource: Resource) -> Value {
     })
 }
 
-fn observed(
-    params: &K8sNodes,
-    found: &Assessment<'_>,
-    scaler: Option<&Scaler>,
-    cut: bool,
-) -> Value {
+fn observed(found: &Assessment<'_>, scaler: Option<&Scaler>, cut: bool, free: Value) -> Value {
     let mut excluded = serde_json::Map::new();
     for (reason, names) in &found.excluded {
         excluded.insert(reason.field().to_owned(), json!(names.len()));
@@ -719,7 +739,7 @@ fn observed(
             Some(Scaler::Unknown(_)) => json!("not known"),
             None => Value::Null,
         },
-        "free": params.free.as_ref().map(|_| "not evaluated"),
+        "free": free,
     })
 }
 
@@ -743,6 +763,9 @@ fn expected(params: &K8sNodes) -> Value {
     }
     if !per_node.is_empty() {
         out.insert("per_node".to_owned(), Value::Object(per_node));
+    }
+    if let Some(free) = &params.free {
+        out.insert("free".to_owned(), free::expected(free));
     }
     Value::Object(out)
 }

@@ -13,14 +13,17 @@
 //!   selector, so no selector has to cover every spelling. A group in `/apis` says the autoscaler is
 //!   installed, not that it can add the nodes the product needs: the warning says "not verified".
 //!
-//! Not read: the `cluster-autoscaler-status` ConfigMap that GKE Standard and AKS keep in `kube-system`.
+//! Not read, and why:
+//!
+//! - the `cluster-autoscaler-status` ConfigMap that GKE Standard and AKS keep in `kube-system`.
 //!   The guard allows no `ConfigMap` read, and adding one needs the Appendix B table, the example role and
 //!   a security review. GKE node auto-provisioning is seen by its `nap-` node pools instead.
 //!
 //! Nothing is created. The rules are in [`judge`]. How this build differs from 03:
 //!
-//! - **Free capacity** (`free`, from pod requests) is M1-159. A spec that holds `free` gets a partial that
-//!   says it was not evaluated, so it is never a pass.
+//! - **Free capacity** (`free`, from pod requests, M1-159) reads the Pod list only when the spec holds
+//!   `free` and a node counts: `status.phase!=Succeeded,status.phase!=Failed`, kept to node name, phase and
+//!   requests. A forbidden, cut or unreadable list is "not evaluated" (partial), never a pass. See [`free`].
 //! - **A forbidden or failing Node list** is a partial with the grant `list nodes`, never a block.
 //! - **`per_node` without `min_ready`** means every counted node, as the spec reference says. With
 //!   `min_ready`, that many counted nodes.
@@ -31,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::core::v1::Node;
+use k8s_openapi::api::core::v1::{Node, Pod};
 use kube::api::ListParams;
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
@@ -42,9 +45,11 @@ use rdy_spec::check::K8sNodes;
 use crate::client::list::list_all;
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
+use facts::command_arg;
 
 mod facts;
 mod fix;
+mod free;
 mod judge;
 
 #[cfg(test)]
@@ -53,6 +58,7 @@ mod tests;
 mod unit_tests;
 
 use facts::NodeFacts;
+use free::{FreeRead, PHASE_SELECTOR, PodsRead};
 use judge::{Assessment, Scaler};
 
 /// Below this much time left, the optional reads are skipped.
@@ -210,7 +216,97 @@ impl NodesCheck {
         } else {
             None
         };
-        Ok(judge::finish(&self.params, &found, scaler.as_ref(), cut))
+        let pods = match &self.params.free {
+            None => FreeRead::NotAsked,
+            Some(_) if found.counted.is_empty() => FreeRead::NoNodes,
+            Some(_) => {
+                self.read_pods(&client, &mapper, ctx, &found.counted)
+                    .await?
+            }
+        };
+        Ok(judge::finish(
+            &self.params,
+            &found,
+            scaler.as_ref(),
+            cut,
+            &pods,
+        ))
+    }
+
+    /// Reads the pods that hold requests on the counted nodes: one cluster-wide list, and when that list
+    /// was cut, one list per counted node (at most [`free::MAX_NODE_LISTS`]).
+    async fn read_pods(
+        &self,
+        client: &ReadOnlyClient,
+        mapper: Mapper<'_>,
+        ctx: &CheckContext,
+        counted: &[&NodeFacts],
+    ) -> Result<FreeRead, CheckError> {
+        let not_evaluated =
+            |why: String, grants: Vec<String>| Ok(FreeRead::NotEvaluated { why, grants });
+        if out_of_time(ctx) {
+            return not_evaluated("the check ran out of time".to_owned(), Vec::new());
+        }
+        let params = ListParams::default().fields(PHASE_SELECTOR);
+        let all = sort(mapper, list_all(&client.all::<Pod>(), &params).await, |l| l)?;
+        let listed = match all {
+            Read::Ok(listed) => listed,
+            Read::Forbidden => {
+                return not_evaluated(
+                    "the identity may not list pods".to_owned(),
+                    vec!["list pods".to_owned()],
+                );
+            }
+            other => return not_evaluated(other.why_discovery(), Vec::new()),
+        };
+        let mut read = PodsRead::default();
+        if !listed.partial {
+            read.add(&listed.items);
+            return Ok(FreeRead::Read(read));
+        }
+        // The cluster-wide list was cut. A node's own list is short, so each counted node is asked for.
+        if counted.len() > free::MAX_NODE_LISTS {
+            return not_evaluated(
+                format!(
+                    "the cluster has too many pods to list at once, and {} counted nodes are more than the {} that are listed one by one",
+                    counted.len(),
+                    free::MAX_NODE_LISTS
+                ),
+                Vec::new(),
+            );
+        }
+        read.by_node_lists();
+        for node in counted {
+            let name = command_arg(&node.name, "");
+            if name.is_empty() {
+                return not_evaluated(
+                    "a counted node has a name that cannot go into a field selector".to_owned(),
+                    Vec::new(),
+                );
+            }
+            if out_of_time(ctx) {
+                return not_evaluated("the check ran out of time".to_owned(), Vec::new());
+            }
+            let params =
+                ListParams::default().fields(&format!("spec.nodeName={name},{PHASE_SELECTOR}"));
+            match sort(mapper, list_all(&client.all::<Pod>(), &params).await, |l| l)? {
+                Read::Ok(one) if !one.partial => read.add(&one.items),
+                Read::Ok(_) => {
+                    return not_evaluated(
+                        "a node has too many pods to list".to_owned(),
+                        Vec::new(),
+                    );
+                }
+                Read::Forbidden => {
+                    return not_evaluated(
+                        "the identity may not list pods".to_owned(),
+                        vec!["list pods".to_owned()],
+                    );
+                }
+                other => return not_evaluated(other.why_discovery(), Vec::new()),
+            }
+        }
+        Ok(FreeRead::Read(read))
     }
 
     /// Looks for a node autoscaler, cheapest evidence first. The first one found ends the search.

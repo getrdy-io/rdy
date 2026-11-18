@@ -68,13 +68,31 @@ impl Amount {
     }
 
     /// Zero when the amount is below it.
-    pub(super) fn at_least_zero(self) -> Self {
+    pub(crate) fn at_least_zero(self) -> Self {
         Self(self.0.max(0))
     }
 
     /// `self` minus `other`. Saturates, so a hostile pair cannot overflow.
-    pub(super) fn minus(self, other: Self) -> Self {
+    pub(crate) fn minus(self, other: Self) -> Self {
         Self(self.0.saturating_sub(other.0))
+    }
+}
+
+impl Amount {
+    /// `self` plus `other`. Saturates, so a hostile pair cannot overflow.
+    pub(crate) fn plus(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
+    /// `self` times 6/5, rounded up: the 120% margin of `k8s.nodes` free capacity.
+    pub(crate) fn with_margin(self) -> Self {
+        let scaled = self.0.saturating_mul(6);
+        Self(scaled / 5 + i128::from(scaled % 5 != 0))
+    }
+
+    /// Zero.
+    pub(crate) fn zero() -> Self {
+        Self(0)
     }
 }
 

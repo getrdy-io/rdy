@@ -83,7 +83,9 @@ drift and on a file the script did not write): `healthy` (8 vCPU nodes at 7910m)
 Fargate, virtual, a tainted GPU pool and a control plane), `prefer-no-schedule`, `arch`, `selector`,
 `single-zone`, `no-zones`, `pressure`, the `scaler-*` cases (Karpenter group, a cluster-autoscaler deployment,
 none, unreadable, Auto Mode and Karpenter node labels, the `gk3-` prefix, a node too small), `forbidden`,
-`empty`, `paged`, `capped` and `hostile`.
+`empty`, `paged`, `capped` and `hostile`. The `free-*` cases (M1-159) add a Pod list for the free capacity half:
+`free-ok`, `free-90pct`, `free-margin`, `free-effective` (init, sidecar and overhead), `free-forbidden`, `free-capped` and
+`free-capped-node` (the cut list read node by node), and `free-bad-request`.
 `checks/k8s.rbac/` holds 18 clusters (`all-allowed`, `two-denied`, `escalate-denied`, `escalate-allowed`,
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
