@@ -340,7 +340,20 @@ pub fn write_raw_bounded(stream: RawStream, bytes: &[u8]) {
 }
 
 fn write_notice() {
-    write_raw_bounded(RawStream::Stderr, NOTICE.as_bytes());
+    let terminal = io::IsTerminal::is_terminal(&io::stderr());
+    write_raw_bounded(RawStream::Stderr, &notice_bytes(terminal));
+}
+
+/// The notice as written. On a terminal it starts with a newline, because the watchdog fires from
+/// another thread and the cursor may be after a line that is still on screen (the static "Running N
+/// checks..." line, a prompt). The same rule as the Ctrl-C path in `rdy-cli`.
+fn notice_bytes(terminal: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(NOTICE.len() + 1);
+    if terminal {
+        bytes.push(b'\n');
+    }
+    bytes.extend_from_slice(NOTICE.as_bytes());
+    bytes
 }
 
 #[cfg(unix)]
