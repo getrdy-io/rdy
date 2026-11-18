@@ -12,7 +12,7 @@
 # - Every `crates/rdy-checks-*` crate has a section. A new check crate fails the test until it has one.
 # - A change to this file needs the `security-review` label (CODEOWNERS covers /ci/).
 # - Never add tokio, cap-std, cap-primitives, rustix, nix, socket2, hyper, hyper-util, walkdir, tempfile,
-#   sysinfo, which, ureq, reqwest or hickory-*. The test refuses them. A check needs the machine through
+#   sysinfo, which, ureq, reqwest, hickory-resolver, hickory-client or hickory-net. The test refuses them. hickory-proto is listed for rdy-checks-net only. A check needs the machine through
 #   the Probe, not through a crate.
 # - One section, then one `allow = [..]` line, sorted. Nothing else is read.
 
@@ -21,9 +21,11 @@
 [rdy-checks-host]
 allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror", "toml"]
 
-# rdy-checks-net: the base list, and x509-parser for the TLS interception check (02).
+# rdy-checks-net: the base list, x509-parser for the TLS interception check (02), and hickory-proto for the
+# per-nameserver lookups of net.dns (M1-155, ADR 0051). hickory-proto is a message codec built with no
+# features: it opens no socket, and the bytes go through Probe::nameserver_exchange.
 [rdy-checks-net]
-allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror", "x509-parser"]
+allow = ["futures-util", "hickory-proto", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror", "x509-parser"]
 
 # rdy-checks-k8s: the base list, and the only crate that may depend on kube (deny.toml) and k8s-openapi.
 # `secrecy` holds kubeconfig token values until they are handed to the known-secret set (M1-102, M1-061).

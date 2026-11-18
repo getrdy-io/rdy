@@ -14,8 +14,7 @@ use hickory_proto::rr::rdata::{A, AAAA};
 use hickory_proto::rr::{RData, Record, RecordType};
 use rdy_engine::check::{Level, Os};
 use rdy_engine::probe::sock::{DnsTransport, RULE_NS_ADDRESS};
-use rdy_engine::testing::Replay;
-use rdy_engine::testing::replay::DnsScript;
+use rdy_engine::testing::{DnsScript, Replay, TestRun};
 use rdy_spec::result::{ActionKind, ActionOutcome, Status};
 use serde_json::{Value, json};
 
@@ -57,6 +56,27 @@ fn zone(
     }
 }
 
+/// The scripted nameservers of a golden case, at the addresses of its `resolv.conf`.
+pub(super) fn with_servers(case: &str, replay: Replay) -> Replay {
+    const WEB: &[(&str, &[&str])] = &[("web.acme.test", &["192.0.2.10"])];
+    match case {
+        "split-horizon" => replay
+            .dns_server(addr(NS1), zone(WEB))
+            .dns_server(addr(NS2), zone(&[("web.acme.test", &["198.51.100.7"])])),
+        "slow-first-nameserver" => replay
+            .dns_server(addr(NS1), zone(WEB))
+            .dns_server(addr(NS2), zone(WEB))
+            .dns_delay(addr(NS1), Duration::from_millis(2000)),
+        "direct-nxdomain" => replay
+            .dns_server(addr(NS1), zone(&[]))
+            .dns_server(addr(NS2), zone(&[])),
+        "nsswitch-sss-mdns" => replay
+            .dns_server(addr(NS1), zone(&[("svc.cluster.local", &["192.0.2.20"])]))
+            .dns_server(addr(NS2), zone(&[("svc.cluster.local", &["192.0.2.20"])])),
+        _ => replay,
+    }
+}
+
 fn names(list: &[&str]) -> Value {
     json!(list)
 }
@@ -79,9 +99,12 @@ async fn agreeing_nameservers_pass_and_the_evidence_names_positions_only() {
     assert_eq!(rows[0]["rcode"], "NOERROR");
     assert_eq!(rows[1]["position"], 2);
     assert_eq!(finding.observed["direct"]["nameservers_asked"], 2);
-    let text = ran.everything_text();
+    let text = ran.result_text();
     // The nameserver addresses are never copied into the result or the log text.
-    assert!(!text.contains("192.0.2.53") && !text.contains("192.0.2.54"), "{text}");
+    assert!(
+        !text.contains("192.0.2.53") && !text.contains("192.0.2.54"),
+        "{text}"
+    );
     // Two nameservers, A each (the system answer has no IPv6, so no AAAA).
     let dns = ran
         .run
@@ -101,15 +124,27 @@ async fn split_horizon_warns() {
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
-    assert!(finding.message.contains("split horizon"), "{}", finding.message);
-    assert!(finding.message.contains("nameserver 2"), "{}", finding.message);
-    assert!(!finding.message.contains("nameserver 1"), "{}", finding.message);
+    assert!(
+        finding.message.contains("split horizon"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        finding.message.contains("nameserver 2"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        !finding.message.contains("nameserver 1"),
+        "{}",
+        finding.message
+    );
     let fix = finding.fix.as_deref().expect("a fix");
     assert!(fix.contains("/etc/resolv.conf"), "{fix}");
     assert_eq!(ran.result().status, Status::Warn);
     // The addresses of the answers are evidence. The nameservers' own addresses are not.
     assert_eq!(positions(&ran, 0)[1]["addresses"], json!(["198.51.100.7"]));
-    assert!(!ran.everything_text().contains("192.0.2.54"));
+    assert!(!ran.result_text().contains("192.0.2.54"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -140,8 +175,12 @@ async fn a_silent_first_nameserver_warns_with_the_timeout_text() {
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert!(
-        finding.message.contains("nameserver 1 did not answer in time")
-            && finding.message.contains("slow first hop adds a timeout to every lookup"),
+        finding
+            .message
+            .contains("nameserver 1 did not answer in time")
+            && finding
+                .message
+                .contains("slow first hop adds a timeout to every lookup"),
         "{}",
         finding.message
     );
@@ -175,8 +214,16 @@ async fn nxdomain_while_the_system_finds_the_name_warns() {
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
-    assert!(finding.message.contains("answered NXDOMAIN"), "{}", finding.message);
-    assert!(finding.message.contains("/etc/hosts"), "{}", finding.message);
+    assert!(
+        finding.message.contains("answered NXDOMAIN"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        finding.message.contains("/etc/hosts"),
+        "{}",
+        finding.message
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -226,7 +273,9 @@ async fn a_reply_to_another_question_is_a_bad_reply_not_an_answer() {
 #[tokio::test(start_paused = true)]
 async fn garbage_from_a_nameserver_is_a_bad_reply() {
     let replay = case("split-horizon")
-        .dns_server(addr(NS1), |_, _| DnsScript::Answer(vec![0xde, 0xad, 0xbe, 0xef]))
+        .dns_server(addr(NS1), |_, _| {
+            DnsScript::Answer(vec![0xde, 0xad, 0xbe, 0xef])
+        })
         .dns_server(addr(NS2), zone(&[("web.acme.test", &["192.0.2.10"])]));
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     assert_eq!(positions(&ran, 0)[0]["status"], "bad_reply");
@@ -242,7 +291,7 @@ async fn a_nameserver_in_a_refused_range_is_skipped_with_the_facade_text() {
         .file("/etc/resolv.conf", "nameserver 169.254.169.254\n")
         .file("/etc/nsswitch.conf", "hosts: files dns\n")
         .command(
-            "/usr/bin/getent",
+            "getent",
             &["ahosts", "--", "web.acme.test"],
             0,
             "192.0.2.10 STREAM web.acme.test\n192.0.2.10 DGRAM\n192.0.2.10 RAW\n",
@@ -263,11 +312,18 @@ async fn a_nameserver_in_a_refused_range_is_skipped_with_the_facade_text() {
     assert_eq!(row["reason"], "nameserver in a refused range");
     let partial = finding.partial.as_ref().expect("a partial result");
     assert!(
-        partial.note.contains("nameserver 1 was not queried directly: nameserver in a refused range"),
+        partial
+            .note
+            .contains("nameserver 1 was not queried directly: nameserver in a refused range"),
         "{}",
         partial.note
     );
-    assert!(finding.notes.iter().any(|n| n.contains("nameserver in a refused range")));
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("nameserver in a refused range"))
+    );
     // The facade logged the refusal as a denied dns call.
     let denied = ran
         .run
@@ -277,8 +333,8 @@ async fn a_nameserver_in_a_refused_range_is_skipped_with_the_facade_text() {
         .filter(|a| a.kind == ActionKind::Dns && a.outcome == ActionOutcome::Denied)
         .count();
     assert_eq!(denied, 1);
-    assert!(!ran.everything_text().contains("169.254.169.254"));
-    assert_eq!(ran.result().status, Status::Partial);
+    assert!(!ran.result_text().contains("169.254.169.254"));
+    assert!(ran.result().partial.is_some());
 }
 
 #[tokio::test(start_paused = true)]
@@ -287,16 +343,19 @@ async fn the_azure_nameserver_is_asked_and_never_named() {
         .file("/etc/resolv.conf", "nameserver 168.63.129.16\n")
         .file("/etc/nsswitch.conf", "hosts: files dns\n")
         .command(
-            "/usr/bin/getent",
+            "getent",
             &["ahosts", "--", "web.acme.test"],
             0,
             "192.0.2.10 STREAM web.acme.test\n",
         )
-        .dns_server(addr("168.63.129.16:53"), zone(&[("web.acme.test", &["192.0.2.10"])]));
+        .dns_server(
+            addr("168.63.129.16:53"),
+            zone(&[("web.acme.test", &["192.0.2.10"])]),
+        );
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
     assert_eq!(positions(&ran, 0)[0]["status"], "replied");
-    assert!(!ran.everything_text().contains("168.63.129.16"));
+    assert!(!ran.result_text().contains("168.63.129.16"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -305,12 +364,15 @@ async fn a_name_with_aaaa_is_compared_in_both_families() {
         .file("/etc/resolv.conf", "nameserver 192.0.2.53\n")
         .file("/etc/nsswitch.conf", "hosts: files dns\n")
         .command(
-            "/usr/bin/getent",
+            "getent",
             &["ahosts", "--", "web.acme.test"],
             0,
             "2001:db8::10 STREAM web.acme.test\n192.0.2.10 STREAM\n",
         )
-        .dns_server(addr(NS1), zone(&[("web.acme.test", &["192.0.2.10", "2001:db8::10"])]));
+        .dns_server(
+            addr(NS1),
+            zone(&[("web.acme.test", &["192.0.2.10", "2001:db8::10"])]),
+        );
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
     assert_eq!(positions(&ran, 0)[0]["aaaa_asked"], true);
@@ -319,15 +381,16 @@ async fn a_name_with_aaaa_is_compared_in_both_families() {
 
 #[tokio::test(start_paused = true)]
 async fn nsswitch_mdns_with_a_local_name_and_sss_warn() {
-    let replay = case("nsswitch-sss-mdns").dns_server(
-        addr(NS1),
-        zone(&[("svc.cluster.local", &["192.0.2.20"])]),
-    ).dns_server(addr(NS2), zone(&[("svc.cluster.local", &["192.0.2.20"])]));
+    let replay = case("nsswitch-sss-mdns")
+        .dns_server(addr(NS1), zone(&[("svc.cluster.local", &["192.0.2.20"])]))
+        .dns_server(addr(NS2), zone(&[("svc.cluster.local", &["192.0.2.20"])]));
     let ran = run_on(replay, names(&["svc.cluster.local"]), json!({})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert!(
-        finding.message.contains("`svc.cluster.local` ends in `.local`")
+        finding
+            .message
+            .contains("`svc.cluster.local` ends in `.local`")
             && finding.message.contains("[NOTFOUND=return]"),
         "{}",
         finding.message
@@ -335,10 +398,17 @@ async fn nsswitch_mdns_with_a_local_name_and_sss_warn() {
     let fix = finding.fix.as_deref().expect("a fix");
     assert!(fix.contains("hosts: files dns"), "{fix}");
     // sss is only a note while every name resolves quickly.
-    assert!(finding.notes.iter().any(|n| n.contains("`sss`")), "{:?}", finding.notes);
+    assert!(
+        finding.notes.iter().any(|n| n.contains("`sss`")),
+        "{:?}",
+        finding.notes
+    );
     assert!(!finding.message.contains("sss"));
     assert_eq!(finding.observed["direct"]["nsswitch_hosts"]["sss"], true);
-    assert_eq!(finding.observed["direct"]["nsswitch_hosts"]["mdns_return_before_dns"], true);
+    assert_eq!(
+        finding.observed["direct"]["nsswitch_hosts"]["mdns_return_before_dns"],
+        true
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -346,12 +416,17 @@ async fn sss_warns_when_a_name_does_not_resolve() {
     let replay = Replay::for_os(Os::Linux)
         .file("/etc/resolv.conf", "nameserver 192.0.2.53\n")
         .file("/etc/nsswitch.conf", "hosts: files sss dns\n")
-        .command("/usr/bin/getent", &["ahosts", "--", "gone.acme.test"], 2, "")
+        .command("getent", &["ahosts", "--", "gone.acme.test"], 2, "")
         .dns_server(addr(NS1), zone(&[]));
     let ran = run_on(replay, names(&["gone.acme.test"]), json!({})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Fail);
-    assert!(finding.fix.as_deref().is_some_and(|f| f.contains("systemctl status sssd")));
+    assert!(
+        finding
+            .fix
+            .as_deref()
+            .is_some_and(|f| f.contains("systemctl status sssd"))
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -362,7 +437,7 @@ async fn the_stub_and_a_long_list_are_notes() {
             "nameserver 127.0.0.53\nnameserver 192.0.2.1\nnameserver 192.0.2.2\nnameserver 192.0.2.3\n",
         )
         .command(
-            "/usr/bin/getent",
+            "getent",
             &["ahosts", "--", "web.acme.test"],
             0,
             "192.0.2.10 STREAM web.acme.test\n",
@@ -373,19 +448,32 @@ async fn the_stub_and_a_long_list_are_notes() {
     let ran = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     let finding = ran.finding();
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
-    assert!(finding.notes.iter().any(|n| n.contains("systemd-resolved stub")));
-    assert!(finding.notes.iter().any(|n| n.contains("lists 4 nameservers")));
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("systemd-resolved stub"))
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("lists 4 nameservers"))
+    );
     assert_eq!(finding.observed["direct"]["nameservers_asked"], 3);
-    assert_eq!(finding.observed["direct"]["resolv_conf"]["stub_first"], true);
+    assert_eq!(
+        finding.observed["direct"]["resolv_conf"]["stub_first"],
+        true
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn nothing_is_asked_without_network_and_off_linux() {
     // `--no-network`: the need is missing, so the check is skipped before any query.
-    let replay = case("split-horizon")
-        .dns_server(addr(NS1), zone(&[("web.acme.test", &["192.0.2.10"])]));
+    let replay =
+        case("split-horizon").dns_server(addr(NS1), zone(&[("web.acme.test", &["192.0.2.10"])]));
     let ran = run_with(
-        rdy_engine::testing::TestRun::new(replay),
+        TestRun::new(replay),
         names(&["web.acme.test"]),
         json!({}),
         Os::Linux,
@@ -393,16 +481,22 @@ async fn nothing_is_asked_without_network_and_off_linux() {
     )
     .await;
     assert!(ran.outcome.is_err());
-    let dns = ran.run.action_log().actions.iter().filter(|a| a.kind == ActionKind::Dns).count();
+    let dns = ran
+        .run
+        .action_log()
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Dns)
+        .count();
     assert_eq!(dns, 0);
 
     // macOS has no nameserver source yet: the system answer only, no direct rows.
-    let replay = Replay::for_os(Os::MacOs).name("web.acme.test", &["192.0.2.10"]);
+    let replay = case("getent-missing");
     let ran = run_with(
-        rdy_engine::testing::TestRun::new(replay),
+        TestRun::new(replay),
         names(&["web.acme.test"]),
         json!({}),
-        Os::MacOs,
+        Os::Macos,
         NET,
     )
     .await;
@@ -424,7 +518,10 @@ async fn the_query_names_only_a_spec_host_over_the_wire() {
             .expect("lock")
             .push((qu.name().to_ascii(), qu.query_type()));
         assert_eq!(m.queries.len(), 1);
-        assert!(m.additionals.is_empty() && m.edns.is_none(), "no OPT record is sent");
+        assert!(
+            m.additionals.is_empty() && m.edns.is_none(),
+            "no OPT record is sent"
+        );
         inner(q, t)
     };
     let replay = case("split-horizon")
@@ -432,5 +529,8 @@ async fn the_query_names_only_a_spec_host_over_the_wire() {
         .dns_server(addr(NS2), zone(&[("web.acme.test", &["192.0.2.10"])]));
     let _ = run_on(replay, names(&["web.acme.test"]), json!({})).await;
     let seen = seen.lock().expect("lock");
-    assert_eq!(seen.as_slice(), [("web.acme.test.".to_owned(), RecordType::A)]);
+    assert_eq!(
+        seen.as_slice(),
+        [("web.acme.test.".to_owned(), RecordType::A)]
+    );
 }

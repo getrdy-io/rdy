@@ -312,7 +312,6 @@ pub(super) fn judge(
 
     let found = split::assess(rules, looked, machine, max_latency);
     slow.extend(found.warns.iter().cloned());
-    notes.extend(found.notes.iter().cloned());
 
     let total = looked.len();
     let tried = total - not_tried;
@@ -388,7 +387,7 @@ pub(super) fn judge(
     for warn in slow {
         finding = finding.with_note(warn);
     }
-    for note in notes {
+    for note in notes.into_iter().chain(found.notes.iter().cloned()) {
         finding = finding.with_note(note);
     }
     let mut partial: Vec<String> = Vec::new();

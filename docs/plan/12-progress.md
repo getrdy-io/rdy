@@ -325,7 +325,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-154 | todo | | musl resolver behaviour fixture for net.dns
 
-- M1-155 | PR #TBD | | Part 1 (facade) built, stacked on PR #72: `Probe::nameserver_exchange` and `nameserver_count`, `Backend::dns_exchange`, the Azure door, Replay `dns_server`, `dns_silent`, `dns_delay`, loopback `DnsServer`, ADR 0051. Deferred to part 2: the check itself (direct lookups, split horizon, resolv.conf and nsswitch analysis, the Skipped mapping and its test, `hickory` and `cargo deny`); macOS and Windows nameserver sources (M2-010).
+- M1-155 | PR #TBD | | Built, stacked on PR #72: part 1 (facade, ADR 0051) and part 2, the check: per-nameserver lookups by index with `hickory-proto` (no features, ADR 0052; deny wrapper, feature pin and lint-wall tests added), reply ID and question checks, `resolv.conf` and `nsswitch.conf` analysis (sss, mDNS with `[NOTFOUND=return]`, no `dns`, stub, more than three nameservers), split horizon against the system answer, slow or dead first nameserver, NXDOMAIN, and a nameserver in a refused range is skipped per nameserver with "nameserver in a refused range" (partial result, system answer kept). Decisions: no OPT record is sent; a refused nameserver is a per-nameserver skip, not a skipped check. Test-only `TestRun::with_deadline`. Deferred: macOS and Windows nameserver sources (M2-010); TCP-only and EDNS probing.
 
 - M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 

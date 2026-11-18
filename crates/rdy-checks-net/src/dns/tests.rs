@@ -56,6 +56,16 @@ impl Ran {
         )
     }
 
+    /// The finding as text, without the action log. The log is the facade's, and it names the nameserver
+    /// it asked (ADR 0051). The result never does.
+    pub(super) fn result_text(&self) -> String {
+        let finding = self.finding();
+        format!(
+            "{} {} {:?} {:?} {:?}",
+            finding.message, finding.observed, finding.fix, finding.notes, finding.partial
+        )
+    }
+
     fn execs(&self) -> usize {
         self.run
             .action_log()
@@ -81,10 +91,19 @@ fn check_of(entry: &CheckSpec) -> DnsCheck {
     }
 }
 
-pub(super) async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Need]) -> Ran {
+pub(super) async fn run_with(
+    run: TestRun,
+    names: Value,
+    extra: Value,
+    os: Os,
+    needs: &[Need],
+) -> Ran {
     let entry = entry(&names, &extra);
     let check = check_of(&entry);
-    let ctx = run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts());
+    let ctx = run.with_deadline(
+        run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts()),
+        Duration::from_secs(60),
+    );
     let outcome = check.run(&ctx).await;
     assert_within_manifest("net.dns", &INFO, &run.action_log());
     Ran {
@@ -187,7 +206,7 @@ async fn a_stopped_getent_is_a_timeout_with_the_resolver_settings() {
         finding.notes
     );
     // The addresses of the nameservers are not copied into the result.
-    assert!(!ran.everything_text().contains("192.0.2.53"));
+    assert!(!ran.result_text().contains("192.0.2.53"));
 }
 
 // ---- the fallback ---------------------------------------------------------------------------------
@@ -346,7 +365,10 @@ fn the_command_table_is_the_only_door_and_lists_net_dns() {
     );
     assert_eq!(INFO.commands.len(), 1);
     assert_eq!(INFO.commands[0].program, "getent");
-    assert_eq!(INFO.peers, &[PeerClass::SpecHosts]);
+    assert_eq!(
+        INFO.peers,
+        &[PeerClass::SpecHosts, PeerClass::SystemResolver]
+    );
     // The table refuses the same names the check does.
     for bad in ["-x", "a b", "a\nb"] {
         assert!(
@@ -708,8 +730,9 @@ macro_rules! expect {
 
 /// Every case of `tests/fixtures/checks/net.dns/`, with the check run by the real scheduler on a paused
 /// clock and given its host set, as `rdy run` gives it. A new directory is a new line here.
-const CASES: [(&str, &str); 14] = [
+const CASES: [(&str, &str); 18] = [
     expect!("aaaa-only"),
+    expect!("direct-nxdomain"),
     expect!("found-dual-stack"),
     expect!("getent-broken"),
     expect!("getent-empty"),
@@ -719,9 +742,12 @@ const CASES: [(&str, &str); 14] = [
     expect!("getent-signal"),
     expect!("mixed"),
     expect!("not-found"),
+    expect!("nsswitch-sss-mdns"),
     expect!("offline"),
     expect!("resolv-link-systemd"),
     expect!("resolv-link-undeclared"),
+    expect!("slow-first-nameserver"),
+    expect!("split-horizon"),
     expect!("timeout"),
 ];
 
@@ -754,7 +780,11 @@ fn run_case(
     fixture
         .ensure_answers("net.dns")
         .expect("it answers net.dns");
-    let test_run = TestRun::for_fixture(&fixture);
+    // The cases that have nameservers in `resolv.conf` get scripted servers (they cannot live in a file).
+    let test_run = TestRun::new(super::direct_tests::with_servers(
+        case,
+        fixture.replay().clone(),
+    ));
     let scheduler = test_run.scheduler(1, fixture.os(), fixture.available_needs());
     let planned = rdy_engine::sched::Planned::new(std::sync::Arc::new(check.clone()), "net.dns")
         .with_hosts(check.hosts());
@@ -796,15 +826,16 @@ fn the_case_list_is_every_directory_of_the_fixtures() {
 
 #[test]
 fn no_case_connects_anywhere() {
-    // The host set carries port 443 as a placeholder, so nothing but exec, lookup and read may appear.
+    // The host set carries port 443 as a placeholder, so nothing but exec, lookup, read and the facade's nameserver `dns` calls may appear.
     for (case, _) in CASES {
         let (_, _, log) = run_case(case);
         for action in &log.actions {
             assert!(
                 action.kind == ActionKind::Exec
                     || action.kind == ActionKind::Lookup
-                    || action.kind == ActionKind::Read,
-                "{case}: {:?} is not exec, lookup or read",
+                    || action.kind == ActionKind::Read
+                    || action.kind == ActionKind::Dns,
+                "{case}: {:?} is not exec, lookup, read or dns",
                 action.kind
             );
         }

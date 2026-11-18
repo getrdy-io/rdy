@@ -90,6 +90,9 @@ pub(super) struct Reply {
 /// A short phrase when the name is not a valid DNS name (an empty label, a label over 63 bytes, a name
 /// over 253 bytes).
 pub(super) fn build_query(name: &str, qtype: Qtype, id: u16) -> Result<Vec<u8>, &'static str> {
+    if name.is_empty() {
+        return Err("the name is not a valid DNS name");
+    }
     let name = Name::from_ascii(name).map_err(|_| "the name is not a valid DNS name")?;
     let mut message = Message::new(id, MessageType::Query, OpCode::Query);
     message.metadata.recursion_desired = true;
@@ -132,7 +135,7 @@ pub(super) fn parse_reply(
     };
     if question.query_type() != qtype.record_type()
         || question.query_class() != DNSClass::IN
-        || !question.name().eq_ignore_root_case(&asked)
+        || !question.name().eq_ignore_root(&asked)
     {
         return Err("the reply answers another question");
     }

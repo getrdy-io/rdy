@@ -24,7 +24,9 @@
 //! log is not empty for the wrong reason.
 //!
 //! The spec uses IP literals, so no resolver is asked: a runner's resolver address is not ours to
-//! allow. Plain `cargo test` runs the `root_*` tests and they return early without root. Where `strace`
+//! allow. It has no `net.dns` entry for the same reason: that check reads the host's own `/etc/resolv.conf`
+//! and asks its nameservers (a stub on `127.0.0.53` included), which the destination rule would flag. The
+//! test `the_fixture_spec_runs_no_dns_check` holds the spec to that (M1-155). Plain `cargo test` runs the `root_*` tests and they return early without root. Where `strace`
 //! or `unshare -n` is unusable they skip, unless `RDY_REQUIRE_ROOT` (the `root` CI job sets it) or
 //! `RDY_REQUIRE_STRACE` is set, which turns a skip into a failure.
 //!
@@ -392,6 +394,16 @@ fn root_run_contacts_only_loopback_and_local_ipc() {
         bad.is_empty(),
         "rdy contacted a non-local destination:\n{}",
         bad.join("\n")
+    );
+}
+
+/// The live legs must not run `net.dns`: it asks the machine's own nameservers, and the destination rule
+/// would flag a stub such as `127.0.0.53`. `net.dns` is covered by fixtures and scripted servers (M1-155).
+#[test]
+fn the_fixture_spec_runs_no_dns_check() {
+    assert!(
+        !SPEC.contains("net.dns"),
+        "net.dns reads the host's resolv.conf and queries its nameservers: keep it out of the strace legs"
     );
 }
 

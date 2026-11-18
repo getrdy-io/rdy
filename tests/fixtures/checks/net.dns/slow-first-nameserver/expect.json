@@ -1,0 +1,73 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "web.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "Nameserver 1 in `/etc/resolv.conf` is slow. Put the nearest nameserver first by changing the DNS servers of the connection (`nmcli con mod <connection> ipv4.dns <servers>` or `/etc/systemd/resolved.conf`), or ask the DNS team why it answers slowly.",
+    "level": "warn",
+    "message": "nameserver 1 took 2000 ms to answer, above 500 ms: a slow first hop adds that time to every lookup",
+    "notes": [
+      "nameserver 1 took 2000 ms to answer, above 500 ms: a slow first hop adds that time to every lookup"
+    ],
+    "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "nsswitch_hosts": {
+          "dns": true,
+          "mdns_return_before_dns": false,
+          "sss": false
+        },
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "web.acme.test",
+          "nameservers": [
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.10"
+              ],
+              "addresses_total": 1,
+              "ms": 2000,
+              "position": 1,
+              "rcode": "NOERROR",
+              "status": "replied"
+            },
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.10"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 2,
+              "rcode": "NOERROR",
+              "status": "replied"
+            }
+          ],
+          "result": "found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

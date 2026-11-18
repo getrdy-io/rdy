@@ -221,6 +221,15 @@ impl TestRun {
         CheckContext::new(key, os, available).with_probe(probe)
     }
 
+    /// `ctx` with a deadline `after` from now, as the scheduler sets one, so `CheckContext::remaining`
+    /// counts down on the tokio clock. A context from this rig has none, so `remaining` is constant; a check
+    /// that measures a latency with it needs this (M1-155).
+    #[cfg(feature = "runtime")]
+    #[must_use]
+    pub fn with_deadline(&self, ctx: CheckContext, after: std::time::Duration) -> CheckContext {
+        ctx.at_deadline(tokio::time::Instant::now() + after)
+    }
+
     /// The run-level probe (`check: null` in the log) for `os`, as the privilege snapshot and the
     /// capability probes use it.
     #[must_use]

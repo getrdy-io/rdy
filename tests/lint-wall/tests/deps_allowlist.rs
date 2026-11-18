@@ -44,7 +44,6 @@ const NEVER: &[&str] = &[
     "ureq",
     "reqwest",
     "hickory-resolver",
-    "hickory-proto",
     "hickory-client",
     "hickory-net",
     "rdy",
@@ -202,6 +201,26 @@ fn only_the_k8s_crate_lists_the_kube_crates_and_only_net_lists_x509() {
             "{name} lists x509-parser; only rdy-checks-net may (02)"
         );
     }
+}
+
+#[test]
+fn only_the_net_crate_lists_the_dns_codec_and_it_builds_without_features() {
+    // hickory-proto is a message codec for net.dns (M1-155). The query goes through the probe facade.
+    for (name, allowed) in allowlist() {
+        assert!(
+            name == "rdy-checks-net" || !allowed.contains("hickory-proto"),
+            "{name} lists hickory-proto; only rdy-checks-net may (deny.toml, ADR 0051)"
+        );
+    }
+    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("hickory-proto"))
+        .expect("a workspace entry for hickory-proto");
+    assert!(
+        line.contains("default-features = false") && !line.contains(", features"),
+        "hickory-proto must be listed with default features off and no others: {line}"
+    );
 }
 
 #[test]

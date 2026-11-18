@@ -60,11 +60,11 @@ use self::judge::Rule;
 use crate::text::{short, soft};
 
 mod direct;
+#[cfg(test)]
+mod direct_tests;
 mod judge;
 mod parse;
 mod split;
-#[cfg(test)]
-mod direct_tests;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -262,11 +262,10 @@ async fn nameserver_count(ctx: &CheckContext) -> Result<Result<usize, String>, C
         Ok(n) => Ok(Ok(n)),
         Err(error) if error.is_no_network() => Err(CheckError::MissingNeed(Need::Network)),
         // The list file is missing, is a link to a place rdy may not read, or this OS has no source yet.
+        // No `/etc/resolv.conf` at all: there is nothing to ask and nothing to report.
+        Err(ProbeError::NotFound) => Ok(Ok(0)),
         Err(
-            ProbeError::NotFound
-            | ProbeError::PermissionDenied
-            | ProbeError::Denied { .. }
-            | ProbeError::Unsupported(_),
+            ProbeError::PermissionDenied | ProbeError::Denied { .. } | ProbeError::Unsupported(_),
         ) => Ok(Err(
             "rdy cannot read the nameserver list on this machine".to_owned()
         )),
