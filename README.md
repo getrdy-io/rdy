@@ -227,7 +227,7 @@ command is this:
 
 ```sh skip=network
 TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
-curl --proto '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
 "$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
 ```
 
@@ -247,7 +247,7 @@ Download, verify and unpack by hand. The archive holds `rdy-<triple>/rdy`. One s
 TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
 BASE=https://github.com/getrdy-io/rdy/releases/download/$TAG
 F=rdy-x86_64-unknown-linux-musl.tar.gz   # pick the file for your platform
-curl -sSfL -O "$BASE/$F" -O "$BASE/SHA256SUMS" -O "$BASE/SHA256SUMS.sigstore.json"
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL -O "$BASE/$F" -O "$BASE/SHA256SUMS" -O "$BASE/SHA256SUMS.sigstore.json"
 cosign verify-blob \
   --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
