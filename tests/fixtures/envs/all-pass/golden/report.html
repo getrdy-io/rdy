@@ -885,7 +885,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">76</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/etc/selinux/config</bdi></td><td>Done, 96 bytes</td></tr>
 <tr><th scope="row">77</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/var/log/audit/audit.log</bdi></td><td>Done, 1070 bytes</td></tr>
 <tr><th scope="row">78</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/module/apparmor/parameters/enabled</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run</bdi></td></tr>
+<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run</bdi></td></tr>
 <tr><th scope="row">80</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>timedatectl</bdi> <bdi>show</bdi> <bdi>-p</bdi> <bdi>NTPSynchronized</bdi> <bdi>-p</bdi> <bdi>NTP</bdi> <bdi>-p</bdi> <bdi>Timezone</bdi></td><td>Done, exit code 0</td></tr>
 <tr><th scope="row">81</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>chronyc</bdi> <bdi>-n</bdi> <bdi>-c</bdi> <bdi>tracking</bdi></td><td>Done, exit code 0</td></tr>
 <tr><th scope="row">82</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp</bdi></td><td>Done, 484 bytes</td></tr>
@@ -938,7 +938,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p>This link carries the product name and nothing else.</p>
 <p>rdy <bdi>&#60;version&#62;</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="6e1707a35b3756c3ca3427c75a8b57f0f8a492dea7897d7e282cf17c2e43d38d">{
+<script type="application/json" id="rdy-result" data-sha256="7b70911f3bb1c779ecfde9824059dc9621cc8252e23602be90244b5a2876f673">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -2643,7 +2643,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "connect",
       "outcome": "failed",
-      "error": "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run",
+      "error": "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run",
       "host": "192.0.2.10",
       "port": 123,
       "proto": "udp"

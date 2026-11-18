@@ -1,0 +1,24 @@
+schema = 1
+name = "no-privileges"
+summary = "The all-pass machine run by an ordinary user: the audit log and other users' sockets are out of reach and there is no kubeconfig"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "all-pass"
+answers = ["host.lsm", "host.ports", "host.security_agents", "host.firewall", "k8s.version"]
+spec = "spec.yaml"
+
+[caps]
+root = false
+network = true
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000005"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "not_ready"
+exit_code = 2

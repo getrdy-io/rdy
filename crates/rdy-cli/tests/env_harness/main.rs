@@ -116,6 +116,133 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
     Ok(())
 }
 
+/// Runs `env` at `jobs = 1`, or `None` on a leg of another OS (these envs are Linux machines).
+fn run_linux_env(env: &str) -> TestResult<Option<driver::EnvRun>> {
+    if Fixture::load(&fixtures_dir(), &format!("envs/{env}"))?.os() != current_os() {
+        eprintln!("env_harness: skipping {env}: it is a Linux machine");
+        return Ok(None);
+    }
+    Ok(Some(driver::run_env(env, 1)?))
+}
+
+/// The ids of the checks of `run` that ended with `status`.
+fn ids_with(run: &driver::EnvRun, status: rdy_spec::result::Status) -> Vec<&str> {
+    let mut ids: Vec<&str> = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| c.status == status)
+        .map(|c| c.id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// M1-118: `warnings-only` exits 1 with two warnings and no block, and no check is partial or skipped.
+#[test]
+fn warnings_only_exits_1_with_two_warnings_and_nothing_else() -> TestResult {
+    use rdy_spec::result::{Status, Verdict};
+    let Some(run) = run_linux_env("warnings-only")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 1, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::ReadyWithWarnings);
+    assert_eq!(run.report.verdict_reason, None);
+    assert_eq!(ids_with(&run, Status::Warn), ["host.lsm", "host.sysctl"]);
+    assert_eq!(run.report.summary.block, 0);
+    assert!(run.report.checks.iter().all(|c| c.partial.is_none()));
+    Ok(())
+}
+
+/// M1-118: `all-block` exits 2 on four blockers: memory, disk, a held port and refused egress.
+#[test]
+fn all_block_exits_2_on_four_blockers() -> TestResult {
+    use rdy_spec::result::{Status, Verdict};
+    let Some(run) = run_linux_env("all-block")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 2, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::NotReady);
+    assert_eq!(run.report.verdict_reason, None, "a block was seen");
+    assert_eq!(
+        ids_with(&run, Status::Block),
+        ["host.disk", "host.memory", "host.ports", "net.egress"]
+    );
+    assert_eq!(run.terminal.lines().last(), Some("NOT READY"));
+    Ok(())
+}
+
+/// M1-118: `no-privileges` (uid 1000, an audit log and other users' sockets out of reach, no kubeconfig)
+/// shows `partial` results, a `missing_need` skip, and no block, so the verdict reason is
+/// `required_check_not_run` and the exit code is 2.
+///
+/// `partial.missing_grants` stays empty here: only the k8s checks fill it, and they need a cluster the
+/// harness cannot serve (no kube mock outside `rdy-checks-k8s`), so its rendering is not proven in this
+/// env.
+#[test]
+fn no_privileges_shows_partial_results_and_a_missing_need_skip() -> TestResult {
+    use rdy_spec::result::{Need, SkipKind, Status, Verdict, VerdictReason};
+    let Some(run) = run_linux_env("no-privileges")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 2, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::NotReady);
+    assert_eq!(
+        run.report.verdict_reason,
+        Some(VerdictReason::RequiredCheckNotRun)
+    );
+    assert_eq!(run.report.summary.block, 0);
+    assert_eq!(run.report.summary.required_not_run, 1);
+
+    let skipped = ids_with(&run, Status::Skipped);
+    assert_eq!(skipped, ["k8s.version"]);
+    let version = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.version")
+        .ok_or("k8s.version missing")?;
+    assert_eq!(version.skip_kind, Some(SkipKind::MissingNeed));
+
+    // The root-optional owner lookup of host.ports: the port is held, the owner is not named.
+    let ports = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "host.ports")
+        .ok_or("host.ports missing")?;
+    assert_eq!(ports.status, Status::Warn);
+    assert!(ports.message.contains("could not identify the holder"));
+
+    let mut partial: Vec<&str> = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| {
+            c.partial
+                .as_ref()
+                .is_some_and(|p| p.missing == [Need::Root])
+        })
+        .map(|c| c.id.as_str())
+        .collect();
+    partial.sort_unstable();
+    assert_eq!(
+        partial,
+        [
+            "host.container_runtime",
+            "host.firewall",
+            "host.lsm",
+            "host.ports",
+            "host.security_agents"
+        ]
+    );
+    assert_eq!(
+        run.terminal.lines().last(),
+        Some("NOT READY: 1 required check was not run")
+    );
+    Ok(())
+}
+
 /// The one file of `folder` that ends in `.extension`.
 fn only_file(folder: &Path, extension: &str) -> TestResult<std::path::PathBuf> {
     let mut found = Vec::new();

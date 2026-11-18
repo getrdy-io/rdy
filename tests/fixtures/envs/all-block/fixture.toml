@@ -1,0 +1,24 @@
+schema = 1
+name = "all-block"
+summary = "8 GiB of RAM, the data disk full, 6443 held by a named process and egress refused"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "all-pass"
+answers = ["host.memory", "host.disk", "host.ports", "net.egress"]
+spec = "spec.yaml"
+
+[caps]
+root = true
+network = true
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000004"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "not_ready"
+exit_code = 2
