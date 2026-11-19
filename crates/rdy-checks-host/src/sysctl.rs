@@ -144,9 +144,7 @@ impl Sysctl {
             .flat_map(|map| map.iter())
             .map(|(name, rule)| Wanted {
                 name: name.as_str().to_owned(),
-                // Not `SysctlName::canonical`: for `net.ipv4.conf.eth0/100.rp_filter` it keeps the text
-                // and names a path that is not there. The first separator decides, as in `sysctl.d`.
-                canonical: persist::canonical_key(name.as_str()),
+                canonical: name.canonical(),
                 rule: rule.clone(),
             })
             .collect();

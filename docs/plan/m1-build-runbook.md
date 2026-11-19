@@ -241,6 +241,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 45: new core M1-181: `rdy run` writes the HTML report next to the JSON, and M1-138 depends on it. M1-100
   takes #71's deferrals (pins, the generated-chain rig, the Timeout case) and grows to 3.5 h. M1-101 moves
   to week 21.
+- 46: records and approves the 03 changes of #74 (net.egress status with no `expect_status`: 403 warns, 407
+  and 5xx fail) and #72 (net.dns needs `Network`, refused-range `getent` answers block, 9 s per name).
+  The second of #70 and #74, and of #70 and #72, to merge deletes that check's `PENDING` row (M1-179).
+  M2-060 sets non-dumpable right after the privilege gate, before any password prompt (#47 security).
 - 47: records and approves the 03 changes of #78 (k8s.cni reads DaemonSets by name only, unknown is partial,
   default-deny is 03's). M1-175 builds k8s.cni. New M2-129: plugin pod restarts, ready below desired and a
   live check of the unverified `cni.toml` entries.
