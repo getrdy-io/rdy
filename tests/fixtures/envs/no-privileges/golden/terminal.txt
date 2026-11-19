@@ -1,0 +1,51 @@
+WARNING: UNSIGNED SPEC
+spec.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+rdy <version>
+spec    acme-platform >=1.0   (spec.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    no-privileges.example   rhel 9.3   x86_64
+user    uid 1000 (not root)
+cluster no kubeconfig found
+
+  SKIP     k8s.version             Not run. No Kubernetes cluster was reachable. (required)
+                                   fix from rdy: Set a kubeconfig, or pass --kube-context <name>,
+                                   then run again.
+  WARN     host.ports              Port 6443/tcp is in use on 0.0.0.0. rdy could not identify the
+                                   holder: it belongs to another user and rdy is not root.
+                                   fix from rdy: Run rdy as root to see the holder, or run `ss -ltnp
+                                   'sport = :6443'` as root.
+  WARN     host.firewall           Cannot confirm 6443/tcp and 10250/tcp in firewalld: firewalld is
+                                   running and its rules need root to read.
+                                   fix from rdy: Run rdy as root so it can read the firewalld rules,
+                                   or check by hand that 6443/tcp and 10250/tcp is open.
+  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
+  PASS     host.memory             31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.cpu                8 vCPUs found, 8 needed
+  PASS     host.disk               `/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is
+                                   needed.
+  PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
+                                   required modules are loaded or built in. BTF type information is
+                                   present.
+  PASS     host.cgroups            cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids`
+                                   available
+  PASS     host.sysctl             4 kernel parameters have the wanted value and are set at boot.
+                                   Services get an open files limit of 1048576
+                                   (`DefaultLimitNOFILE=1048576` in
+                                   `/etc/systemd/system.conf.d/10-acme.conf`).
+  PASS     host.lsm                SELinux is enforcing. AppArmor is off.
+  PASS     host.time_sync          Clock is synchronized, under 1 ms away from chrony's reference
+                                   `192.0.2.30`.
+  PASS     host.security_agents    No known security software process was found among 7 processes.
+  PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
+                                   driver overlayfs).
+  PASS     net.egress              1 of 1 endpoints reachable
+  PASS     net.mtu                 `eth0` has MTU 1500.
+
+0 blocks, 2 warnings, 13 passed, 1 required check not run
+
+WARNING: UNSIGNED SPEC
+NOT READY: 1 required check was not run

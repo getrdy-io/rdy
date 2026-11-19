@@ -338,7 +338,10 @@ async fn an_unlisted_resource_is_refused_and_logged() {
         "/apis/apps/v1/statefulsets",
         "/apis/apps/v1/namespaces/default/deployments",
         "/apis/batch/v1/jobs",
-        "/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations",
+        // M1-160 reads the webhook lists and policies. A get by name and a neighbour kind stay refused.
+        "/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations/x",
+        "/apis/admissionregistration.k8s.io/v1/mutatingadmissionpolicies",
+        "/apis/discovery.k8s.io/v1/endpointslices",
         "/apis/apiextensions.k8s.io/v1/customresourcedefinitions",
         "/healthz",
         "/openapi/v2",
@@ -1049,6 +1052,25 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
         judge_get(&format!("{pods}?fieldSelector=status.phase%21%3DFailed%0A")),
         Err(RULE_QUERY)
     );
+    let pods = "/api/v1/namespaces/app/events";
+    assert_eq!(
+        judge_get(&format!(
+            "{pods}?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim"
+        )),
+        Ok(())
+    );
+    assert_eq!(
+        judge_get(&format!(
+            "{pods}?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim%2Cx"
+        )),
+        Err(RULE_QUERY)
+    );
+    assert_eq!(
+        judge_get(&format!(
+            "{pods}?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim%0A"
+        )),
+        Err(RULE_QUERY)
+    );
 }
 
 // ---- the citation of ALLOWED by the checks -------------------------------------------------------------------
@@ -1056,7 +1078,7 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
 /// Check ids that `ALLOWED` cites and that no `CheckInfo` exists for yet. A check ticket removes its id
 /// when it registers its info in `crate::registry::infos`; the test fails if an id is in both places or
 /// in neither. M1-115 requires this list to be empty.
-const NOT_BUILT_YET: &[&str] = &["k8s.nodes"];
+const NOT_BUILT_YET: &[&str] = &[];
 
 /// The ids `ALLOWED` cites that no info in `infos` has.
 fn uncited<'a>(
@@ -1156,5 +1178,17 @@ fn every_cited_check_id_is_a_check_in_the_catalog() {
             catalog.lines().any(|line| line.starts_with(&heading)),
             "{id} is not a heading in 03-check-catalog.md"
         );
+    }
+}
+
+#[test]
+fn allowed_has_one_entry_per_group_version_and_resource() {
+    // `target_of` and the audit use the first entry that matches, so a second entry for the same resource
+    // would never be reached and its checks would be refused as not cited. A check that needs more of a
+    // resource adds its access and its id to the entry that is there.
+    let mut seen = BTreeSet::new();
+    for entry in ALLOWED {
+        let key = (entry.group, entry.version, entry.resource);
+        assert!(seen.insert(key), "ALLOWED names {key:?} twice");
     }
 }

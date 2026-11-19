@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-missing-kinds"
+summary = "Gateway API v1 installed with GatewayClass and Gateway but without HTTPRoute"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

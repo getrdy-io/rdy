@@ -442,7 +442,7 @@ Patterns are sketches; the code is the source of truth and the corpus is its tes
 
 | Rule | Group | M | Matches | Span |
 | --- | --- | --- | --- | --- |
-| `url_userinfo` | `url_credentials` | 1 | `scheme://user:pass@host`, `scheme://token@host`, percent-encoded | the userinfo |
+| `url_userinfo` | `url_credentials` | 1 | `scheme://user:pass@host`, `scheme://token@host`, percent-encoded, a proxy with no scheme after a proxy key (`*_proxy=user:pass@host`, `"http-proxy": "user:pass@host"`) | the userinfo |
 | `auth_header` | `bearer_tokens` | 1 | `Authorization:` and `Proxy-Authorization:` values (any scheme), `-H 'Authorization: ...'`, bare `Bearer <token>` | the credential |
 | `api_key_header` | `bearer_tokens` | 1 | `X-Api-Key`, `X-Auth-Token` values. M2 adds `Cookie` and `Set-Cookie` | each value |
 | `aws_access_key_id` | `aws_keys` | 1 | `(AKIA\|ASIA\|ABIA\|ACCA)[A-Z2-7]{16}` | the id |
@@ -451,7 +451,7 @@ Patterns are sketches; the code is the source of truth and the corpus is its tes
 | `pem_private_key` | `private_keys` | 1 | `-----BEGIN [A-Z0-9 ]*PRIVATE KEY...-----` through the matching END, header and blank lines included, plain or literal `\n`. No END: to the end of the input (whole string) or entry (stream) | the block |
 | `kubeconfig_credential` | `kubeconfig` | 1 | keys `token`, `client-key-data`, `password`, `access-token`, `refresh-token`, `id-token`, `client-secret`. Public certificates stay | the value |
 | `rdy_share_token` | `rdy_tokens` | 1 | `rdy_st_[A-Za-z0-9]{20,}` up to 16 KiB | the token |
-| `jwt` | `jwt` | 1 | `eyJ...` three base64url parts | the token |
+| `jwt` | `jwt` | 1 | `eyJ...` three base64url parts; `k8s-aws-v1.<token>` (EKS plugin); `ya29.<token>` (Google plugin) | the token |
 | `secret_by_key` | `secrets_by_key` | 1 | a key containing `pass`, `secret`, `token`, `api_key`, `access_key`, `private_key`, `credential`, `auth`, `bearer` or `dsn` followed by `=` or `:`, in env, YAML, JSON, INI, `--flag=x`, systemd `Environment=`, connection strings | the value, no quotes |
 | `github_token`, `gitlab_token`, `slack_token`, `stripe_key`, `google_api_key`, `npm_token`, `pypi_token`, `docker_pat` | `saas_tokens` | 2 | documented prefixes (`gh[pousr]_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `[sr]k_live_`, `AIza`, `npm_`, `pypi-`, `dckr_pat_`) | the token |
 | `gcp_service_account_key`, `azure_credential` | `cloud_credentials` | 2 | service-account `"private_key"`, `client_secret`, SAS `sig=`, `AccountKey=` | the value |
@@ -478,7 +478,14 @@ the choices the table leaves open.
   A raw `/`, `?` or `#` in a password ends the authority with no `@` in it. If what came before is
   `user:x` (`x` not all digits, so not a port) and an `@` follows before white space, a quote or a
   backslash, the userinfo runs to the last such `@` (`postgres://app:K7x/9+Qa@db/app`). A space in a
-  password is not read; write it as a percent escape. `http:\/\/` (JSON slashes) is read too.
+  password is not read; write it as a percent escape. `http:\/\/` (JSON slashes) is read too. A value
+  with no scheme (`svc:pw@proxy.acme.test:3128`) is read after a key that ends in `_proxy=` (any case,
+  also inside `Environment=`) and after the JSON keys `"http-proxy":`, `"https-proxy":`, `"HttpProxy":`
+  and `"HttpsProxy":` (M1-182). The userinfo ends at the last `@` of the value. A value with no `@`
+  stays. A value that opens with `"` or `'` ends at the same quote or at white space. Any other value
+  ends at white space, a control character, `"`, a backtick, `<` or `>`, so a `'` stays inside it. The
+  scan reads at most 16 KiB. Only a value that opens with a scheme is left to the scheme form. Any other
+  key, and free text, is not read (05 I1).
 - **`auth_header`** keeps the scheme and replaces the credential after it (`Authorization: Basic
   <credential>`; one word is all credential). A quoted value runs to its closing quote, a header inside
   a quoted word (`-H 'Authorization: ...'`) to that quote, anything else to the end of the line or a

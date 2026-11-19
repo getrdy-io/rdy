@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-getent-empty"
+summary = "getent exits 0 and prints nothing, so the facade resolver answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-capped-node"
+summary = "The cluster-wide pod list is cut, and so is the list of the second node"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

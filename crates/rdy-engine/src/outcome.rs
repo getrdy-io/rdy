@@ -202,6 +202,12 @@ fn from_error(
     };
     let mut result = CheckResult::skipped(info.id, info.family, severity.clone(), skip_kind);
     match error {
+        CheckError::Probe(ref probe) if probe.is_no_network() => {
+            // The check reached for a socket while `--no-network` was set (SEC-01).
+            let (message, fix) = missing_need_text(&Need::Network, ctx.os());
+            result.message = message;
+            result.fix = Some(fix);
+        }
         CheckError::MissingNeed(need) => {
             let (message, fix) = missing_need_text(&need, ctx.os());
             result.message = message;

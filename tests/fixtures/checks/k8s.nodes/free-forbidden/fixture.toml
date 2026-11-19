@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-forbidden"
+summary = "Three healthy nodes and the identity may not list pods"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

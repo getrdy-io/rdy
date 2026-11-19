@@ -1,0 +1,3 @@
+{
+  "dns": { "gone.acme.test": "NXDOMAIN" }
+}

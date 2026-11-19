@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/admissionregistration.k8s.io/v1/mutatingwebhookconfigurations",
+    "query": "limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "mutatingwebhookconfigurations is forbidden: User \"acme-reader\" cannot list resource \"mutatingwebhookconfigurations\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

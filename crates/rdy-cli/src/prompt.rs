@@ -26,7 +26,9 @@
 //! raises SIGINT on Ctrl-C while the terminal is still in raw mode, which leaves the user's shell
 //! with echo off. Here the signal key is switched off for the read, so Ctrl-C arrives as a byte,
 //! the guard restores the terminal, and the prompt returns [`Cancelled`](PromptError::Cancelled).
-//! A signal sent from outside (such as `kill -INT`) is not caught here. The Ctrl-C ticket owns that.
+//! A signal sent from outside (such as `kill -INT` or SIGTERM) is caught by the signal thread
+//! (`crate::interrupt`, M1-058). It calls `restore_terminal` with the settings saved here, so echo
+//! is back before rdy exits 70.
 //!
 //! A declined question is not an error here: [`Prompter::confirm`] returns `Ok(false)`. The caller
 //! decides what that means. `trust add` prints `Not trusted. Nothing was changed.` and exits 64
@@ -213,12 +215,67 @@ impl Terminal for StdTerminal {
     }
 }
 
+/// Where the terminal is, for the signal thread (security review S1).
+#[cfg(unix)]
+enum TerminalState {
+    /// No hidden read is under way.
+    Idle,
+    /// A hidden read is under way, and these are the settings to put back.
+    Hidden(rustix::termios::Termios),
+    /// A signal ended the prompts. No hidden read starts after this.
+    Closed,
+}
+
+#[cfg(unix)]
+static TERMINAL: std::sync::Mutex<TerminalState> = std::sync::Mutex::new(TerminalState::Idle);
+
+#[cfg(unix)]
+fn terminal_state() -> std::sync::MutexGuard<'static, TerminalState> {
+    TERMINAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Puts the terminal back as it was before a hidden read, when one is in progress, throws away what
+/// was typed and not yet read, and closes the prompts for good. True if it put settings back.
+///
+/// For the signal thread ([`crate::interrupt`]): a signal that arrives during the read ends the process
+/// while the guard of [`read_hidden_tty`] cannot run, and the shell would be left with echo off. The
+/// state lock is held by a hidden read from the save through the change of mode, so this sees either
+/// no change yet (and closes the prompts, so the read that follows refuses to start) or the whole of it.
+/// The flush keeps unread keys from reaching the shell. Not on Windows, where the console is not
+/// changed by this module (`rpassword` restores it).
+#[cfg(unix)]
+pub(crate) fn restore_terminal() -> bool {
+    use rustix::termios::{OptionalActions, QueueSelector, tcflush, tcsetattr};
+    let before = std::mem::replace(&mut *terminal_state(), TerminalState::Closed);
+    match before {
+        TerminalState::Hidden(settings) => {
+            let _ = tcsetattr(io::stdin(), OptionalActions::Now, &settings);
+            let _ = tcflush(io::stdin(), QueueSelector::IFlush);
+            true
+        }
+        TerminalState::Idle | TerminalState::Closed => {
+            // Already restored, or nothing was hidden: keys typed since are still thrown away.
+            let _ = tcflush(io::stdin(), QueueSelector::IFlush);
+            false
+        }
+    }
+}
+
+/// See the Unix version: Windows does nothing here.
+#[cfg(not(unix))]
+pub(crate) fn restore_terminal() -> bool {
+    false
+}
+
 /// Read a password from stdin with echo and the signal keys off (Unix).
 ///
 /// The terminal is set to non-canonical mode with ECHO, ECHONL, ICANON and ISIG off, so each key
 /// arrives as a byte and Ctrl-C is the byte 0x03, not a SIGINT. A guard puts the saved settings
 /// back on every way out, including a panic. Line editing is Backspace and Ctrl-U. Other control
-/// bytes are ignored.
+/// bytes are ignored. After a signal closed the prompts ([`restore_terminal`]) this returns
+/// [`Cancel::Interrupted`] without touching the terminal.
 #[cfg(unix)]
 fn read_hidden_tty() -> Result<Secret, PromptError> {
     use rustix::termios::{LocalModes, OptionalActions, SpecialCodeIndex, tcgetattr, tcsetattr};
@@ -230,22 +287,45 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
     }
     impl Drop for Restore<'_> {
         fn drop(&mut self) {
+            let mut state = terminal_state();
             // Nothing useful can be done if this fails while unwinding or returning.
             let _ = tcsetattr(self.fd, OptionalActions::Now, &self.saved);
+            // A signal may have closed the prompts already: that stays.
+            if matches!(*state, TerminalState::Hidden(_)) {
+                *state = TerminalState::Idle;
+            }
         }
     }
 
     let stdin = io::stdin();
-    let saved = tcgetattr(&stdin).map_err(|e| PromptError::Io(e.into()))?;
-    let mut hidden = saved.clone();
-    hidden
-        .local_modes
-        .remove(LocalModes::ECHO | LocalModes::ECHONL | LocalModes::ICANON | LocalModes::ISIG);
-    hidden.special_codes[SpecialCodeIndex::VMIN] = 1;
-    hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
-    // The guard goes first, so a failure half way through `tcsetattr` is also undone.
-    let restore = Restore { fd: &stdin, saved };
-    tcsetattr(&stdin, OptionalActions::Now, &hidden).map_err(|e| PromptError::Io(e.into()))?;
+    // The state lock is held from the save through the change of mode, so the signal thread never sees
+    // a terminal that is half way (S1). `Restore` takes the lock itself, so the lock is let go first
+    // on every way out of this block.
+    let restore = {
+        let mut state = terminal_state();
+        if matches!(*state, TerminalState::Closed) {
+            return Err(PromptError::Cancelled(Cancel::Interrupted));
+        }
+        let saved = tcgetattr(&stdin).map_err(|e| PromptError::Io(e.into()))?;
+        let mut hidden = saved.clone();
+        hidden
+            .local_modes
+            .remove(LocalModes::ECHO | LocalModes::ECHONL | LocalModes::ICANON | LocalModes::ISIG);
+        hidden.special_codes[SpecialCodeIndex::VMIN] = 1;
+        hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
+        // The signal thread puts these back if a signal ends the process during the read.
+        *state = TerminalState::Hidden(saved.clone());
+        let changed = tcsetattr(&stdin, OptionalActions::Now, &hidden);
+        drop(state);
+        // Built after the lock is let go: a drop of `Restore` takes the lock itself.
+        let restore = Restore { fd: &stdin, saved };
+        if let Err(e) = changed {
+            // The guard goes first, so a failure half way through `tcsetattr` is also undone.
+            drop(restore);
+            return Err(PromptError::Io(e.into()));
+        }
+        restore
+    };
 
     let result = read_hidden_bytes(&mut stdin.lock());
     drop(restore);
@@ -738,6 +818,27 @@ mod tests {
         assert_eq!(err.exit_code(), 64);
         assert_eq!(err.to_string(), "the password is longer than 1024 bytes");
         assert_eq!(err.fix(), "use a shorter password");
+    }
+
+    /// A signal that comes while no hidden read is under way (before the first prompt, or between two)
+    /// closes the prompts: the next hidden read refuses to start, so echo is never turned off after the
+    /// terminal was "restored" (security review S1). The state is process-wide, so it is put back.
+    #[cfg(unix)]
+    #[test]
+    fn a_closed_terminal_refuses_a_hidden_read_and_restores_nothing() {
+        *terminal_state() = TerminalState::Idle;
+        assert!(
+            !restore_terminal(),
+            "nothing was hidden, so nothing to put back"
+        );
+        assert!(matches!(*terminal_state(), TerminalState::Closed));
+        assert!(matches!(
+            read_hidden_tty(),
+            Err(PromptError::Cancelled(Cancel::Interrupted))
+        ));
+        // Still closed, and a second call still restores nothing.
+        assert!(!restore_terminal());
+        *terminal_state() = TerminalState::Idle;
     }
 
     #[cfg(unix)]

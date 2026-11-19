@@ -22,6 +22,9 @@
 //! - `the_server_names_the_caller_and_answers_access_reviews` sends the raw `SelfSubjectReview` and two
 //!   access reviews as the admin of the kind cluster.
 //! - `the_test_namespace_enforces_restricted` reads the namespace labels through the read-only client.
+//! - `k8s_dns_passes_on_the_cluster` runs the `k8s.dns` check (M1-162) as the `rdy-readonly` service account, and
+//!   expects a pass with nothing partial: kind runs CoreDNS under the label `k8s-app=kube-dns`, with a Service
+//!   `kube-dns` and a ConfigMap `coredns`, which the optional `kube-system` Role lets the check read.
 //! - `the_readonly_role_serves_discovery_and_names_itself` runs the discovery routes, the raw
 //!   `SelfSubjectReview` and `k8s.version` as the `rdy-readonly` service account.
 //! - `the_readonly_role_serves_every_allowed_read_and_nothing_else` is the guard test of M1-103
@@ -35,15 +38,23 @@
 //!   exist, where the point is that the answer is not a 403). The same role, asked through the
 //!   server's own access review, may not write, read Secrets, mint tokens, exec, impersonate or bind.
 //!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
-//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding.
+//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding. The
+//!   same review's `nonResourceRules` hold only the `get` of the URLs of the default ClusterRoles
+//!   `system:discovery`, `system:public-info-viewer` and `system:service-account-issuer-discovery`
+//!   (`NON_RESOURCE_DEFAULTS`).
 //!   The guard's refusals need no cluster and are tested without one.
 //!
 //! Not covered here, and carried:
 //! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
 //!   cluster does not serve them, so the test asks the server's access review whether the role allows
 //!   them. That catches a typo in the rule, not a missing API.
+//! - The policy lists of Kyverno and Gatekeeper (M1-160: `clusterpolicies`, `validatingpolicies`,
+//!   `imagevalidatingpolicies` and any constraint kind). Their groups are not on a kind cluster either, so
+//!   the test asks the access review, with a constraint kind that only the `*` rule of the role can admit.
+//!   The webhook, admission policy, Service and EndpointSlice lists are served by kind and run for real.
 //! - The in-cluster path (a pod's service account). The job runs rdy outside the cluster.
-//! - The optional `kube-system` Role: the deployments list runs, and a 403 there means the optional
+//! - The optional `kube-system` Role: the deployments and daemon sets lists, the Service `kube-dns` get and the
+//!   ConfigMap `coredns` get run, and a 403 there means the optional
 //!   Role was not applied.
 
 #![allow(clippy::expect_used)]
@@ -59,20 +70,27 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret,
+    ConfigMap, Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota,
+    Secret, Service,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::networking::v1::IngressClass;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
-use rdy_checks_k8s::{Cluster, VersionCheck};
+use rdy_checks_k8s::{Cluster, DnsCheck, VersionCheck};
 use rdy_engine::check::{Check, Finding, Level, Need, Os};
 use rdy_engine::testing::{Replay, TestRun};
-use rdy_spec::check::K8sVersion;
+use rdy_spec::check::{K8sDns, K8sVersion};
 use serde_json::json;
 
 async fn connect_with(run: &TestRun, options: KubeOptions) -> Connected {
@@ -313,6 +331,83 @@ async fn the_readonly_role_serves_discovery_and_names_itself() {
     assert_version_passes(&finding, &expected_minor());
 }
 
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn k8s_dns_passes_on_the_cluster() {
+    let run = TestRun::new(Replay::new());
+    let connected = readonly_connection(&run).await;
+    assert_expected_minor(&connected);
+    let cluster: Arc<dyn Cluster> = Arc::new(connected);
+    let ctx = run.context_for(DnsCheck::info(), "k8s.dns", Os::Linux, [Need::KubeContext]);
+    let params: K8sDns = serde_json::from_value(json!({})).expect("the parameters parse");
+    // CoreDNS may still be coming up when the job starts. Ask again for up to a minute.
+    let mut finding = None;
+    for _ in 0..30 {
+        let answer = DnsCheck::new(params.clone(), cluster.clone())
+            .run(&ctx)
+            .await
+            .expect("the check ran");
+        let done = answer.level == Level::Pass;
+        finding = Some(answer);
+        if done {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let finding = finding.expect("the check ran at least once");
+    eprintln!("k8s.dns: {}", finding.message);
+    assert_eq!(finding.level, Level::Pass, "{finding:#?}");
+    // Every read the check makes is in the role file, so nothing is partial.
+    assert!(finding.partial.is_none(), "{finding:#?}");
+    assert_eq!(finding.observed["namespace"], "kube-system");
+    assert!(
+        finding.observed["workloads"]
+            .as_array()
+            .is_some_and(|list| !list.is_empty()),
+        "{finding:#?}"
+    );
+    assert!(
+        finding.observed["service"]["cluster_ip"].is_string(),
+        "{finding:#?}"
+    );
+    assert!(finding.observed["corefile"].is_object(), "{finding:#?}");
+}
+
+/// A `GatewayClass`, named only so the live test can list it: the Gateway API has no type in k8s-openapi.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct GatewayClass {
+    metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+}
+
+impl kube::Resource for GatewayClass {
+    type DynamicType = ();
+    type Scope = kube::core::ClusterResourceScope;
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        "GatewayClass".into()
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        "gateway.networking.k8s.io".into()
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        "v1".into()
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        "gatewayclasses".into()
+    }
+
+    fn meta(&self) -> &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &mut self.metadata
+    }
+}
+
 /// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,
 /// for the get of a storage class that does not exist. Anything else, including a guard refusal, a 403
 /// or a 500, fails the test.
@@ -402,6 +497,38 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
+    ("list", "networking.k8s.io", "ingressclasses", ""),
+    ("list", "gateway.networking.k8s.io", "gatewayclasses", ""),
+    ("list", "", "services", ""),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingwebhookconfigurations",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "mutatingwebhookconfigurations",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingadmissionpolicies",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingadmissionpolicybindings",
+        "",
+    ),
+    ("list", "discovery.k8s.io", "endpointslices", ""),
+    ("list", "kyverno.io", "clusterpolicies", ""),
+    ("list", "policies.kyverno.io", "validatingpolicies", ""),
+    ("list", "policies.kyverno.io", "imagevalidatingpolicies", ""),
+    ("list", "constraints.gatekeeper.sh", "*", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -428,6 +555,16 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
+/// What the optional `kube-system` Role of the role file grants (`rdy-readonly-kube-system`): the deployments
+/// of `k8s.nodes`, and the daemon sets, the Service `kube-dns` and the ConfigMap `coredns` of `k8s.dns`.
+const KUBE_SYSTEM_ROLE: &[(&str, &str, &str, &str)] = &[
+    ("list", "apps", "deployments", ""),
+    ("list", "apps", "daemonsets", ""),
+    ("get", "", "services", "kube-dns"),
+    ("get", "", "services", "rke2-coredns-rke2-coredns"),
+    ("get", "", "configmaps", "coredns"),
+];
+
 /// Reads the Kubernetes project gives every signed-in user on newer minors, outside the role file. Each
 /// is read-only and holds no secret. An entry stays only with a reason.
 const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
@@ -440,6 +577,95 @@ const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
     ("list", "certificates.k8s.io", "clustertrustbundles", ""),
     ("watch", "certificates.k8s.io", "clustertrustbundles", ""),
 ];
+
+/// The URLs the Kubernetes project lets every signed-in user `get` outside the role file: the rules of the
+/// ClusterRoles `system:discovery` and `system:public-info-viewer`, bound to the group
+/// `system:authenticated`. `/healthz/*`, `/livez/*`, `/readyz/*` and `/metrics` belong to
+/// `system:monitoring` only, so they are surprises here. They are discovery, health and version documents, and hold no secret. The role
+/// file has no `nonResourceURLs` rule of its own, so any other URL, any other verb and any wildcard verb
+/// is a grant the role file did not make. The identity is a service account, so it also gets the
+/// ClusterRole `system:service-account-issuer-discovery`, which Kubernetes binds to the group
+/// `system:serviceaccounts` by default: the public OIDC discovery document and its key set, which hold no
+/// secret either.
+const NON_RESOURCE_DEFAULTS: &[&str] = &[
+    "/api",
+    "/api/*",
+    "/apis",
+    "/apis/*",
+    "/healthz",
+    "/livez",
+    "/readyz",
+    "/version",
+    "/version/",
+    "/openapi",
+    "/openapi/*",
+    "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/",
+    "/openid/v1/jwks",
+    "/openid/v1/jwks/",
+];
+
+/// What the server grants the identity on non-resource URLs in `namespace`, one entry per verb and URL.
+fn non_resource_grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<(String, String)> {
+    let status = answer
+        .status
+        .as_ref()
+        .expect("the server fills the status of a rules review");
+    let mut out = Vec::new();
+    for rule in &status.non_resource_rules {
+        let urls = rule.non_resource_urls.clone().unwrap_or_default();
+        assert!(
+            !urls.is_empty(),
+            "{namespace}: a non-resource rule with no URL: {rule:?}"
+        );
+        for verb in &rule.verbs {
+            for url in &urls {
+                out.push((verb.clone(), url.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The grants of `grants` that are not a `get` of a URL of [`NON_RESOURCE_DEFAULTS`].
+fn unexpected_non_resource(namespace: &str, grants: &[(String, String)]) -> Vec<String> {
+    grants
+        .iter()
+        .filter(|(verb, url)| verb != "get" || !NON_RESOURCE_DEFAULTS.contains(&url.as_str()))
+        .map(|(verb, url)| format!("{namespace}: {verb} {url}"))
+        .collect()
+}
+
+#[test]
+fn only_a_get_of_a_default_url_is_an_expected_non_resource_grant() {
+    let grant = |verb: &str, url: &str| (verb.to_owned(), url.to_owned());
+    // What a stock server reports for a signed-in service account.
+    let stock: Vec<_> = NON_RESOURCE_DEFAULTS
+        .iter()
+        .map(|url| grant("get", url))
+        .collect();
+    assert!(unexpected_non_resource("default", &stock).is_empty());
+    // Another verb, another URL, a wildcard URL or a wildcard verb are each a surprise.
+    let surprises = [
+        grant("post", "/healthz"),
+        grant("get", "/metrics"),
+        grant("get", "*"),
+        grant("get", "/logs/*"),
+        grant("*", "/version"),
+        grant("get", "/apis/*/extra"),
+        grant("get", "/healthz/*"),
+        grant("get", "/livez/*"),
+        grant("get", "/readyz/*"),
+        grant("get", "/metrics"),
+    ];
+    for surprise in surprises {
+        assert_eq!(
+            unexpected_non_resource("kube-system", std::slice::from_ref(&surprise)),
+            [format!("kube-system: {} {}", surprise.0, surprise.1)],
+            "{surprise:?}"
+        );
+    }
+}
 
 /// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
 /// The server may merge rules, so the answer is expanded before it is compared.
@@ -551,6 +777,52 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         false,
         &client.all::<Namespace>().get("kube-system").await,
     );
+    // k8s.admission (M1-160). The Service is asked for by name, as the check asks, and the slices by label.
+    assert_served(
+        "validatingwebhookconfigurations",
+        false,
+        &client
+            .all::<ValidatingWebhookConfiguration>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "mutatingwebhookconfigurations",
+        false,
+        &client
+            .all::<MutatingWebhookConfiguration>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "validatingadmissionpolicies",
+        false,
+        &client.all::<ValidatingAdmissionPolicy>().list(&all).await,
+    );
+    assert_served(
+        "validatingadmissionpolicybindings",
+        false,
+        &client
+            .all::<ValidatingAdmissionPolicyBinding>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "services",
+        false,
+        &client
+            .namespaced::<Service>("default")
+            .list(&all.clone().fields("metadata.name=kubernetes"))
+            .await,
+    );
+    assert_served(
+        "endpointslices",
+        false,
+        &client
+            .namespaced::<EndpointSlice>("default")
+            .list(&all.clone().labels("kubernetes.io/service-name=kubernetes"))
+            .await,
+    );
     assert_served(
         "deployments (needs the optional kube-system Role)",
         false,
@@ -568,6 +840,48 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .namespaced::<k8s_openapi::api::apps::v1::Deployment>("kube-system")
             .get("coredns")
             .await,
+    );
+    assert_served(
+        "daemonsets (needs the optional kube-system Role)",
+        false,
+        &client
+            .namespaced::<k8s_openapi::api::apps::v1::DaemonSet>("kube-system")
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "service kube-dns (needs the optional kube-system Role)",
+        false,
+        &client
+            .namespaced::<Service>("kube-system")
+            .get("kube-dns")
+            .await,
+    );
+    assert_served(
+        "configmap coredns (needs the optional kube-system Role)",
+        false,
+        &client
+            .namespaced::<ConfigMap>("kube-system")
+            .get("coredns")
+            .await,
+    );
+    assert_served(
+        "ingressclasses",
+        false,
+        &client.all::<IngressClass>().list(&all).await,
+    );
+    // The whole-namespace list of k8s.ingress, with no field selector (the admission list carries one).
+    assert_served(
+        "services (the whole namespace, no selector)",
+        false,
+        &client.namespaced::<Service>("default").list(&all).await,
+    );
+    // kind has no Gateway API CRDs, so the server answers 404 ("not installed"), which is the answer the
+    // check reads. A 403 would fail here: that is what proves the role grants the list.
+    assert_served(
+        "gatewayclasses (404 when the Gateway API is not installed)",
+        true,
+        &client.all::<GatewayClass>().list(&all).await,
     );
     // The rules review is a POST the guard allows. The server answers 201. It is asked for `default`
     // (where only the cluster role applies) and for `kube-system` (where the optional Role adds the
@@ -593,6 +907,23 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let reviews = client.all::<SelfSubjectAccessReview>();
     let must_allow = [
         ("list", "", "nodes", None, None),
+        // k8s.dns: the Service and the ConfigMap, by name, in kube-system only (the optional Role).
+        ("get", "", "services", Some("kube-system"), Some("kube-dns")),
+        (
+            "get",
+            "",
+            "services",
+            Some("kube-system"),
+            Some("rke2-coredns-rke2-coredns"),
+        ),
+        (
+            "get",
+            "",
+            "configmaps",
+            Some("kube-system"),
+            Some("coredns"),
+        ),
+        ("list", "apps", "daemonsets", Some("kube-system"), None),
         // The OpenShift rules cannot be exercised on kind (404), so the server's review stands in. A
         // typo in either rule fails here.
         (
@@ -609,6 +940,30 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("version"),
         ),
+        // The engines' groups are not on a kind cluster either. The Gatekeeper kind is one the rule's
+        // wildcard has to admit.
+        ("list", "kyverno.io", "clusterpolicies", None, None),
+        (
+            "list",
+            "policies.kyverno.io",
+            "validatingpolicies",
+            None,
+            None,
+        ),
+        (
+            "list",
+            "policies.kyverno.io",
+            "imagevalidatingpolicies",
+            None,
+            None,
+        ),
+        (
+            "list",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            None,
+        ),
     ];
     let allowed_count = must_allow.len();
     for ask in must_allow {
@@ -619,6 +974,24 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     }
     let must_not_allow = [
         ("get", "", "secrets", Some("kube-system"), None),
+        // The ConfigMap and Service reads are by name: no other name, no list, no other namespace.
+        (
+            "get",
+            "",
+            "configmaps",
+            Some("kube-system"),
+            Some("kubeadm-config"),
+        ),
+        ("list", "", "configmaps", Some("kube-system"), None),
+        ("get", "", "configmaps", Some("default"), Some("coredns")),
+        (
+            "get",
+            "",
+            "services",
+            Some("kube-system"),
+            Some("metrics-server"),
+        ),
+        ("watch", "", "services", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
         // The deployment grant is a get by name, not a list.
         ("list", "apps", "deployments", Some("default"), None),
@@ -652,6 +1025,35 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("other"),
         ),
+        // The M1-160 lists are lists only: no get by name, no write, and the wildcard group is not writable.
+        (
+            "delete",
+            "admissionregistration.k8s.io",
+            "validatingwebhookconfigurations",
+            None,
+            None,
+        ),
+        (
+            "get",
+            "admissionregistration.k8s.io",
+            "validatingwebhookconfigurations",
+            None,
+            Some("x"),
+        ),
+        (
+            "create",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            None,
+        ),
+        (
+            "get",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            Some("x"),
+        ),
         // Escalation paths: minting tokens, running commands in pods, acting as someone else and
         // granting roles.
         ("create", "", "serviceaccounts/token", Some("default"), None),
@@ -675,7 +1077,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
 
     //    "Nothing else" is read from the server, not sampled. Every grant the server reports for the
     //    identity must be one the role file lists, a default the Kubernetes project gives every signed-in
-    //    user (`SERVER_DEFAULTS`), or the deployments list the optional Role adds in `kube-system`.
+    //    user (`SERVER_DEFAULTS`), or one of the reads the optional Role adds in `kube-system` (`KUBE_SYSTEM_ROLE`).
     //    Another binding, an aggregated role or a broad grant to `system:authenticated` shows up here.
     //    All of them are collected, so one run names every surprise.
     let mut unexpected = Vec::new();
@@ -693,11 +1095,11 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
                 })
             };
             let optional = *namespace == "kube-system"
-                && listed(&[
-                    ("list", "apps", "deployments", ""),
+                && (KUBE_SYSTEM_ROLE
+                    .iter()
+                    .any(|&(verb, group, resource, name)| listed(&[(verb, group, resource, name)]))
                     // The operator template, rendered for CoreDNS by the kind job.
-                    ("get", "apps", "deployments", "coredns"),
-                ]);
+                    || listed(&[("get", "apps", "deployments", "coredns")]));
             if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
                 unexpected.push(format!("{namespace}: {grant:?}"));
             }
@@ -706,6 +1108,17 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     assert!(
         unexpected.is_empty(),
         "the server grants the rdy-readonly identity more than the role file lists: {unexpected:#?}"
+    );
+    //    The same for URLs. The role file grants none, so every non-resource rule the server reports is a
+    //    default the project gives every signed-in user (`NON_RESOURCE_DEFAULTS`), and a `get` only.
+    let mut unexpected_urls = Vec::new();
+    for (namespace, answer) in &rules_answers {
+        let urls = non_resource_grants(namespace, answer);
+        unexpected_urls.extend(unexpected_non_resource(namespace, &urls));
+    }
+    assert!(
+        unexpected_urls.is_empty(),
+        "the server grants the rdy-readonly identity non-resource URLs beyond the discovery, public-info-viewer and issuer-discovery defaults: {unexpected_urls:#?}"
     );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
@@ -728,10 +1141,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 13 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 25 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 13 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 25 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-unreadable-dropins"
+summary = "The drop-in directory of Docker cannot be read by this user"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

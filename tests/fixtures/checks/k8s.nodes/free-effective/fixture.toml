@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-effective"
+summary = "One 4 CPU node with a pod that has a sidecar, an init container and overhead, and a pod that finished"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true
