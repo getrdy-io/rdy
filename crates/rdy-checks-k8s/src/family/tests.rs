@@ -98,7 +98,7 @@ impl Cluster for Fixtured {
 }
 
 /// A spec that holds every k8s id of this build, and the fixture whose cluster answers that entry.
-const ENTRIES: [(&str, &str, &str); 7] = [
+const ENTRIES: [(&str, &str, &str); 8] = [
     (
         "k8s.version",
         "checks/k8s.version/kind",
@@ -130,6 +130,7 @@ const ENTRIES: [(&str, &str, &str); 7] = [
         "    namespace: acme-system\n",
     ),
     ("k8s.dns", "checks/k8s.dns/kubeadm-ok", ""),
+    ("k8s.ingress", "checks/k8s.ingress/nginx-f5", ""),
 ];
 
 fn family_spec() -> Spec {
@@ -150,7 +151,7 @@ fn the_family_builds_every_k8s_id_of_a_spec_and_none_is_unsupported() {
     let with_namespace = K8sFamily::new().with_namespace(
         serde_json::from_value(serde_json::json!("acme-system")).expect("a namespace"),
     );
-    assert_eq!(spec.checks.len(), 8);
+    assert_eq!(spec.checks.len(), 9);
     for entry in &spec.checks {
         for family in [&family, &with_namespace] {
             let built = family

@@ -743,7 +743,7 @@ macro_rules! expect {
 
 /// Every case of `tests/fixtures/checks/net.dns/`, with the check run by the real scheduler on a paused
 /// clock and given its host set, as `rdy run` gives it. A new directory is a new line here.
-const CASES: [(&str, &str); 18] = [
+const CASES: [(&str, &str); 19] = [
     expect!("aaaa-only"),
     expect!("direct-nxdomain"),
     expect!("found-dual-stack"),
@@ -754,6 +754,7 @@ const CASES: [(&str, &str); 18] = [
     expect!("getent-refused-forms"),
     expect!("getent-signal"),
     expect!("mixed"),
+    expect!("musl-sss-no-getent"),
     expect!("not-found"),
     expect!("nsswitch-sss-mdns"),
     expect!("offline"),
