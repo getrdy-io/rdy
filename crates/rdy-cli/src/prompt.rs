@@ -1000,7 +1000,13 @@ mod tests {
             let err = (&spy.master).read(&mut [0_u8; 64]).unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
             assert_eq!(spy.written, b"Password: \n");
-            assert_eq!(before.local_modes, after.local_modes);
+            assert_eq!(settable(before.local_modes), settable(after.local_modes));
+        }
+
+        /// The local modes a program sets. The kernel sets `PENDIN` itself (macOS does when canonical mode
+        /// comes back), so it is left out of the compare.
+        fn settable(modes: rustix::termios::LocalModes) -> rustix::termios::LocalModes {
+            modes.difference(rustix::termios::LocalModes::PENDIN)
         }
 
         #[test]
@@ -1008,7 +1014,7 @@ mod tests {
             let (result, spy, before, after) = run(true);
             assert!(matches!(result, Err(PromptError::Io(_))));
             assert!(spy.at_prompt.is_none());
-            assert_eq!(before.local_modes, after.local_modes);
+            assert_eq!(settable(before.local_modes), settable(after.local_modes));
             assert_eq!(
                 before.special_codes[rustix::termios::SpecialCodeIndex::VMIN],
                 after.special_codes[rustix::termios::SpecialCodeIndex::VMIN]
