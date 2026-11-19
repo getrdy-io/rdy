@@ -226,11 +226,19 @@ pub struct Cli {
 
 /// Runs `rdy <args>` in process on the machine of the environment `env`, with the same pinned hooks as
 /// `run_env`. The caller writes any file the arguments name. Nothing else is read from the real machine.
+/// An env whose `kube` cap is true serves its scripted cluster here too, as in `run_env`. The INV-14 audit
+/// needs the report's action log, so it runs in `run_env` over the same env, not here.
 pub fn run_cli(env: &str, args: &[&str]) -> Result<Cli, String> {
     let root = fixtures_dir();
     let name = format!("envs/{env}");
     let fixture = Fixture::load(&root, &name).map_err(|e| format!("{name}: {e}"))?;
     let hooks = hooks_for(&fixture.manifest().run)?;
+    let cluster = if fixture.manifest().caps.kube {
+        Some(ScriptedCluster::new(fixture.replay()).map_err(|e| format!("{name}: {e}"))?)
+    } else {
+        None
+    };
+    families::serve(cluster);
     let machine = machine(&fixture, env);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -248,6 +256,7 @@ pub fn run_cli(env: &str, args: &[&str]) -> Result<Cli, String> {
             &mut err,
         ))
         .code();
+    families::serve(None);
     Ok(Cli {
         code: code.into(),
         stdout: String::from_utf8(out).map_err(|e| format!("stdout is not UTF-8: {e}"))?,

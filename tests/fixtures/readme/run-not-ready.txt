@@ -5,11 +5,13 @@ The spec decides which files rdy reads and which hosts it contacts.
 Run it only if you wrote it yourself or got it from the vendor in a way you trust.
 Every report from this run is marked UNSIGNED SPEC.
 
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
 rdy <version>
 spec    acme-platform >=1.0   (not-ready.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
 host    all-block.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
 
   BLOCK    host.memory             7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB
                                    wanted, the box is busy
@@ -28,6 +30,16 @@ user    uid 0 (root)
                                    listens there, or a firewall rejects it. Check the port in the
                                    spec, and ask the network team to allow tcp/8080 to web.acme.test
                                    from this machine.
+  BLOCK    k8s.version             Server v1.24.9 is older than the 1.27 minimum
+                                   fix from the spec file (not verified): Upgrade the cluster to
+                                   Kubernetes 1.27 or newer.
+  BLOCK    k8s.rbac                The kubeconfig identity cannot `create namespaces`: not allowed
+                                   fix from the spec file (not verified): Run the install with an
+                                   identity that can create namespaces.
+  WARN     k8s.storageclass        not verified: could not read the CSINode list
+                                   fix from rdy: Ask the cluster admin to grant this identity: list
+                                   csinodes (storage.k8s.io). Check each with `kubectl auth can-i
+                                   list csinodes.storage.k8s.io`.
   PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
   PASS     host.cpu                8 vCPUs found, 8 needed
   PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
@@ -48,7 +60,7 @@ user    uid 0 (root)
   PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
   PASS     net.mtu                 `eth0` has MTU 1500.
 
-4 blocks, 0 warnings, 11 passed
+6 blocks, 1 warning, 11 passed
 
 WARNING: UNSIGNED SPEC
 NOT READY
