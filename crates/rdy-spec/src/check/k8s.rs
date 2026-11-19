@@ -499,7 +499,7 @@ pub struct K8sRbac {
     /// The service account to test as (`as:`), `system:serviceaccount:<namespace>:<name>`, for example
     /// `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the
     /// identity in the kubeconfig may impersonate it, so the check answers for the install identity before
-    /// it exists as a kubeconfig. M1 takes a service account only.
+    /// it exists as a kubeconfig. M1 takes a service account only: a user name is refused with a hint that shows the form.
     #[serde(rename = "as")]
     pub as_user: Option<ImpersonatedUser>,
 }

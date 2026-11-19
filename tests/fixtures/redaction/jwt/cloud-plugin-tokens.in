@@ -1,0 +1,3 @@
+Unauthorized: token ${SYN:eks_token} was refused
+the plugin returned ${SYN:gke_token} and it expired
+a robot gave ${SYN:gke_sa_token} to the plugin

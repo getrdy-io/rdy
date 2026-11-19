@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-scaler-gke-hosted"
+summary = "One GKE node and no autoscaler object to read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

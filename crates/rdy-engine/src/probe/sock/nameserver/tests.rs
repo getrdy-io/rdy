@@ -639,7 +639,14 @@ async fn a_silent_server_times_out_and_a_slow_one_is_measured() {
         .await
         .expect_err("silent");
     assert!(matches!(error, ProbeError::Timeout), "{error:?}");
-    assert_eq!(started.elapsed(), NAMESERVER_TIMEOUT);
+    // The call takes the time it spent reading the nameserver list off the limit, and it measures that
+    // with the real clock. Under the paused clock a slow runner can spend a few real milliseconds there,
+    // so the silent server is cut a little before the full limit, never after it.
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed <= NAMESERVER_TIMEOUT && elapsed >= NAMESERVER_TIMEOUT - Duration::from_millis(100),
+        "{elapsed:?}"
+    );
     let started = tokio::time::Instant::now();
     probe
         .nameserver_exchange(1, &q, DnsTransport::Udp)

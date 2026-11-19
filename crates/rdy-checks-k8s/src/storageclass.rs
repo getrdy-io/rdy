@@ -3,14 +3,18 @@
 //!
 //! What it reads, all read-only and all through the guard:
 //!
-//! - the `StorageClass` list (the first page of 500), or the one class by name when the spec names a class
-//!   and the identity may not list;
+//! - the `StorageClass` list, or the one class by name when the spec names a class and the identity may
+//!   not list;
 //! - for a class on a CSI driver (the provisioner after the in-tree map, so `kubernetes.io/aws-ebs` is
 //!   looked up as `ebs.csi.aws.com`): the `CSINode` list, the strongest evidence that a node registered the
 //!   driver, and only when no node did, the `CSIDriver` list;
 //! - when the family names a target namespace: the `Namespace` by name (a list in a namespace that does
 //!   not exist is empty, so the check asks first), the `PersistentVolumeClaim` list there, and, only when
 //!   a claim has been `Pending` for 5 minutes, the claim `Event` list (reason `ProvisioningFailed`).
+//!
+//! Every list goes through the paging helper of the client (`list_all`: pages of 500, at most 5000 objects,
+//! one restart on `410 Gone`). A list cut at the cap, or by a server that failed part way, is "not read" past
+//! what came back, and a negative answer from it is a partial, never a block.
 //!
 //! Nothing is created. No canary claim is made.
 //!
@@ -44,6 +48,7 @@ use rdy_engine::check::{
 };
 use rdy_spec::check::{K8sName, K8sStorageClass};
 
+use crate::client::list::{Listed, list_all};
 use crate::client::{KubeError, ReadOnlyClient, ServerVersion};
 use crate::cluster::Cluster;
 
@@ -62,9 +67,6 @@ use judge::{
     Classes, Evidence, Nodes, Object, Unread, Verdict, judge_driver, judge_modes, judge_settings,
     judge_waiting, needs_evidence, select,
 };
-
-/// The most objects one list asks for. A longer list is read as its first page and the rest is "not read".
-const PAGE: u32 = 500;
 
 /// Below this much time left, the optional reads are skipped.
 const MIN_LEFT: Duration = Duration::from_millis(500);
@@ -179,21 +181,18 @@ fn sort<T, U>(
     }
 }
 
-/// The page of a list: its objects and whether the server had more.
-fn page_of<K: Clone, U>(list: kube::core::ObjectList<K>, map: impl Fn(K) -> Option<U>) -> Page<U> {
-    let more = list
-        .metadata
-        .continue_
-        .as_deref()
-        .is_some_and(|token| !token.is_empty());
+/// A list read by the paging helper: its objects and whether it was cut (the cap, or a server that failed
+/// part way).
+fn page_of<K, U>(list: Listed<K>, map: impl Fn(K) -> Option<U>) -> Page<U> {
     Page {
         items: list.items.into_iter().filter_map(map).collect(),
-        more,
+        more: list.partial,
     }
 }
 
-fn first_page() -> ListParams {
-    ListParams::default().limit(PAGE)
+/// The parameters of a list with no selector.
+fn plain() -> ListParams {
+    ListParams::default()
 }
 
 /// The Kubernetes version as (major, minor), from `gitVersion` or, failing that, `major` and `minor`
@@ -257,14 +256,14 @@ impl StorageClassCheck {
         Ok(verdict.finish(&self.params))
     }
 
-    /// The classes: the first page of the list, or the one class by name when the list is refused.
+    /// The classes: the list, or the one class by name when the list is refused.
     async fn read_classes(
         &self,
         client: &ReadOnlyClient,
         mapper: Mapper<'_>,
     ) -> Result<Classes, CheckError> {
         let api = client.all::<StorageClass>();
-        let listed = sort(mapper, api.list(&first_page()).await, |list| {
+        let listed = sort(mapper, list_all(&api, &plain()).await, |list| {
             page_of(list, |object| Class::from_object(&object))
         })?;
         Ok(match (listed, &self.params.class) {
@@ -304,7 +303,7 @@ impl StorageClassCheck {
         }
         let nodes = sort(
             mapper,
-            client.all::<CSINode>().list(&first_page()).await,
+            list_all(&client.all::<CSINode>(), &plain()).await,
             |list| page_of(list, Some),
         )?;
         let nodes = match nodes {
@@ -336,18 +335,13 @@ impl StorageClassCheck {
         }
         let objects = sort(
             mapper,
-            client.all::<CSIDriver>().list(&first_page()).await,
+            list_all(&client.all::<CSIDriver>(), &plain()).await,
             |list| {
                 let found = list
                     .items
                     .iter()
                     .any(|object| object.metadata.name.as_deref() == Some(driver));
-                let more = list
-                    .metadata
-                    .continue_
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty());
-                (found, more)
+                (found, list.partial)
             },
         )?;
         let object = match objects {
@@ -388,10 +382,7 @@ impl StorageClassCheck {
         }
         let claims = sort(
             mapper,
-            client
-                .namespaced::<PersistentVolumeClaim>(ns)
-                .list(&first_page())
-                .await,
+            list_all(&client.namespaced::<PersistentVolumeClaim>(ns), &plain()).await,
             |list| page_of(list, Some),
         )?;
         let page = match claims {
@@ -410,7 +401,7 @@ impl StorageClassCheck {
             }
         };
         if page.more {
-            verdict.unread("the claims after the first page", None);
+            verdict.unread("the claims past what was read", None);
         }
         let now = self.now.unwrap_or_else(Timestamp::now);
         let waiting = pending_claims(&page.items, &class.name, class.default, now);
@@ -423,17 +414,18 @@ impl StorageClassCheck {
         } else {
             sort(
                 mapper,
-                client
-                    .namespaced::<Event>(ns)
-                    .list(&first_page().fields("involvedObject.kind=PersistentVolumeClaim"))
-                    .await,
+                list_all(
+                    &client.namespaced::<Event>(ns),
+                    &plain().fields("involvedObject.kind=PersistentVolumeClaim"),
+                )
+                .await,
                 |list| page_of(list, Some),
             )?
         };
         let events = match events {
             Read::Ok(page) => {
                 if page.more {
-                    verdict.unread("the claim events after the first page", None);
+                    verdict.unread("the claim events past what was read", None);
                 }
                 page.items
             }

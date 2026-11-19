@@ -66,6 +66,11 @@ fn push_once(list: &mut Vec<String>, text: String) {
 /// from different resolvers, and that is not split horizon. Two sets with nothing in common are.
 fn overlaps(system: &[IpAddr], direct: &[IpAddr], asked_v6: bool) -> bool {
     let keep = |ip: &&IpAddr| asked_v6 || ip.is_ipv4();
+    // With nothing of the system answer in the families asked (it is IPv6 only and the AAAA question failed)
+    // there is nothing to compare, so the comparison is skipped and never warns.
+    if !system.iter().any(|ip| keep(&ip)) {
+        return true;
+    }
     system
         .iter()
         .filter(keep)

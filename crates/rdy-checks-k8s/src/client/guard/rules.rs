@@ -134,7 +134,7 @@ pub enum FieldSelector {
 impl FieldSelector {
     /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
     /// `labelSelector` key) meet the requirement.
-    fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+    pub(super) fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
         if let Self::LabelEquals(key) = self {
             // A set expression (`app in (a,key=x)`) can hide a term after a comma: refuse any `(`.
             if labels.is_some_and(|text| text.contains('(')) {
@@ -634,7 +634,7 @@ pub(crate) fn judge(
 }
 
 /// What a request path is, for the audit of a fixture run (`client::mock`).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     /// A path with no [`ALLOWED`] entry by design: `/version`, discovery and the three review POSTs.
@@ -647,7 +647,7 @@ pub(crate) enum Target {
 
 /// Classifies a path as written in the action log (no query string). Only the path is judged, so this
 /// says which entry a request belongs to, not whether the guard would allow it ([`judge`] does that).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn target_of(path: &str) -> Target {
     const REVIEWS: [&str; 3] = [
         "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
