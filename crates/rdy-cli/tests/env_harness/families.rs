@@ -7,11 +7,25 @@
 use rdy_checks_host::HostFamily;
 use rdy_checks_k8s::K8sFamily;
 use rdy_checks_k8s::client::Env;
+use rdy_checks_k8s::testing::ScriptedCluster;
 use rdy_checks_net::NetFamily;
 use rdy_engine::check::CheckInfo;
 use rdy_engine::family::{BuildError, Built, Family, Registry, RegistryError};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
+use std::cell::RefCell;
+
+thread_local! {
+    /// The scripted cluster of the env being run on this thread. `RunHooks::families` is a plain function
+    /// with no state, and `run_env` runs the whole run on the thread that set this, so the cell is how the
+    /// env's cluster reaches `registry`.
+    static CLUSTER: RefCell<Option<ScriptedCluster>> = const { RefCell::new(None) };
+}
+
+/// Serves `cluster` to the `k8s` family of the next `registry` call on this thread. `None` serves none.
+pub fn serve(cluster: Option<ScriptedCluster>) {
+    CLUSTER.with(|cell| *cell.borrow_mut() = cluster);
+}
 
 /// A registered family and the ids in it that are still stubs.
 ///
@@ -41,18 +55,20 @@ pub fn rows() -> Vec<Row> {
     ]
 }
 
-/// A registry with every family of [`rows`], and the `k8s` family over an empty environment (M1-118).
+/// A registry with every family of [`rows`], and the `k8s` family.
 ///
-/// The empty `Env` has no `KUBECONFIG`, no home directory and no pod, so the lazy probe finds no kubeconfig
-/// and every k8s check is skipped `missing_need`, whatever the machine running the test has. The family is
-/// not a row: the harness has no kube mock to serve a cluster (the mock is test code inside
-/// `rdy-checks-k8s`), so the completeness rule does not ask the k8s checks for env cases.
+/// With a scripted cluster ([`serve`], an env whose `kube` cap is true) the family reads it, in process,
+/// with the read-only guard in front (M1-185). Without one the family reads an empty `Env`: no
+/// `KUBECONFIG`, no home directory and no pod, so the lazy probe finds no kubeconfig and every k8s check
+/// is skipped `missing_need`, whatever the machine running the test has (M1-118). The family is not a row:
+/// the completeness rule does not ask the k8s checks for env cases.
 pub fn registry() -> Result<Registry, RegistryError> {
     let mut registry = Registry::new();
     for row in rows() {
         registry.register(Shared(row.family))?;
     }
-    registry.register(K8sFamily::with_env(Env::empty()))?;
+    let scripted = CLUSTER.with(|cell| cell.borrow().as_ref().map(ScriptedCluster::family));
+    registry.register(scripted.unwrap_or_else(|| K8sFamily::with_env(Env::empty())))?;
     Ok(registry)
 }
 

@@ -38,7 +38,7 @@ use rdy_spec::spec::{CheckSpec, Spec};
 use crate::access::{AccessCheck, Dial, DialOutcome, Dialed};
 use crate::admission::AdmissionCheck;
 use crate::client::{
-    ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions,
+    Connected, ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions,
     ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
@@ -103,11 +103,32 @@ impl K8sFamily {
         Arc::clone(&self.holder) as Arc<dyn Cluster>
     }
 
+    /// The family's answer as a [`Dial`], for tests that read what `k8s.access` would.
+    #[cfg(test)]
+    pub(crate) fn dial(&self) -> Arc<dyn Dial> {
+        Arc::clone(&self.holder) as Arc<dyn Dial>
+    }
+
     /// A family that reads `env` and not the process. Tests use it, so they never change the process.
     #[must_use]
     pub fn with_env(env: Env) -> Self {
         Self {
             holder: Arc::new(Holder::new(Some(env))),
+            namespace: None,
+        }
+    }
+
+    /// A family whose cluster is `mock`, served in process: no kubeconfig is read and no socket opens.
+    /// The probe runs the steps of the module text from the cluster line on, with the mock where the
+    /// connection would be, and the read-only guard stays in front of it. Only the `testing` feature has
+    /// this constructor (M1-185).
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub(crate) fn over_mock(mock: crate::client::mock::Mock) -> Self {
+        let mut holder = Holder::new(None);
+        holder.scripted = Some(mock);
+        Self {
+            holder: Arc::new(holder),
             namespace: None,
         }
     }
@@ -137,6 +158,10 @@ pub(crate) struct Holder {
     facts: Mutex<Option<ConnectionFacts>>,
     /// The credential plugin and the run probe, kept until the `exec` entry is written with its real end.
     plugin: Mutex<Option<(Probe, String, Vec<String>)>>,
+    /// The scripted cluster that stands in for the kubeconfig and the socket (M1-185). Only a build with
+    /// the `testing` feature has the field, so the shipped family has no way to name a mock.
+    #[cfg(any(test, feature = "testing"))]
+    scripted: Option<crate::client::mock::Mock>,
 }
 
 impl std::fmt::Debug for Holder {
@@ -154,6 +179,8 @@ impl Holder {
             dialed: OnceLock::new(),
             facts: Mutex::new(None),
             plugin: Mutex::new(None),
+            #[cfg(any(test, feature = "testing"))]
+            scripted: None,
         }
     }
 
@@ -195,6 +222,10 @@ impl Holder {
                 "--no-network".to_owned(),
                 "run rdy again without --no-network to check the cluster".to_owned(),
             )]);
+        }
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(mock) = self.scripted.clone() {
+            return Ok(self.attempt_scripted(mock, &ctx, started).await);
         }
         // The probe has its own limit, held by the engine. The client's timeouts are the longest a check may
         // take, because the one client serves every check of the run (ADR 0031 decision 7).
@@ -249,6 +280,35 @@ impl Holder {
         } else {
             ActionOutcome::Failed
         });
+        Ok(self.conclude(&ctx, started, facts, attempt).await)
+    }
+
+    /// The probe over a scripted cluster: the cluster line, `GET /version` through the guard, and what
+    /// follows a real attempt. The mock holds no credential, so there is no secret to register and no
+    /// plugin to record.
+    #[cfg(any(test, feature = "testing"))]
+    async fn attempt_scripted(
+        &self,
+        mock: crate::client::mock::Mock,
+        ctx: &FamilyProbe<'_>,
+        started: std::time::Instant,
+    ) -> Vec<Capability> {
+        let facts = crate::client::scripted_facts();
+        self.remember(facts.clone());
+        let announce = ctx.announce;
+        let attempt =
+            Connected::over_mock(mock, &ctx.probe, |line| announce(&line.to_string())).await;
+        self.conclude(ctx, started, facts, attempt).await
+    }
+
+    /// Settles the answer of the attempt and builds the `kube_context` capability.
+    async fn conclude(
+        &self,
+        ctx: &FamilyProbe<'_>,
+        started: std::time::Instant,
+        facts: ConnectionFacts,
+        attempt: Result<Connected, KubeError>,
+    ) -> Vec<Capability> {
         match attempt {
             Ok(connected) => {
                 let mut cap = Capability::new(Need::KubeContext.wire(), true);
@@ -273,9 +333,9 @@ impl Holder {
                     )
                     .await;
                 }
-                Ok(vec![cap])
+                vec![cap]
             }
-            Err(error) => Ok(self.failed(Some(facts), error)),
+            Err(error) => self.failed(Some(facts), error),
         }
     }
 

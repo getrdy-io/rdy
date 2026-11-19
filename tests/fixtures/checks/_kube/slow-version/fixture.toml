@@ -1,0 +1,12 @@
+schema = 1
+name = "kube-slow-version"
+summary = "A synthetic cluster whose version call answers after 10 minutes, so the run's attempt to reach it ends at its limit"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = []
+
+[caps]
+root = false
+network = true
+kube = true

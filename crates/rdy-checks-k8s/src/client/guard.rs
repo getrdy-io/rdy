@@ -42,7 +42,7 @@ mod tests;
 
 use rules::SELF_SUBJECT_REVIEW_PATH;
 pub(super) use rules::impersonation_allowed;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "testing")))]
 use rules::log_path;
 pub use rules::{
     ALLOWED, ANY_RESOURCE, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only,
@@ -53,7 +53,7 @@ pub use rules::{
 pub(super) use rules::{BodyView, judge};
 use rules::{bad_header, is_group, is_version};
 // What the mock harness (`client::mock`) needs to judge the requests it recorded the way the guard does.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(super) use rules::{Target, decode_query_value, log_path, target_of};
 
 use super::impersonate::{AddImpersonation, ImpersonationError};

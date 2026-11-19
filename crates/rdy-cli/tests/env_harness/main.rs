@@ -10,6 +10,10 @@
 //! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
+//! Clusters (M1-185). An environment whose `kube` cap is true serves its `api/` tree as a scripted cluster (the
+//! kube mock of `rdy-checks-k8s`, behind its `testing` feature), and the driver audits INV-14 over the run.
+//! `driver` says how.
+//!
 //! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
 //! so the page golden of each env in `HTML_ENVS` is rendered here from the normalised report. One test
 //! runs the host-min environment into a folder (exit 0) and checks the written page against the structure
@@ -90,7 +94,7 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
     let run = driver::run_env("all-pass", 1)?;
     assert_eq!(run.report.exit_code, 0);
     let ids: Vec<&str> = run.report.checks.iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids.len(), 15, "checks that ran: {ids:?}");
+    assert_eq!(ids.len(), 16, "checks that ran: {ids:?}");
     for check in &run.report.checks {
         assert_eq!(
             check.status,
@@ -101,6 +105,26 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
         );
         assert!(check.partial.is_none(), "{} is partial", check.key);
     }
+    // M1-185: k8s.version reads the scripted three-node cluster, and the audit of the run (INV-14) is clean.
+    let version = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.version")
+        .ok_or("k8s.version did not run")?;
+    assert_eq!(version.message, "Server v1.29.4, 1.27 to 1.31 needed");
+    assert!(run.violations.is_empty(), "{:?}", run.violations);
+    assert_eq!(
+        run.kube_requests.first().map(String::as_str),
+        Some("GET /version")
+    );
+    assert!(
+        run.kube_requests
+            .iter()
+            .any(|line| line.starts_with("GET /api/v1/nodes")),
+        "{:?}",
+        run.kube_requests
+    );
     let memory = run
         .report
         .checks
@@ -141,9 +165,10 @@ fn ids_with(run: &driver::EnvRun, status: rdy_spec::result::Status) -> Vec<&str>
     ids
 }
 
-/// M1-118: `warnings-only` exits 1 with two warnings and no block, and no check is partial or skipped.
+/// M1-118, M1-185: `warnings-only` exits 1 with three warnings and no block, and no check is partial or
+/// skipped. The third warning is k8s.storageclass: the scripted cluster has two classes and no default.
 #[test]
-fn warnings_only_exits_1_with_two_warnings_and_nothing_else() -> TestResult {
+fn warnings_only_exits_1_with_three_warnings_and_nothing_else() -> TestResult {
     use rdy_spec::result::{Status, Verdict};
     let Some(run) = run_linux_env("warnings-only")? else {
         return Ok(());
@@ -151,15 +176,31 @@ fn warnings_only_exits_1_with_two_warnings_and_nothing_else() -> TestResult {
     assert_eq!(run.report.exit_code, 1, "{}", run.terminal);
     assert_eq!(run.report.verdict, Verdict::ReadyWithWarnings);
     assert_eq!(run.report.verdict_reason, None);
-    assert_eq!(ids_with(&run, Status::Warn), ["host.lsm", "host.sysctl"]);
+    assert_eq!(
+        ids_with(&run, Status::Warn),
+        ["host.lsm", "host.sysctl", "k8s.storageclass"]
+    );
+    let storage = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.storageclass")
+        .ok_or("k8s.storageclass did not run")?;
+    assert!(
+        storage.message.starts_with("No default storage class"),
+        "{}",
+        storage.message
+    );
     assert_eq!(run.report.summary.block, 0);
     assert!(run.report.checks.iter().all(|c| c.partial.is_none()));
     Ok(())
 }
 
-/// M1-118: `all-block` exits 2 on four blockers: memory, disk, a held port and refused egress.
+/// M1-118, M1-185: `all-block` exits 2 on six blockers: memory, disk, a held port, refused egress, a cluster
+/// too old for the spec (k8s.version) and an identity that may not create namespaces (k8s.rbac). The
+/// k8s.storageclass result is partial and names the grant it lacks, because the `CSINode` list is refused.
 #[test]
-fn all_block_exits_2_on_four_blockers() -> TestResult {
+fn all_block_exits_2_on_six_blockers() -> TestResult {
     use rdy_spec::result::{Status, Verdict};
     let Some(run) = run_linux_env("all-block")? else {
         return Ok(());
@@ -169,8 +210,27 @@ fn all_block_exits_2_on_four_blockers() -> TestResult {
     assert_eq!(run.report.verdict_reason, None, "a block was seen");
     assert_eq!(
         ids_with(&run, Status::Block),
-        ["host.disk", "host.memory", "host.ports", "net.egress"]
+        [
+            "host.disk",
+            "host.memory",
+            "host.ports",
+            "k8s.rbac",
+            "k8s.version",
+            "net.egress"
+        ]
     );
+    let storage = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.storageclass")
+        .ok_or("k8s.storageclass did not run")?;
+    let partial = storage
+        .partial
+        .as_ref()
+        .ok_or("k8s.storageclass is not partial")?;
+    assert_eq!(partial.missing_grants, ["list csinodes (storage.k8s.io)"]);
+    assert!(run.violations.is_empty(), "{:?}", run.violations);
     assert_eq!(run.terminal.lines().last(), Some("NOT READY"));
     Ok(())
 }
@@ -179,9 +239,8 @@ fn all_block_exits_2_on_four_blockers() -> TestResult {
 /// shows `partial` results, a `missing_need` skip, and no block, so the verdict reason is
 /// `required_check_not_run` and the exit code is 2.
 ///
-/// `partial.missing_grants` stays empty here: only the k8s checks fill it, and they need a cluster the
-/// harness cannot serve (no kube mock outside `rdy-checks-k8s`), so its rendering is not proven in this
-/// env.
+/// `partial.missing_grants` stays empty here: only the k8s checks fill it, and this env has no kubeconfig,
+/// so it serves no cluster (`kube = false`) and sends no request. `all-block` shows the field (M1-185).
 #[test]
 fn no_privileges_shows_partial_results_and_a_missing_need_skip() -> TestResult {
     use rdy_spec::result::{Need, SkipKind, Status, Verdict, VerdictReason};
@@ -199,6 +258,7 @@ fn no_privileges_shows_partial_results_and_a_missing_need_skip() -> TestResult {
 
     let skipped = ids_with(&run, Status::Skipped);
     assert_eq!(skipped, ["k8s.version"]);
+    assert!(run.kube_requests.is_empty(), "{:?}", run.kube_requests);
     let version = run
         .report
         .checks
@@ -418,7 +478,7 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
         );
 
         // The same environment at one job and at eight gives the same report. Host-min has one check;
-        // all-pass has fourteen, so the order of completion has something to change.
+        // all-pass has sixteen, so the order of completion has something to change.
         let mut serial = driver::run_env(&env, 1)?.report;
         let mut parallel = driver::run_env(&env, 8)?.report;
         normalize_across_jobs(&mut serial);
