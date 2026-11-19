@@ -295,7 +295,7 @@ the earlier pause notes in this file's history. 46 is #75, merged 2026-11-19.
   net.dns: Alpine's `musl-utils` ships `getent`; the M1-154 fixture stays a minimal musl image without it.
   New M2-154 (SEC-22 strace leg for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
   M1-187 has since merged (#134).
-- 60 (#138, in CI at 567b9b96, merges before this PR): new M2-155 (the k8s skip after a probe
+- 60 (#138, merged as 4e566dea): new M2-155 (the k8s skip after a probe
   timeout shows the capability's hint, with a second 01 5.2 and 07 text) and M2-156 (the scheduler origin
   on the deadlines' clock under a paused clock). M2-126 becomes the per-check `services` pin (a new public
   `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules, `FieldSelector::Key` only
@@ -313,9 +313,8 @@ does not exist yet, and each piece needs its own security review, so it is not b
   interception case to M2-152.
 
 **Open PRs at the pause.**
-- In CI: #138 correction-60 (head 567b9b96), the last open PR before this one. It merges first.
-- Then #122, this pause-state PR. It merges main after #138 and needs `ci-ok`, because it edits
-  `12-progress.md`.
+- Merged: #138 correction-60, as 4e566dea.
+- Last: #122, this pause-state PR. It needs `ci-ok`, because it edits `12-progress.md`.
 - Closed: #62 (M1-162). It held an unsigned merge commit; #137 replaced it.
 - Parked: #83, the `merge_group` CI trigger. It is useless while `getrdy-io` is a personal account (owner
   type User), because merge queues need an organization. Do not merge it unless the repo moves to an org.
@@ -337,8 +336,7 @@ so CI runs one PR at a time.
 - The next PR is #139. #138 is correction-60.
 - The next free ADR on main is 0053. ADRs 0043 to 0046 (#137, #65, #64, #78), 0047 (#85), 0048 (#111),
   0049 (correction-56, Proposed), 0050 (#110, suspended by #123), and 0051 and 0052 (#118) are on main.
-- The next ticket ids are M1-188 and M2-157, and the next correction is 61. Those assume #138 merges; it
-  takes M2-155 and M2-156 (#120 took M1-187 and M2-154).
+- The next ticket ids are M1-188 and M2-157, and the next correction is 61. #138 took M2-155 and M2-156 (#120 took M1-187 and M2-154).
 - The next plan-correction row is PC-55. PC-54 is on main (#82).
 
 **Definition of done** (the "Done means" paragraph at the top of this file), at main a870ec3f:
