@@ -75,7 +75,7 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, ResourceQuota, Secret, Service,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
@@ -409,6 +409,7 @@ type Grant = (String, String, String, String);
 const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("get", "", "namespaces", ""),
     ("list", "", "nodes", ""),
+    ("list", "", "pods", ""),
     ("list", "", "persistentvolumeclaims", ""),
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
@@ -621,7 +622,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let check = run.context("k8s.nodes", Os::Linux, []);
     let client = connected.read_only(check.probe());
     let all = ListParams::default().limit(50);
-    // The selector the guard requires on the event list (02 Appendix B, section 4).
+    // The selectors the guard requires on these two lists (02 Appendix B, section 4).
+    let pods = all
+        .clone()
+        .fields("status.phase!=Succeeded,status.phase!=Failed");
     let events = all
         .clone()
         .fields("involvedObject.kind=PersistentVolumeClaim");
@@ -630,6 +634,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     //    the rules review are GA on every supported minor, so a 404 there fails too. The one tolerated
     //    404 is the get of a storage class that does not exist (the point is that it is not a 403).
     assert_served("nodes", false, &client.all::<Node>().list(&all).await);
+    assert_served("pods", false, &client.all::<Pod>().list(&pods).await);
     assert_served(
         "pvc",
         false,
@@ -932,10 +937,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 17 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 18 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 17 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 18 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }
