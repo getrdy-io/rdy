@@ -40,6 +40,8 @@ pub mod panic_hook;
 pub mod password;
 
 #[doc(hidden)]
+pub mod progress;
+#[doc(hidden)]
 pub mod prompt;
 #[doc(hidden)]
 pub mod redaction;
@@ -62,7 +64,6 @@ pub mod terminal;
 
 mod spec_cmds;
 mod spec_load;
-mod static_line;
 
 #[doc(hidden)]
 pub mod trust;

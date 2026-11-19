@@ -285,9 +285,7 @@ the trust store, opens no socket and creates no folder (C.3).
 ## 3. Progress display
 
 Progress uses `indicatif`. A run can take ten seconds or more (a check timeout is 10 s by default), and a
-silent terminal looks hung. It is never needed to read a result. The core build prints one static line,
-`Running 8 checks...`, on a TTY only, and clears it before the check list. The live line below is the full
-build.
+silent terminal looks hung. It is never needed to read a result. The live line below is the only progress display (PC-54: it replaced the earlier static line).
 
 The live line draws only when stderr is a TTY, `TERM` is not `dumb`, and none of `--quiet`, `--progress never`,
 `RDY_PROGRESS=never` and `RUST_LOG` is set. `--verbose` adds plain event lines on any stream.

@@ -14,7 +14,6 @@
 //! folder) is `run_watchdog.rs` and `run_watchdog_binary.rs` (M1-176, PC-51). The interrupt path is
 //! `run_interrupt.rs` (M1-058). "Files not written after the verdict" is the `run_cmd` unit tests, which
 //! hold that stdout already has the document (PC-50); neither of those is run with `--color always` here.
-//! The static line is `run_static_line_pty.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
