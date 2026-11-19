@@ -99,6 +99,42 @@ fn long_help_snapshots() {
     }
 }
 
+/// The legend and the rule of 07 D.7 ("Header wording"), as the plan words them, are in `rdy run --help`
+/// and in 07 A.3 (M1-143, PR #21 review).
+#[test]
+fn run_help_has_the_legend_and_the_rule_of_the_report() {
+    let plan = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/plan/07-cli-ux.md"),
+    )
+    .unwrap_or_else(|e| panic!("cannot read 07: {e}"));
+    let long = help(&["run"], "--help");
+    let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (plan, long) = (flat(&plan), flat(&long));
+    let legend = [
+        "BLOCK: fix before install.",
+        "WARN: fix if you can.",
+        "SKIP: rdy could not check it.",
+    ];
+    let rule = [
+        "NOT READY if anything blocks or a required check could not run.",
+        "READY with warnings if only optional things are wrong.",
+        "READY if every check ran and passed.",
+    ];
+    for sentence in legend.iter().chain(rule.iter()) {
+        assert!(long.contains(sentence), "rdy run --help lacks {sentence:?}");
+        // D.7 gives the same sentences, and A.3 holds them as the help prints them.
+        assert!(plan.contains(sentence), "07 lacks {sentence:?}");
+    }
+    assert!(plan.contains(&legend.join(" ")), "D.7 legend changed");
+    assert!(plan.contains(&rule.join(" ")), "D.7 rule changed");
+    assert!(
+        plan.matches("Words in the list: BLOCK: fix before install.")
+            .count()
+            >= 1,
+        "A.3 lacks the legend"
+    );
+}
+
 #[test]
 fn help_subcommand_matches_long_help() {
     let want = help(&["run"], "--help");
