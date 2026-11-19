@@ -932,10 +932,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 18 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 17 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 18 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 17 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }
