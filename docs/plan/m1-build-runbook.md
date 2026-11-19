@@ -190,75 +190,72 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-11-06)
+## State at the pause (2026-11-19)
 
-The fifth coordinator session paused here at the founder's request. Read this section and
-`reviews/open-findings-2026-11-06/pending-fixes.md`, then check every open PR's head and CI before acting.
-Every agent was stopped at the pause. The briefs, fix lists and coordinator scripts for the resume are in
-`reviews/open-findings-2026-11-06/`. They carry `<the coordinator session URL>` and `<scratchpad>`
-placeholders, which the next session fills in.
+The coordinator session of 2026-11-17 to 2026-11-19 paused here. Read this section, then check every open
+PR's head and CI, and every stacked branch's head, before acting. The queue log, the fix lists and the
+coordinator scripts lived in the session scratchpad, which does not survive a session. This section keeps
+what they said, and the cascade method below replaces `stackup.sh`.
 
 **Identity.** The 2026-10-31 rule is unchanged. Every commit is authored and committed as
 `Rdy <dev@getrdy.io>`. Every commit message, merges too, ends with `Signed-off-by: Rdy <dev@getrdy.io>`, a
-`Co-Authored-By` line and the coordinator's `Claude-Session` URL. Set it first in a new container:
-`git config user.name Rdy && git config user.email dev@getrdy.io`. `get_me` returned `getrdy-io` all session.
-Squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. A subagent writes its
-own model name in `Co-Authored-By`; the brief now says so.
+`Co-Authored-By` line with the agent's own model name and the coordinator's `Claude-Session` URL. Set it
+first in a new container: `git config user.name Rdy && git config user.email dev@getrdy.io`. Never use
+`git commit -s`: the local identity signs as someone else. Write the trailers into the message, and pass
+`-m` to every `git merge` so git never writes a merge message. `get_me` returned `getrdy-io` all session,
+and squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. An unsigned commit
+fails DCO and costs a new PR: #112 (M1-134) was closed for one and redone as #114.
 
 **Ownership.** Apostolic Path LLC owns the code, the copyright and the marks (NOTICE and TRADEMARKS.md on
 main). No document may name a person as owner, and no document may mention the founder's employer.
 
-**Merged in this session** (main at 3c49a5a), in merge order:
-- #31 correction-35, #18 M1-174, #33 correction-36, #20 M1-149, #19 M1-078, #36 correction-37.
-- #37 fixes main after #36. #36 changed 03 Appendix A rows that a test pins.
-- #21 M1-079, #38 correction-38, #32 M1-161, #40 correction-39, #34 M1-176, #22 M1-080.
-- #44 M1-124, #43 correction-40, #46 correction-41, #23 M1-150, #25 M1-072, #42 M1-086.
+**Merged in this session** (main at a77d7144), in merge order:
+- #71 M1-099, #81 correction-48, #58 M1-081, #86 M1-082, #87 correction-50, #84 M1-126.
+- #90 correction-51, #95 correction-52, #93 M1-130, #97 correction-53, #96 M1-132, #99 M1-129.
+- #101 correction-54, #102 correction-55, #98 M1-183, #88 M1-181, #103 correction-56, #91 M1-100.
+- #104 M1-101, #92 M1-182, #106 correction-57, #74 M1-096, #107 M1-184, #85 M1-133.
+- #110 the macOS arm64 PR gate (ADR 0050), #111 M1-136, #89 M1-141, #113 M1-128, #114 M1-134, #77 M1-177.
+- #82 M1-088, #94 M1-127, #100 M1-140, #109 M1-097, #72 M1-153, #80 M1-117.
+- #56 the http 302 flake fix, #115 correction-58, #116 M1-098.
 
-**Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
-M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-60: M1 184 tickets, 405 h, 345 h core; M2 156 tickets, 513.25 h; all milestones 440 tickets,
-1431.75 h, 1371.75 h core.
-Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
+**Merged on 2026-11-18 and 2026-11-19** (main at a870ec3f), in merge order:
+- #123 the macOS PR legs on Intel, #117 M1-107, #124 M1-113, #125 M1-175, #126 M1-115, #127 M1-118.
+- #128 M1-185, #129 M1-186, #130 M1-135, #131 M1-137, #132 M1-116, #119 M1-119, #133 M1-159, #134 M1-187.
+- #118 M1-155, #135 the probe clock fix, #121 the install redirects, #136 M1-154, #137 M1-162 (replaces #62,
+  closed unmerged).
+- #60 M1-142, #61 M1-173, #68 M1-143, #65 M1-163, #64 M1-164, #78 M1-165, #75 correction-46, #76 M1-178.
+- #70 M1-179 (31aa9926), the last M1 code PR, #120 correction-59 (a870ec3f), #138 correction-60 (4e566dea)
+  and #139, the password prompt echo fix.
 
-**Corrections filed in this session:**
-- 35: M1-148 drops adjtimex. `NativeCall::Adjtimex` moves to M2-004.
-- 36: M1-175 builds k8s.namespace. New M2-116 (`limit_needs`) and M2-117 (OpenShift namespace reads).
-- 37: `chronyc -n -c tracking`, with no `-t`. time_sync gets a step budget. The INV-11 local IPC exception
-  and a forged-SNTP T5 row.
-- 38: new M1-179 (env harness bounded hang), M2-118 (the watchdog report keeps the action log) and M2-119
-  (parallel SNTP). M1-130 takes three carries.
-- 39: `--no-network` is an allow-list: only AF_UNIX sockets from rdy or its children. firewall-cmd's local
-  IPC is named. chronyc does not run offline. The facade refuses network calls.
-- 40: the unsigned banner may name `--allow-unsigned`. M1-126's rule covers only hint, fix and error lines.
-- 41: new core M1-180 (`report.host.os` from os-release) and M2-120 (`ProductSlug` refuses `rdy`).
-- 42: the print banners stay in the flow with the title in the top margin of every page; the HTML size cap
-  cuts action rows, then Found and Needed lines. M1-175 builds k8s.dns. New M2-121 to M2-125.
-- 43: records and approves the 03 changes of #64 (k8s.crds reads discovery) and #65 (k8s.ingress). M1-175
-  builds k8s.crds and k8s.ingress. Two k8s verdicts go to the founder. New M2-126 and M2-127.
-- 44: records #68's decisions (M1-143). The run header prints at the end, so `--verbose` event lines come
-  before it. `--verbose` turns the live line off (M1-142's exit test), in the second of #60 and #68 to merge.
-  A full stderr pipe under `--verbose` ends in the watchdog (07 5.2). New M2-128 moves the header earlier.
-- 45: new core M1-181: `rdy run` writes the HTML report next to the JSON, and M1-138 depends on it. M1-100
-  takes #71's deferrals (pins, the generated-chain rig, the Timeout case) and grows to 3.5 h. M1-101 moves
-  to week 21.
-- 46: records and approves the 03 changes of #74 (net.egress status with no `expect_status`: 403 warns, 407
-  and 5xx fail) and #72 (net.dns needs `Network`, refused-range `getent` answers block, 9 s per name).
-  The second of #70 and #74, and of #70 and #72, to merge deletes that check's `PENDING` row (M1-179).
-  M2-060 sets non-dumpable right after the privilege gate, before any password prompt (#47 security).
-- 47: records and approves the 03 changes of #78 (k8s.cni reads DaemonSets by name only, unknown is partial,
-  default-deny is 03's). M1-175 builds k8s.cni. New M2-129: plugin pod restarts, ready below desired and a
-  live check of the unverified `cni.toml` entries.
+**Progress.** 181 of 184 M1 tickets are merged on main, 400.5 of 405 h: 154 of 156 core (342.5 of 345 h)
+and 27 of 28 non-core. The 184 count M1-187 (correction-59) and leave out M1-156, M1-158 and M1-166, which
+correction-58 moved to M2; their rows are stubs. All M1 code is merged. The three tickets left are founder
+steps: M1-138 and M1-139 (core) and M1-167 (non-core), 4.5 h. `12-progress.md` links the PR and gives the
+merge date of every merged line: this PR filled seven (M1-058 #47, M1-097 #109, M1-098 #116, M1-128 #113,
+M1-134 #114, not #112, M1-136 #111 and M1-184 #107), correction-60 (#138) filled the rest, and this PR
+sets M1-178 (#76) and M1-179 (#70) to their merge date, 2026-11-19. It also writes the "Summary" section.
+
+Totals on main, after correction-59 (#120): M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h;
+all milestones 438 tickets, 1429.25 h, 1369.25 h core. After #138 (correction-60): M2 156 tickets,
+513.25 h; all milestones 440 tickets, 1431.75 h, 1371.75 h core. Recompute with
+`python3 -I docs/plan/reviews/open-findings-2026-11-06/totals.py < docs/plan/11-backlog.md`.
+
+**Corrections filed in this session.** Corrections 35 to 47 are in `11-backlog.md`'s correction log and in
+the earlier pause notes in this file's history. 46 is #75, merged 2026-11-19.
 - 48: the env harness skips Linux envs on macOS and Windows (M1-086), so M1-117, M1-138, the done test and
   08 say the Linux legs; PC-53 for the plan. New M2-130: a `RunHooks` OS override. M1-107 adds k8s.version
   and the `api/` tree to `all-pass` and regenerates its goldens (4 h; M1-117's if it is not merged first).
+- 49 (in #85, M1-133): two founder hand steps, the `install-blocks` run against the first release and the
+  302 rule for `https://docs.getrdy.io/unsigned`, which must answer before M1-138 publishes.
 - 50: `--key` needs a signature; the unknown-key line shows the key id, not a fingerprint (01, 07 C.5). The
   `--allow-unsigned` page is M1-181's. 05 Surface 2 lists the `--key` file swap for M1-132. M1-098 builds
   the `auto` "direct works, proxy fails" sentence. M1-107 never uses an `HTTP_PROXY` proxy for https and
-  takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation tests (4 h).
+  takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation
+  tests (4 h).
 - 51: new core M1-182: host.container_runtime stores a proxy as `ProxyUrl::origin`, so a password in a URL
   with no scheme never reaches the report, plus a `url_userinfo` form for it; M1-138 depends on it. 05 INV-11
-  names the proxy lookup, `proxy_reach` and the direct retry. M1-107 checks `proxy_source` itself. 03 net.proxy
-  reads `daemon.json`.
+  names the proxy lookup, `proxy_reach` and the direct retry. M1-107 checks `proxy_source` itself. 03
+  net.proxy reads `daemon.json`.
 - 52: no new M1 ticket. M1-100 pins match the leaf only, and its net.tls_intercept `PENDING` row moves to
   M1-179 as `Timeout`. 05 T3 gains the JSON control rule. New M2-131 to M2-136: JSON escapes, the fix
   `<bdi>` override, `FixText` controls, the Java and Node stores, the verified path, the real anchor.
@@ -288,79 +285,165 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 58: new core M1-185 (the env harness serves a scripted cluster; the k8s parts of `all-pass`,
   `warnings-only` and `all-block`, and the `timeouts` slow `/version` case) and M1-186 (the terminal prints
   `partial.missing_grants`); M1-138 depends on both. M1-118 keeps the host and network parts (1.5 h) and
-  M1-107 goes to 3 h. The non-core M1-156, M1-158 and M1-166
-  move to M2-149, M2-151 and M2-153, after new facade tickets M2-148 and M2-150 and the env TLS rig M2-152;
-  their M1 rows are stubs. M2-142 takes the pending-claim age and `run.clock`. M1-154 depends on M1-155.
-  New M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
+  M1-107 goes to 3 h. M2-142 takes the pending-claim age and `run.clock`. M1-154 depends on M1-155. New
+  M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
   progress line gets #104. Merged M1-101, M1-112, M1-124, M1-169, M1-170, M1-174 and M1-182 move weeks.
-- 59: new core M1-187 (0.5 h, week 24): the slow `/version` case in the `timeouts` env, after M1-119 (#119)
-  and M1-185 merge; M1-185 proves it at family level only, and M1-138 depends on M1-187. M1-135's
-  acme-platform transcript ends `1 block, ... 1 optional check not run` and `NOT READY` (no TLS server for
-  `:443` in the env harness); the reason-line variant waits for M2-152. 03 net.dns: Alpine's `musl-utils`
-  ships `getent`; the M1-154 fixture stays a minimal musl image without it. New M2-154 (SEC-22 strace leg
-  for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
-- 60: new M2-155 (the k8s skip after a probe timeout shows the capability's hint; a second 01 5.2 and 07
-  text) and M2-156 (the scheduler origin on the deadlines' clock under a paused clock; #135 is done).
-  M2-126 becomes the per-check `services` pin (a new public `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules,
-  `FieldSelector::Key` only `=` and `==`, k8s.ingress pinned to the family namespace), 2.5 h, and holds
-  ADR 0044's first implied ticket. #62 is replaced: M1-162 lands from `m1/162-k8s-dns-2`.
+  The moves to M2 are below.
+- 59 (#120, merged 2026-11-19): new core M1-187 (0.5 h, week 24): the slow `/version` case in the
+  `timeouts` env, after M1-119 (#119) and M1-185 merge; M1-185 proves it at family level only, and M1-138
+  depends on M1-187. M1-135's acme-platform transcript ends `1 block, ... 1 optional check not run` and
+  `NOT READY` (no TLS server for `:443` in the env harness); the reason-line variant waits for M2-152. 03
+  net.dns: Alpine's `musl-utils` ships `getent`; the M1-154 fixture stays a minimal musl image without it.
+  New M2-154 (SEC-22 strace leg for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
+  M1-187 has since merged (#134).
+- 60 (#138, merged as 4e566dea): new M2-155 (the k8s skip after a probe
+  timeout shows the capability's hint, with a second 01 5.2 and 07 text) and M2-156 (the scheduler origin
+  on the deadlines' clock under a paused clock). M2-126 becomes the per-check `services` pin (a new public
+  `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules, `FieldSelector::Key` only
+  `=` and `==`, k8s.ingress pinned to the family namespace), 2.5 h, and holds ADR 0044's first implied
+  ticket. #62 is replaced by #137. It also links the PR and merge date of every merged M1 progress line.
 
-**Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
-- #26, #27, #28 and #24 come first, from the 2026-10-31 list.
-- Then #35, #39, #45, #47, #41, #48, #49 and #30.
-- #1 and #2 (Dependabot) are for the founder.
+**Moved to M2 in this session** (correction-58). Each of these builds needed a facade or harness piece that
+does not exist yet, and each piece needs its own security review, so it is not built under an M1 ticket:
+- M1-156 (net.registry) is M2-149, after M2-148: the `Probe::http` facade has no `Accept` header, response
+  body, `WWW-Authenticate` or Bearer support.
+- M1-158 (net.bandwidth) is M2-151, after M2-150, for the same facade gap. One ADR covers M2-148 and M2-150.
+- M1-166 (the net-airgapped env) is M2-153, after M2-152: the env driver has no TLS server rig.
+- Parts of M1-118: the Kubernetes parts of the envs went to M1-185, the `partial.missing_grants` terminal
+  golden to M1-186, the `warnings-only` pending-claim age on `run.clock` to M2-142, and the `all-block` TLS
+  interception case to M2-152.
 
-**Not finished.** M1-162 and M1-087 pushed nothing. Rerun them from the brief.
+**Open PRs at the pause.**
+- Merged: #138 correction-60, as 4e566dea.
+- Last: #122, this pause-state PR. It needs `ci-ok`, because it edits `12-progress.md`.
+- Closed: #62 (M1-162). It held an unsigned merge commit; #137 replaced it.
+- Parked: #83, the `merge_group` CI trigger. It is useless while `getrdy-io` is a personal account (owner
+  type User), because merge queues need an organization. Do not merge it unless the repo moves to an org.
+- For the founder: Dependabot #1, #2, #51, #53, #54 and #108. Never touch them.
+- No stacked branch is left. Every approved branch from the 2026-11-18 pause has merged.
+
+**macOS gate.** ADR 0050 is suspended. GitHub's `macos-15` arm64 pool gave no runners, so #123 moved the PR
+legs to `macos-15-intel`: the `macos-x64` tests and the `macos-arm64-compile` leg both run there
+(`.github/workflows/ci.yml`, the two matrix lines under the "Temporary (2026-11-18)" comment). When the
+arm64 pool returns, swap those two lines back and ADR 0050 applies again. The account's cap is 5 macOS jobs,
+so CI runs one PR at a time.
+
+**Not finished.**
+- Founder steps: M1-138 (tag and release 0.1.0), M1-139 (the alpha announcement) and M1-167 (time the
+  quickstart with two design-partner SEs). M1-137's review left one open item for M1-167 or release: time
+  the five-minute quickstart on a clean VM.
 
 **Numbers.**
-- The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0053. ADRs 0051 and 0052 are M1-155's (#118, `m1/155-net-dns-check2`, not
-  merged), and 0050 is the macOS CI gate (merged in #110). ADR 0042 (the Gatekeeper constraints list
-  wildcard) is in #48, accepted by security. ADR 0043 is on `m1/162-k8s-dns-2` (M1-162; #62 is replaced), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
-  in #78 (M1-165). ADR 0047 is in #85 (M1-133, merged). ADR 0048 is M1-136's docs-test ADR. ADR 0049 is
-  correction-56's (Proposed).
-- The next ticket ids are M1-188 and M2-157, and the next correction is 61 (49 is in #85).
-- The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
+- The next PR is #140. #138 is correction-60 and #139 is the prompt echo fix.
+- The next free ADR on main is 0053. ADRs 0043 to 0046 (#137, #65, #64, #78), 0047 (#85), 0048 (#111),
+  0049 (correction-56, Proposed), 0050 (#110, suspended by #123), and 0051 and 0052 (#118) are on main.
+- The next ticket ids are M1-188 and M2-157, and the next correction is 61. #138 took M2-155 and M2-156 (#120 took M1-187 and M2-154).
+- The next plan-correction row is PC-55. PC-54 is on main (#82).
+
+**Definition of done** (the "Done means" paragraph at the top of this file), at main a870ec3f:
+- Every M1 ticket merged: the founder's. Only M1-138, M1-139 and M1-167 are left, all founder steps.
+- CI green on main: met once #139 merges. The push runs on 31aa9926 and a870ec3f failed one test on
+  `macos-x64`, `rdy::prompt_pty a_password_over_the_cap_is_refused_with_exit_64` (300 s timeout). The cause
+  was a race: the prompt was written before echo and canonical mode went off, so on macOS a paste longer
+  than MAX_CANON (1024 bytes) lost its newline, and keys typed right after the prompt could echo. #139
+  turns hidden mode on before the prompt is written, checks the modes took effect, and adds deterministic
+  pty tests. 34466f6a passed all 18 checks, and 31aa9926 passes the full `cargo test --workspace` on Linux.
+- `cargo install --path crates/rdy-cli` builds: passing. Checked on main 34466f6a plus this PR's docs; the
+  binary then ran `rdy run examples/specs/acme-platform.yaml --allow-unsigned` and exited 2, not ready.
+- `rdy run examples/specs/acme-platform.yaml` gives the expected report against the fixtures: passing on
+  main. The `envs/acme-platform` goldens (M1-135, #130) run in CI; the expected ending is `NOT READY`, exit
+  2 (correction-59, #120).
+- `rdy verify` rejects a tampered spec: passing on main (M1-126, #84;
+  `crates/rdy-cli/tests/verify_command.rs`).
+- `12-progress.md` summarizes what shipped and what moved to M2 and why: in this PR ("Summary").
+- The final reply to the founder (that summary, the install command a design partner runs, and the three
+  decisions to look at): drafted by the coordinator, sent when #122 merges. The install command is the M1
+  one in CLAUDE.md until M1-138 publishes a release.
 
 **Process lessons from this session.**
-- A docs PR that touches a doc a test reads waits for `ci-ok`. Main went red once: #36 merged without CI,
-  and #37 fixed it. Tests read these parts:
+- Stack builders on approved but unmerged branches. A ticket whose dependency is approved does not wait for
+  the merge. Its builder branches from the dependency's approved head, and the PR opens after the base
+  merges. Eleven approved branches were stacked at the pause.
+- The squash-merge cascade. A squash merge gives main a commit that is not in any stacked branch, so a plain
+  main merge conflicts with the branch's own history. For each branch on a base that just merged:
+  1. Merge the base's final head (the head that was squash-merged), with `-m` and the trailers.
+  2. Check that main's tree equals that head's tree:
+     `git diff <base-final-head> origin/main --stat` prints nothing.
+  3. Merge main with `git merge -s ours origin/main -m "..."`. It records the squash commit without
+     changing files.
+  4. Push, then do the same for the branches stacked on this one, using this branch's new head as the base.
+  If the trees differ, main moved after the squash: do a normal main merge instead and run every check.
+- Never share `CARGO_TARGET_DIR` across worktrees. Test binaries keep the old `CARGO_MANIFEST_DIR` and read
+  fixtures from a removed path.
+- Never type a full SHA. Copy it from `git rev-parse` output. Typed SHAs go wrong.
+- Chain the resolve and the commit with `&&`, and grep for conflict markers before committing. The main
+  merge into #116 committed markers in the fixtures README because a failed script was chained with `;`. A
+  follow-up commit fixed it.
+- The disk is about 40 GB for every agent together, and it filled three times with four or five builders.
+  Run `cargo clean` in a worktree as soon as its branch is pushed for good, and delete dead cascade targets.
+- The container restarted at least three times, and every running agent was lost each time. Only pushed
+  work survived. Tell builders to push after each green step, and record each pushed head in the queue log.
+- GitHub's macOS arm64 runner pool (`macos-15`) went unavailable from about 08:33 UTC on 2026-11-18 for
+  hours. Gate jobs queued for 15 minutes and were cancelled, so no PR could reach a green `ci-ok`, while
+  GitHub's status page showed green. The founder chose to wait rather than change the gate, so ADR 0050
+  stays. When it happens again, do not merge around the gate or edit the workflow; hold merges and rerun the
+  cancelled jobs once the pool is back. Later on 2026-11-18 the pool was still empty, and #123 suspended
+  ADR 0050 by moving the PR legs to Intel (see "macOS gate" above).
+- ADR 0050 (#110) moved the macOS PR gate to arm64 on `macos-15` (6 to 12 minutes a run). Intel macOS runs
+  the full tests on main and nightly in `macos-intel.yml`. After #110 merged, every open PR needed a main
+  merge to run on the new gate.
+- There is no merge queue: `getrdy-io` is a personal account and merge queues need an organization. Merge
+  by hand, and merge main into a PR only when it is behind or dirty.
+- Every push starts a full CI run on five legs. The account's cap is 5 macOS jobs, so since #123 only one PR
+  is in CI at a time. Cancel runs on PRs that wait for a fix round.
+- Merge a docs-only PR right after a code merge, before main is merged into the next CI round, so main does
+  not move under a running CI.
+- Docs PRs that touch a doc a test reads conflict and break more often than code PRs. They wait for
+  `ci-ok`, and the second of two such PRs to merge resolves the conflict and reruns the tests. Tests read
+  these parts:
   - 03: its `###` headings and Appendix A.
   - 05: the Native calls table.
   - 07: B.1 to B.3, C.11, the trust goldens, and the console blocks C.12 to C.18 and 2.7.
   - 01: the json and yaml blocks under `###` headings.
+  - The README and the docs pages with tested shell blocks (M1-136's docs-test runner, ADR 0048).
+  - 12-progress: the `todo` rows (docs-test `pending=` check).
   Grep `crates/`, `tests/` and `xtask/` for the file name before calling a PR docs-only.
-- After any code merge, run the full `cargo test --workspace`. A compile error in one test crate stops every
-  other result. The lint wall's include prefixes are now `&[&str]` lists, and old branches still use a plain
-  string.
-- Host family merges conflict in `family.rs`, `family/tests.rs`, `lib.rs` and the fixtures README. Take
-  main's files and apply the branch's own changes, rather than resolving hunk by hunk.
-- `mergemain.sh` now works on a detached HEAD. The old version moved the branch out from under an agent's
-  worktree.
-- The kind workflow is outside `ci-ok`. It must still be green for a k8s PR that changes the role or the
-  guard, because `live_cluster.rs` pins the `GRANTED` list and a derived action count.
-- When main moves under a running CI, cancel the stale run and merge main again.
-- When a docs correction merges, hold it until the code PR whose CI is running has merged. Then main does not
-  move under that CI.
-- A security review on test-only PRs found a vacuous leak test (#41). Keep adding security review when a
-  ticket tests redaction.
-- GitHub's macOS arm64 runner pool (`macos-15`) went unavailable from about 08:33 UTC on 2026-11-18 for
-  hours. Gate jobs queued for 15 minutes and were cancelled, so no PR could reach a green `ci-ok`. The
-  founder chose to wait rather than change the gate, so ADR 0050 stays. When it happens again, do not
-  merge around the gate or edit the workflow; hold merges and rerun the cancelled jobs once the
-  pool is back.
+- Shared files conflict in every PR of a family: `tests/fixtures/README.md` "What exists today", the
+  runbook's next-ADR line and `docs/adr/README.md`. Keep main's text and add the branch's own lines.
 - An approved branch with an unsigned commit is re-landed as one signed squash commit on a new branch.
+- Approved PRs that sat 60 or more commits behind main were caught up by builders in local worktrees
+  without pushing. A push starts CI, and the cap allows one PR at a time. The coordinator pushed each one
+  at its turn.
+- Stacks of local, unpushed commits merge directly across worktrees, which share one object store. No side
+  branch is needed.
+- After the base of a stack is squash merged, merge its final head and then record main with `-s ours`, as
+  long as main's tree equals that head.
+- A CI failure from an apt mirror 503 is rerun with `rerun_failed_jobs`, so the macOS legs that passed keep
+  their result.
+- Mixing the std and tokio clocks cut paused-time limits short on slow runners. Fixed in #135. The
+  scheduler origin is M2-156.
+- The lint job's bare rdy-engine library build caught features gated off where a caller needs them. Fixed
+  in #61.
 
 **Environment facts from this session.**
-- The pinned toolchain 1.99.1 was installed and worked. `cargo-deny` and `cargo-nextest` are not installed,
-  and the CI deny job covers deny.
-- The macOS x64 leg is the slowest at about 25 minutes. Three PRs at once is the most CI keeps up with.
-- The GitHub job log API sometimes cuts nextest failure output. A haiku agent with `get_job_logs` and
-  `tail_lines` finds the failing test names.
+- The pinned toolchain 1.99.1 worked. `cargo-deny` and `cargo-nextest` are not installed, and the CI deny
+  job covers deny.
+- The machine has 4 CPUs and a shared disk of about 40 GB. Builders export
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0` and run
+  `cargo test --workspace -j 2`. A full debug build otherwise takes 6 GB per worktree.
+- A container restart kills every agent and every background waiter. Relaunch the CI waiters after one.
+- macOS arm64 gate runs take 6 to 12 minutes when runners are assigned.
+- `getrdy-io` is a personal account (owner type User). Merge queues and org-wide settings are not
+  available.
+- The permission system denied `rm` of scratchpad review folders. They were left in place.
 
 ## Notes carried to later tickets
 
 Review findings that belong to a later ticket. Give each note to that ticket's implementer and reviewer.
+
+- Correction 61 (security review of #139): `StdinLock` reads through an 8 KiB `BufReader`, so a pasted
+  password stays in std's stdin buffer and is never zeroized. Read the hidden prompt through an unbuffered
+  dup, as `password.rs` does. File it as an M2 security ticket.
 
 - M1-024 and M1-025: a bare `- id: host.memory` with no threshold must decode to `unsupported_spec` with
   reason `no_threshold` (01 section 2.5). Add a per-struct test so the FIELDS lists cannot drift.
@@ -436,6 +519,7 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - M1-137 or release-engineer: the `install.sh` header comment (lines 6 and 7) and RELEASING.md:123 run
     `curl -sSf` without `-L` on a GitHub release URL. GitHub answers with a redirect, so curl downloads 0
     bytes and `| sh` installs nothing. Use `--proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL`.
+    #121 makes this fix (approved, waiting for CI). Drop this note when it merges.
   - M1-126 or qa: `tests/fixtures/signed/acme-platform.yaml:11` and `tests/fixtures/minisign-c/acme-platform.yaml:11`
     say the quickstart "can reach READY today". That is stale. Re-sign the fixtures if they change.
   - M1-095 and M1-107: rerun the `root_*` `--no-network` strace test once net and k8s are registered. The
@@ -470,15 +554,11 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     - M2-135: the recording verifier keeps the verified path, so a pin matches any certificate on it
       (#91 SEC-100-1).
     - M2-136: the real trust anchor through `TrustStore` root subjects (#91 review).
-  - #91 (M1-100) and #70 (M1-179): add "backlog corrected 2026-11-17 (correction-52)" to their progress
-    lines. The second to merge deletes the net.tls_intercept `PENDING` row.
+  - #70 (M1-179): add "backlog corrected 2026-11-17 (correction-52)" to its progress line. #91 (M1-100)
+    merged first, so #70 deletes the net.tls_intercept `PENDING` row.
   - Follow-ups that correction-53 gave ids:
-    - M1-183: every spec read through `read_public`, and `spec sign` refuses an expired spec (#96 MF-01).
-      A 0.1.0 gate.
     - M2-137: host.container_runtime adds `ProxyUrl::secrets()` to the known-secret set (#92 security F8).
   - M2-032 (correction-53): the `signed_at` more than 24 h in the future warning (#96 SF-01).
-  - M1-134 (correction-53): the sign and verify page and #85's unsigned page say to compare the full
-    fingerprint from `rdy verify --key`, never the short form in the banner (#96 SF-02).
   - M2-107 (correction-53, +0.25 h): `check_note` also refuses the code points `is_invisible` flags in
     trust-store notes (#96 N-01).
   - Follow-ups that correction-54 gave ids:
@@ -492,18 +572,6 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       list with `continue` tokens (M1-107 reviews).
   - M1-107 (correction-54): its row says the plugin token is registered before the first request leaves.
     Its PR adds "backlog corrected 2026-11-17 (correction-54)" to its progress line.
-  - #100 (M1-140): use the new 07 D.7 `nothing_verified` sentence (correction-54) in `view.rs`,
-    `html_print.rs` and the golden.
-  - Follow-ups that correction-55 gave ids:
-    - M1-184: the handshake signature test on TLS 1.2 and 1.3, the unknown-CA zero-bytes case, and
-      `REVOCATION_NOTE` once per net.tls_intercept and net.egress result (M1-101 review SF-01, SF-02). A
-      0.1.0 gate. Build it after #74 (M1-096) and #91 (M1-100) merge.
-  - M1-101's PR (correction-55): SF-01's owner is M1-184, not M1-096, and SF-02 is an M1-138 dependency.
-    In the review, its progress line and 05 "TLS", write "from M1-184" for "from M1-096", and drop the
-    facade zero-bytes test from SF-02's fix (it exists:
-    `the_live_backend_handshakes_on_loopback_and_reads_the_real_store`, `probe/net/tls/tests.rs` ~764).
-  - #91 (M1-100) and correction-55 both edit 03's net.tls_intercept Thresholds line. The second to merge
-    keeps #91's pin text and appends correction-55's "Until M2-135" sentence.
   - M1-113 and M1-175 (correction-55): M1-113 implements `Cluster::read_only_as` and
     `Cluster::is_openshift` with tests through the family holder; M1-175 proves in a run on the kube mock
     that a spec `as:` reaches k8s.rbac and an OpenShift mock shows the grant text (M1-113 code review).
@@ -569,12 +637,13 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       security-reviewed. M2-149 and M2-151 are the checks (from M1-156 and M1-158).
     - M2-152: the generated-chain rig in the env driver, with the `all-block` TLS interception part. M2-153
       is the net-airgapped env (from M1-166), with a loopback-literal variant spec for SEC-22.
-  - M1-107's, M1-117's and M1-119's PRs (correction-58): drop the `all-pass` k8s.version and `api/` item
-    and the `timeouts` slow `/version` case (now M1-185's) and keep the correction-58 clause in their
-    progress lines.
+  - #117 (M1-107) and #119 (M1-119) (correction-58; #80, M1-117, merged): drop the `all-pass`
+    k8s.version and `api/` item and the `timeouts` slow `/version` case (now M1-185's) and keep the
+    correction-58 clause in their progress lines.
   - M1-118's PR (correction-58): its progress line's "not done, no owner yet" items now have owners
     (M1-185, M1-186, M2-142, M2-152); say so and keep the correction-58 clause.
-  - M1-155's PR (correction-58): ADR 0051 is its nameserver facade ADR. M1-154 builds after it.
+  - #118 (M1-155, correction-58): ADRs 0051 (the nameserver facade) and 0052 (the hand-written DNS reader,
+    `hickory-proto` as a test-only oracle) are in it. M1-154 is stacked on it.
   - Follow-ups that correction-59 gave ids:
     - M1-187: add M1-185's `_kube/slow-version` tree to the `timeouts` env with `kube = true`, prove the
       engine limit and `deadline_ms` at `jobs = 1` and `jobs = 8`, and regenerate the goldens. Build it
@@ -597,19 +666,93 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       (security review of PR #135).
     - M2-126 (rewritten): the per-check `services` pin, with ADR 0044's first implied ticket folded in. The
       k8s.nodes `pods` rule keeps its two `!=` terms when `FieldSelector::Key` narrows.
-  - M1-162 (correction-60): #62 is replaced by a new PR from `m1/162-k8s-dns-2`, one signed squash commit.
-    Where these notes say #62, read that PR.
-  - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
-    "correction-50".
-  - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
-    k8s.version and the `api/` tree to `all-pass`, sets `kube = true` and regenerates its three goldens.
-    #80 adds "backlog corrected 2026-11-17 (correction-54)" to M1-117's progress line.
+  - M1-162 (correction-60): #62 is replaced by #137 (merged), from `m1/162-k8s-dns-2`, one signed squash
+    commit. Where these notes say #62, read #137.
+  - #84 (M1-126) and #109 (M1-097) merged with "correction-49" in their progress lines. Change it to
+    "correction-50" in the next bookkeeping PR, and in #119 (M1-119) before it merges.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel
     and the AWS VPC CNI): their names come from memory of the projects' manifests. Read each entry's
     `source` page. Where the page shows the names, set `verified = true` and `checked_on`. Leave the rest
     for M2-129.
   - Whichever of #60 (M1-142) and #68 (M1-143) merges second passes `quiet or verbose` to
     `live_line_allowed` and updates the run_cmd.rs docs sentence on `--quiet` and `--verbose`.
+
+- From the 2026-11-17 and 2026-11-18 session (review nits and lows, by owner):
+  - Before each stacked PR opens:
+    - #117 (M1-107): `gen-k8s-version-fixtures.py --check` failed on hand-edited fixtures (`ccbc8840`). The
+      cascade ported M1-115's script fix into it; confirm the check passes in #117's CI. Nits: the
+      `std::mem::forget(dir)` temp dir leak per test run, the empty `_keep` wrapper, the progress reason
+      "no target namespace key", and `to_string_lossy` garbling a non-UTF-8 plugin path.
+    - M1-115: `gen-k8s-admission-fixtures.py` lines ~906 and ~911 label 1.16 to 1.19 as preferring `v1` and
+      1.20 as preferring `v1beta1`; 03 says `v1` since 1.17, so relabel. Wrap `rdy-readonly.yaml` lines 10
+      to 12.
+    - M1-116: its progress line says M1-115 at `f68ec65a`; name the head it was approved against.
+    - M1-159: the `pod.rs:5` comment overstates (raw bytes are held during the parse); add a node name with
+      a comma to the bad-name fixture.
+    - M1-118: `tests/fixtures/envs/all-pass/root/proc/cmdline` still says `rl-root` and `rl-swap` (from
+      #80; `rhel-root`, `rhel-swap`), and the all-pass guard loads the fixture twice. Both are still there
+      at `6fff6a63`.
+  - Open PRs:
+    - #62 (M1-162), next correction: k8s.dns blocks on ready below desired, which blocks during a rolling
+      update or with a cordoned node. k8s-expert suggests Fail only at 0 ready, Warn below desired, and
+      Fail for a headless DNS Service. The forward-loop fix names the coredns ConfigMap; for an `rke2-`
+      workload it should say HelmChartConfig. Kept as 03 says for M1 (a founder decision below).
+    - #60 (M1-142), SEC-60-4: spec or machine text in the progress line must pass `style::untrusted` and
+      the width cap, with an exit test for a check named `"\x1b]0;x\x07"` (the "name running checks"
+      ticket). SEC-60-6: `process::exit` and the panic hook skip `Progress::drop`. M1-058 merged without
+      it, so the next correction gives it an owner. After #60 merges, put `binary(run_progress_pty)` in
+      the nextest `pty-probe` group too.
+    - #70 (M1-179): `HANG_NOTES` uses `contains` (anchor it to ": it timed out"); `env_harness/main.rs:163`
+      says the PENDING list is "Empty since M1-174" and is over 100 columns; `registry.rs:8` is over 100
+      columns; `family/tests.rs` stub tests are vacuous now `STUBS` is empty; the M1-148 progress line
+      repeats "Backlog correction(s)" (PR #35 and #45 nits).
+    - #68 (M1-143), low: an engine test that a secret-shaped key reaches the `on_progress` hook redacted
+      (owner M2-124).
+  - Follow-ups on merged code (a later correction gives each an owner, or the next change to the file
+    takes it):
+    - #56: run the bare `8443` needle in the http 302 test on `log_text(&hub)` alone (JSON, no `Duration`
+      Debug).
+    - PR #24: `terminal/tests.rs:929` `unwrap_or_default()` hides a missing 07; the C.16 plan check repeats
+      literals instead of parsing the plan blocks.
+    - #58 (cli-ux): notes, message and fix on the HTML page come from `report`, not `on_page` (redacted,
+      but may pass the JSON's cut); "-0%" for small negative percents; float `_ms` not rounded; one
+      kubeconfig input for the canary test and its control; a comment on the binary search in `fit_page`.
+      M1-141's exit test should name the Found and Needed labels and lines (#58 security F3).
+    - #100 (M1-140): `nothing_verified_doc` (`html_print.rs:306`) embeds JSON with verdict `not_ready` and
+      reason null while the page says READY with warnings; set both and regenerate. Its progress line is
+      out of date (contact is untrusted, it edits `html_structure.rs`, the #89 risk note).
+      `html_structure.rs` lines 1 to 2 and 29 to 30 say three goldens and `results-` stems.
+    - #89 (M1-141): `check-html-escapes.sh` misses an attribute opened several lines before the allowed
+      json line (documented in its header). A render-time test that the JSON block sits in a top-level
+      `<script>` would close it.
+    - #107 (M1-184): the 20-note cap test (`egress/tests.rs:1105`) checks `result.notes` before
+      `report::json::bound` applies the cap; pass it through `bound`. The progress line should list
+      `HttpServer::finished`.
+    - #109 (M1-097, correction-50 review): 03 net.egress should say one proxy per run, and add the note
+      when `HTTP_PROXY` served https. Check 03; if it is missing, the next correction adds it.
+    - #85 (M1-133): `unsigned.md` ~58 should say `--key` needs a signature even with `--allow-unsigned`;
+      `install.md` Windows step 2 says "runs under bash", and should say "It is a POSIX sh script. Git
+      Bash or WSL can run it." (docs-writer).
+    - #84 (M1-126): the progress item (3) wording, a full stop on the `--key` error line, a redundant `||`
+      in the UnknownKey CRLF test.
+    - #93 (M1-130): `hooks.rs` lines ~12 and ~62 are over 100 columns; the wall field parse misses
+      non-`pub` and `pub(crate)` fields and same-line attributes, so cross-check the count against the
+      `hooks.rs` destructuring.
+    - #88 (M1-181): `env_harness/main.rs:14` doc line over 100 columns.
+    - #114 (M1-134): `sign_verify_page.rs` `stderr()` does not normalize `\r\n` on Windows like
+      `verify_command.rs`.
+    - #111 (M1-136): `docs_test.rs:874` says "rdy function" (it is a PATH wrapper now); the wrapper checks
+      only `$1`, so `rdy --flag run` is not wrapped; each run leaves a wrapper folder in the target temp
+      folder.
+    - #47 (M1-058), security: `runner.rs` `inherited_fds` hides a failed `read_dir`; return an error or warn
+      "could not list descriptors" (a new ticket or M2-104).
+    - #41: the `leaky_doc` doc comment could point at `redact/report/tests.rs` for the report-only path.
+    - #39: `registry.rs` `HANDLES_REFUSAL` has no validity test (each id registered, `reaches_network()`
+      and not `gates_on_network()`); time_sync `Ran::Offline` for timedatectl cannot happen (document it or
+      map it to Unusable); the M1-059 deferral (1) says M1-086 is "building the header now"; the offline
+      time_sync test could assert one Denied chronyc entry.
+  - Flake candidate: `rdy::prompt_pty backspace_edits_the_hidden_password` timed out at 120 s on macos-x64
+    (PR #27 job 133763510026, 2026-11-17). File it with the `flake` label.
 
 ## For the founder
 
@@ -695,3 +838,22 @@ From the 2026-11-17 session:
   - k8s.dns blocks when CoreDNS ready replicas are below desired. k8s-expert suggests a block only at 0 ready,
     a warn for some ready, and a block for a headless DNS Service.
   - k8s.ingress gives a note, not a warn, for two default classes.
+
+From the 2026-11-18 pause:
+
+- The M1 founder steps: M1-138 (push the `v0.1.0` tag and approve the release once every 0.1.0 gate has
+  merged), M1-139 (send the alpha announcement to design partners) and M1-167 (time the quickstart with two
+  design-partner SEs). M1-137's review left one open item: time the five-minute quickstart on a clean VM.
+- Correction-49 hand steps: run the `install-blocks` job against the first release, and add the 302 rule
+  for `https://docs.getrdy.io/unsigned` before M1-138 publishes.
+- Review the Dependabot PRs #1, #2, #51, #53, #54 and #108. Agents never touch them.
+- Decision: merge queues need an organization, and `getrdy-io` is a personal account. #83 (the
+  `merge_group` trigger) is parked until then. This adds to the 2026-10-29 decision on moving to an org.
+- Decision made on 2026-11-18: during the macOS arm64 runner outage, the founder chose to wait rather than
+  change the gate, so ADR 0050 stays. If an outage lasts days, reverting to the Intel gate is the
+  founder's call, through a new ADR.
+- Decisions to look at once #118 merges: ADR 0051 (the nameserver exchange in the facade) and ADR 0052 (a
+  hand-written DNS reader, with `hickory-proto` only as a test oracle). ADR 0049 (the M2 spec `k8s:` block)
+  is still Proposed.
+- Correction-58 moved M1-156, M1-158 and M1-166 to M2 (M2-149, M2-151, M2-153), because each needed a
+  facade or harness piece that needs its own security review.
