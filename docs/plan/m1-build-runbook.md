@@ -190,9 +190,9 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-11-18)
+## State at the pause (2026-11-19)
 
-The coordinator session of 2026-11-17 and 2026-11-18 paused here. Read this section, then check every open
+The coordinator session of 2026-11-17 to 2026-11-19 paused here. Read this section, then check every open
 PR's head and CI, and every stacked branch's head, before acting. The queue log, the fix lists and the
 coordinator scripts lived in the session scratchpad, which does not survive a session. This section keeps
 what they said, and the cascade method below replaces `stackup.sh`.
@@ -218,19 +218,29 @@ main). No document may name a person as owner, and no document may mention the f
 - #82 M1-088, #94 M1-127, #100 M1-140, #109 M1-097, #72 M1-153, #80 M1-117.
 - #56 the http 302 flake fix, #115 correction-58, #116 M1-098.
 
-**Progress.** 157 of 183 M1 tickets are merged on main: 142 of 155 core and 15 of 28 non-core. The 183
-leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their rows are stubs. This PR fills
-the `12-progress.md` lines of seven merged tickets that had no PR link or date: M1-058 (#47), M1-097
-(#109), M1-098 (#116), M1-128 (#113), M1-134 (#114, not #112), M1-136 (#111) and M1-184 (#107).
+**Merged on 2026-11-18 and 2026-11-19** (main at 34466f6a), in merge order:
+- #123 the macOS PR legs on Intel, #117 M1-107, #124 M1-113, #125 M1-175, #126 M1-115, #127 M1-118.
+- #128 M1-185, #129 M1-186, #130 M1-135, #131 M1-137, #132 M1-116, #119 M1-119, #133 M1-159, #134 M1-187.
+- #118 M1-155, #135 the probe clock fix, #121 the install redirects, #136 M1-154, #137 M1-162 (replaces #62,
+  closed unmerged).
+- #60 M1-142, #61 M1-173, #68 M1-143, #65 M1-163, #64 M1-164, #78 M1-165, #75 correction-46, #76 M1-178.
+
+**Progress.** 180 of 184 M1 tickets are merged on main: 154 of 156 core and 26 of 28 non-core. The 184
+count M1-187 (correction-59) and leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their
+rows are stubs. Not merged: M1-179 (#70, in CI, the last M1 code PR) and the founder steps M1-138, M1-139
+and M1-167. Once #70 lands, every M1 ticket is merged except those three. `12-progress.md` links the PR
+and gives the merge date of every merged line: this PR filled seven (M1-058 #47, M1-097 #109, M1-098 #116,
+M1-128 #113, M1-134 #114, not #112, M1-136 #111 and M1-184 #107), correction-60 filled the rest, and this
+PR sets M1-178 (#76) to its merge date, 2026-11-19.
 
 Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153 tickets, 509.75 h; all
-milestones 436 tickets, 1427.75 h, 1367.75 h core. Correction-59 (#120) adds M1-187 and M2-154: M1 184
-tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets, 1429.25 h, 1369.25 h core.
-Recompute with
+milestones 436 tickets, 1427.75 h, 1367.75 h core. After #120 (correction-59) and the correction-60 PR:
+M1 184 tickets, 405 h, 345 h core; M2 156 tickets, 513.25 h; all milestones 440 tickets, 1431.75 h,
+1371.75 h core. Recompute with
 `python3 -I docs/plan/reviews/open-findings-2026-11-06/totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session.** Corrections 35 to 47 are in `11-backlog.md`'s correction log and in
-the earlier pause notes in this file's history. 46 is #75, still open.
+the earlier pause notes in this file's history. 46 is #75, merged 2026-11-19.
 - 48: the env harness skips Linux envs on macOS and Windows (M1-086), so M1-117, M1-138, the done test and
   08 say the Linux legs; PC-53 for the plan. New M2-130: a `RunHooks` OS override. M1-107 adds k8s.version
   and the `api/` tree to `all-pass` and regenerates its goldens (4 h; M1-117's if it is not merged first).
@@ -278,12 +288,19 @@ the earlier pause notes in this file's history. 46 is #75, still open.
   M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
   progress line gets #104. Merged M1-101, M1-112, M1-124, M1-169, M1-170, M1-174 and M1-182 move weeks.
   The moves to M2 are below.
-- 59 (#120, open, needs `ci-ok`): new core M1-187 (0.5 h, week 24): the slow `/version` case in the
+- 59 (#120, open, merges after #70): new core M1-187 (0.5 h, week 24): the slow `/version` case in the
   `timeouts` env, after M1-119 (#119) and M1-185 merge; M1-185 proves it at family level only, and M1-138
   depends on M1-187. M1-135's acme-platform transcript ends `1 block, ... 1 optional check not run` and
   `NOT READY` (no TLS server for `:443` in the env harness); the reason-line variant waits for M2-152. 03
   net.dns: Alpine's `musl-utils` ships `getent`; the M1-154 fixture stays a minimal musl image without it.
   New M2-154 (SEC-22 strace leg for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
+  M1-187 has since merged (#134).
+- 60 (branch `correction-60`, its PR opens after #120 merges): new M2-155 (the k8s skip after a probe
+  timeout shows the capability's hint, with a second 01 5.2 and 07 text) and M2-156 (the scheduler origin
+  on the deadlines' clock under a paused clock). M2-126 becomes the per-check `services` pin (a new public
+  `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules, `FieldSelector::Key` only
+  `=` and `==`, k8s.ingress pinned to the family namespace), 2.5 h, and holds ADR 0044's first implied
+  ticket. #62 is replaced by #137. It also links the PR and merge date of every merged M1 progress line.
 
 **Moved to M2 in this session** (correction-58). Each of these builds needed a facade or harness piece that
 does not exist yet, and each piece needs its own security review, so it is not built under an M1 ticket:
@@ -296,47 +313,52 @@ does not exist yet, and each piece needs its own security review, so it is not b
   interception case to M2-152.
 
 **Open PRs at the pause.**
-- Open and approved, waiting for CI, in a suggested order:
-  - #117 M1-107 (`0b939f05`), the base of the k8s stack below. Merge it first.
-  - #118 M1-155 (`002c07f9`), with ADRs 0051 and 0052. M1-154 stacks on it.
-  - #119 M1-119 (`c26e2717`). M1-187 needs it.
-  - #120 correction-59 (`418d54d1`). It edits 03, so it needs `ci-ok`. It also edits this section: the
-    second of #120 and this PR to merge keeps this section, which already holds correction-59's lines.
-  - #121 the install curl redirect fix (`df072b68`): the documented install commands follow redirects,
-    https only. Docs and comments only; `fetch()` in `install.sh` was already right.
-- Older and approved: #60 M1-142, #61 M1-173, #62 M1-162, #64 M1-164, #65 M1-163, #68 M1-143, #70 M1-179,
-  #75 correction-46, #76 M1-178 and #78 M1-165. Each needs a main merge and `ci-ok`. Per correction-57,
-  the k8s ones (#62, #64, #65, #78) also fold their duplicate `ALLOWED` entries into M1-115's one entry per
-  resource once M1-115 merges, and need a `build_check` arm if M1-175 merged first (correction-56). They
-  change the role or the guard, so kind must be green too.
-- Stacked and approved. Each PR opens when its base merges, after the cascade below:
-  - On #117 (M1-107): M1-113 `c88dac85`, then M1-175 `86e8140e` on M1-113.
-  - On M1-175: M1-115 `39eebe1e`, then M1-116 `7220e937` and M1-159 `0df8c2cb` on M1-115.
-  - On M1-175: M1-118 `6fff6a63`. On M1-118: M1-185 `be1d0871`, then M1-186 `fd243a77` on M1-185; and
-    M1-135 `283d6ba2`, then M1-137 `b3776bb8` on M1-135 (approved at `582bf2ec`, plus the coordinator's
-    README `--proto-redir` fix).
-  - On #118 (M1-155): M1-154 `552a03c3`.
-  - M1-115 narrows the role and M1-159 adds `pods` back, so both need kind green.
+- In CI: #70 M1-179, the last M1 code PR.
+- After #70, one at a time: #120 correction-59, then the correction-60 PR, then #122 (this pause-state PR).
+  Each edits `12-progress.md` and this section, so each merges main first. #120 and correction-60 edit 03,
+  so they need `ci-ok`.
+- Closed: #62 (M1-162). It held an unsigned merge commit; #137 replaced it.
 - Parked: #83, the `merge_group` CI trigger. It is useless while `getrdy-io` is a personal account (owner
   type User), because merge queues need an organization. Do not merge it unless the repo moves to an org.
 - For the founder: Dependabot #1, #2, #51, #53, #54 and #108. Never touch them.
+- No stacked branch is left. Every approved branch from the 2026-11-18 pause has merged.
+
+**macOS gate.** ADR 0050 is suspended. GitHub's `macos-15` arm64 pool gave no runners, so #123 moved the PR
+legs to `macos-15-intel`: the `macos-x64` tests and the `macos-arm64-compile` leg both run there
+(`.github/workflows/ci.yml`, the two matrix lines under the "Temporary (2026-11-18)" comment). When the
+arm64 pool returns, swap those two lines back and ADR 0050 applies again. The account's cap is 5 macOS jobs,
+so CI runs one PR at a time.
 
 **Not finished.**
-- M1-187 is not started. It needs M1-119 (#119) and M1-185 merged, and correction-59 (#120).
-- Founder steps: M1-138 (tag 0.1.0), M1-139 (the alpha announcement) and M1-167 (timing the quickstart
-  with two design-partner SEs). M1-137's review left one open item for M1-167 or release: time the
-  five-minute quickstart on a clean VM.
-- Every other unmerged M1 ticket is in an open PR or a stacked branch above.
+- M1-179 is in #70.
+- Founder steps: M1-138 (tag and release 0.1.0), M1-139 (the alpha announcement) and M1-167 (time the
+  quickstart with two design-partner SEs). M1-137's review left one open item for M1-167 or release: time
+  the five-minute quickstart on a clean VM.
 
 **Numbers.**
-- The next PR is #122, which this pause-state PR takes.
-- The next free ADR is 0053. ADRs 0051 and 0052 are M1-155's (#118, `m1/155-net-dns-check2`). ADR 0050 is
-  the macOS CI gate (merged in #110). ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64
-  (M1-164) and ADR 0046 in #78 (M1-165). ADR 0047 (#85), 0048 (M1-136, #111) and 0049 (correction-56,
-  Proposed) are merged.
-- The next ticket ids are M1-188 and M2-155, and the next correction is 60 (49 is in #85). Those assume
-  #120 merges; it takes M1-187 and M2-154.
+- The next PR is #138. The correction-60 PR takes it or a later number.
+- The next free ADR on main is 0053. ADRs 0043 to 0046 (#137, #65, #64, #78), 0047 (#85), 0048 (#111),
+  0049 (correction-56, Proposed), 0050 (#110, suspended by #123), and 0051 and 0052 (#118) are on main.
+- The next ticket ids are M1-188 and M2-157, and the next correction is 61. Those assume #120 and the
+  correction-60 PR merge; they take M1-187, M2-154, M2-155 and M2-156.
 - The next plan-correction row is PC-55. PC-54 is on main (#82).
+
+**Definition of done** (the "Done means" paragraph at the top of this file), at main 34466f6a:
+- Every M1 ticket merged: waits on #70 (M1-179), and on the founder for M1-138, M1-139 and M1-167.
+- CI green on main: passing. The last two main commits (630cd50e, f0038ad8) passed all 18 checks; the run
+  on 34466f6a was still going at the pause.
+- `cargo install --path crates/rdy-cli` builds: passing. Checked on main 34466f6a plus this PR's docs; the
+  binary then ran `rdy run examples/specs/acme-platform.yaml --allow-unsigned` and exited 2, not ready.
+- `rdy run examples/specs/acme-platform.yaml` gives the expected report against the fixtures: passing on
+  main. The `envs/acme-platform` goldens (M1-135, #130) run in CI; the expected ending is `NOT READY`, exit
+  2 (correction-59, #120).
+- `rdy verify` rejects a tampered spec: passing on main (M1-126, #84;
+  `crates/rdy-cli/tests/verify_command.rs`).
+- `12-progress.md` summarizes what shipped and what moved to M2 and why: waits on #70, #120 and the
+  correction-60 PR. Its "Summary" section is written when the last M1 ticket merges. A draft is ready.
+- The final reply to the founder (that summary, the install command a design partner runs, and the three
+  decisions to look at): the founder's, after M1-138 tags 0.1.0. The install command is the M1 one in
+  CLAUDE.md until M1-138 publishes a release.
 
 **Process lessons from this session.**
 - Stack builders on approved but unmerged branches. A ticket whose dependency is approved does not wait for
@@ -365,14 +387,15 @@ does not exist yet, and each piece needs its own security review, so it is not b
   hours. Gate jobs queued for 15 minutes and were cancelled, so no PR could reach a green `ci-ok`, while
   GitHub's status page showed green. The founder chose to wait rather than change the gate, so ADR 0050
   stays. When it happens again, do not merge around the gate or edit the workflow; hold merges and rerun the
-  cancelled jobs once the pool is back.
+  cancelled jobs once the pool is back. Later on 2026-11-18 the pool was still empty, and #123 suspended
+  ADR 0050 by moving the PR legs to Intel (see "macOS gate" above).
 - ADR 0050 (#110) moved the macOS PR gate to arm64 on `macos-15` (6 to 12 minutes a run). Intel macOS runs
   the full tests on main and nightly in `macos-intel.yml`. After #110 merged, every open PR needed a main
   merge to run on the new gate.
 - There is no merge queue: `getrdy-io` is a personal account and merge queues need an organization. Merge
   by hand, and merge main into a PR only when it is behind or dirty.
-- Every push starts a full CI run on five legs. Keep at most three code PRs in CI, and cancel runs on PRs
-  that wait for a fix round.
+- Every push starts a full CI run on five legs. The account's cap is 5 macOS jobs, so since #123 only one PR
+  is in CI at a time. Cancel runs on PRs that wait for a fix round.
 - Merge a docs-only PR right after a code merge, before main is merged into the next CI round, so main does
   not move under a running CI.
 - Docs PRs that touch a doc a test reads conflict and break more often than code PRs. They wait for
@@ -387,6 +410,20 @@ does not exist yet, and each piece needs its own security review, so it is not b
   Grep `crates/`, `tests/` and `xtask/` for the file name before calling a PR docs-only.
 - Shared files conflict in every PR of a family: `tests/fixtures/README.md` "What exists today", the
   runbook's next-ADR line and `docs/adr/README.md`. Keep main's text and add the branch's own lines.
+- An approved branch with an unsigned commit is re-landed as one signed squash commit on a new branch.
+- Approved PRs that sat 60 or more commits behind main were caught up by builders in local worktrees
+  without pushing. A push starts CI, and the cap allows one PR at a time. The coordinator pushed each one
+  at its turn.
+- Stacks of local, unpushed commits merge directly across worktrees, which share one object store. No side
+  branch is needed.
+- After the base of a stack is squash merged, merge its final head and then record main with `-s ours`, as
+  long as main's tree equals that head.
+- A CI failure from an apt mirror 503 is rerun with `rerun_failed_jobs`, so the macOS legs that passed keep
+  their result.
+- Mixing the std and tokio clocks cut paused-time limits short on slow runners. Fixed in #135. The
+  scheduler origin is M2-156.
+- The lint job's bare rdy-engine library build caught features gated off where a caller needs them. Fixed
+  in #61.
 
 **Environment facts from this session.**
 - The pinned toolchain 1.99.1 worked. `cargo-deny` and `cargo-nextest` are not installed, and the CI deny
@@ -625,8 +662,8 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       (security review of PR #135).
     - M2-126 (rewritten): the per-check `services` pin, with ADR 0044's first implied ticket folded in. The
       k8s.nodes `pods` rule keeps its two `!=` terms when `FieldSelector::Key` narrows.
-  - M1-162 (correction-60): #62 is replaced by a new PR from `m1/162-k8s-dns-2`, one signed squash commit.
-    Where these notes say #62, read that PR.
+  - M1-162 (correction-60): #62 is replaced by #137 (merged), from `m1/162-k8s-dns-2`, one signed squash
+    commit. Where these notes say #62, read #137.
   - #84 (M1-126) and #109 (M1-097) merged with "correction-49" in their progress lines. Change it to
     "correction-50" in the next bookkeeping PR, and in #119 (M1-119) before it merges.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel

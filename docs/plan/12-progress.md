@@ -371,7 +371,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-177 | [#77](https://github.com/getrdy-io/rdy/pull/77) | 2026-11-17 | (1) Not taken, as the row does not name them: the host.time_sync harness nits (M1-179). (2) `observed.active[].ports` of host.firewall is now an array sorted by port number (an object cannot be sorted numerically in a golden); no other code reads it. (3) `cargo deny` is not installed here; CI's deny job covers it.
 
-- M1-178 | [#76](https://github.com/getrdy-io/rdy/pull/76) | 2026-11-17 | `SysctlName::canonical` by the first separator: spec, check and docs agree, no deferrals | added 2026-10-30 (correction-34, PR #20 review)
+- M1-178 | [#76](https://github.com/getrdy-io/rdy/pull/76) | 2026-11-19 | `SysctlName::canonical` by the first separator: spec, check and docs agree, no deferrals | added 2026-10-30 (correction-34, PR #20 review)
 
 - M1-179 | todo | | The env harness counts a hang the check survived as the Timeout class | added 2026-11-06 (correction-38, PR #35 review)
 
