@@ -1341,7 +1341,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
-| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes` free capacity: requests, `nodeName`, phase only |
+| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only; `k8s.dns`: container states of the DNS pods, with a label selector (only the pods of `kube-system` and `openshift-dns` are kept) |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
 | core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |
@@ -1349,12 +1349,14 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |
 | `storage.k8s.io` `csidrivers` | LIST | `k8s.storageclass`: driver objects |
-| `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name |
+| `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name; `k8s.dns`: replicas, ready count and container names of the DNS Deployment, by label |
+| `apps` `daemonsets` | LIST in `kube-system` and `openshift-dns` only | `k8s.dns`: desired and ready counts and container names of the DNS and NodeLocal DNSCache daemon sets, by label, or by the name `dns-default` in `openshift-dns` |
+| core `configmaps` | GET `kube-system/coredns`, by name | `k8s.dns`: the `Corefile` key only (ADR 0043) |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
 | `admissionregistration.k8s.io` `validatingwebhookconfigurations`, `mutatingwebhookconfigurations` | LIST | `k8s.admission` (M1-160): each webhook's name, `failurePolicy`, rules, selectors, `matchConditions` and backend kind; the CA bundle is dropped |
 | `admissionregistration.k8s.io` `validatingadmissionpolicies`, `validatingadmissionpolicybindings` | LIST | `k8s.admission` (M1-160): name, match constraints, actions; the CEL is dropped |
-| core `services` | LIST in a namespace, `fieldSelector` must include `metadata.name` | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names |
+| core `services` | LIST in a namespace, `fieldSelector` must include `metadata.name`; GET `kube-system/kube-dns`, `kube-system/rke2-coredns-rke2-coredns` (RKE2 names its Service after its Deployment) and `openshift-dns/dns-default`, by name | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names; `k8s.dns`: ClusterIP and ports |
 | `discovery.k8s.io` `endpointslices` | LIST in a namespace, `labelSelector` must include `kubernetes.io/service-name=<name>` | `k8s.admission` (M1-160): ready endpoints behind a webhook Service |
 | `kyverno.io` `clusterpolicies` (`v1`); `policies.kyverno.io` `validatingpolicies`, `imagevalidatingpolicies` (`v1`, `v1beta1`, `v1alpha1`) | LIST | `k8s.admission` (M1-160): policy names, actions and match filters |
 | `constraints.gatekeeper.sh` every resource (`v1beta1`; resource `*` in the table, ADR 0042) | LIST | `k8s.admission` (M1-160): constraint names, `enforcementAction` and match; parameters dropped |
@@ -1363,7 +1365,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    above: `admissionregistration.k8s.io` webhook configurations, `validatingadmissionpolicies` and bindings;
    core `services`; `discovery.k8s.io` `endpointslices`; Kyverno and Gatekeeper policy objects. Still to
    come: ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
+   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap

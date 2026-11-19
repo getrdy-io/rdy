@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-openshift"
+summary = "OpenShift: the dns-default daemon set in openshift-dns found by label, no kube-dns Service, no Corefile read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-healthy-corefile-forbidden"
+summary = "CoreDNS is healthy and the identity may not get the coredns ConfigMap"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

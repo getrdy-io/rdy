@@ -87,7 +87,7 @@ pub fn api_read_line(entry: &Allowed) -> String {
         let verb = match access {
             Access::List => "list",
             Access::ListInNamespace(_) => "list in a namespace",
-            Access::Get(_) => "get",
+            Access::Get(_) | Access::GetIn { .. } => "get",
         };
         if !verbs.contains(&verb) {
             verbs.push(verb);
