@@ -105,6 +105,13 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
+`checks/k8s.crds/` holds 29 clusters (the definition cases `crds-present`, `crd-group-missing`, `crd-version-old`, `crd-not-in-group`,
+`crd-any-version`, `crd-aggregated`, `crd-discovery-forbidden`, `crd-document-forbidden`, `crd-document-gone`, the operator cases `operator-ready`,
+`operator-not-ready`, `operator-partly-ready`, `operator-scaled-to-zero`, `operator-missing`, `operator-forbidden`, `operator-old`,
+`operator-prerelease`, `operator-equal`, `operator-digest-label`, `operator-label-differs`, `operator-latest`, `operator-sidecar`,
+`operator-ambiguous`, `operator-registry-port`, `operator-hostile`, and `everything-wrong`, `warn-only`, `two-groups`, `namespace-secrets`),
+`generated` by `scripts/gen-k8s-crds-fixtures.py` (`--check` fails on drift and on a file the script did not write). The Deployments
+carry annotations and environment values with markers that no result may hold.
 `checks/net.egress/` holds eleven scripted `net.json` cases, each with a reviewed `expect.json` (M1-095, M1-096): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused`, `nxdomain`, and the HTTP cases `http-ok`, `http-503`, `http-401-default`, `http-404-not-expected` and `not-http`. A `serve` entry names a server that
 code registers, so `crates/rdy-checks-net/src/expect_cases.rs` runs them through `rdy_engine::testing::assert_cases_with`, which takes the replay servers and the hosts the family builds. The TLS cases need real sockets and are in the check's own tests.

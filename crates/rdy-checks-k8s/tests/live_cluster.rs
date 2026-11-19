@@ -831,6 +831,16 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
+    // k8s.crds reads an operator Deployment by name. CoreDNS is a Deployment of every kind cluster, and the
+    // kind job grants it through the operator template (a Role of kube-system, by name).
+    assert_served(
+        "deployment by name (k8s.crds)",
+        false,
+        &client
+            .namespaced::<k8s_openapi::api::apps::v1::Deployment>("kube-system")
+            .get("coredns")
+            .await,
+    );
     assert_served(
         "daemonsets (needs the optional kube-system Role)",
         false,
@@ -983,6 +993,24 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         ),
         ("watch", "", "services", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
+        // The deployment grant is a get by name, not a list.
+        ("list", "apps", "deployments", Some("default"), None),
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("default"),
+            Some("coredns"),
+        ),
+        // resourceNames holds inside the namespace of the Role: another Deployment is refused.
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("kube-system"),
+            Some("other"),
+        ),
+        ("delete", "apps", "deployments", Some("default"), None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
         ("patch", "", "nodes", None, None),
@@ -1067,9 +1095,11 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
                 })
             };
             let optional = *namespace == "kube-system"
-                && KUBE_SYSTEM_ROLE
+                && (KUBE_SYSTEM_ROLE
                     .iter()
-                    .any(|&(verb, group, resource, name)| listed(&[(verb, group, resource, name)]));
+                    .any(|&(verb, group, resource, name)| listed(&[(verb, group, resource, name)]))
+                    // The operator template, rendered for CoreDNS by the kind job.
+                    || listed(&[("get", "apps", "deployments", "coredns")]));
             if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
                 unexpected.push(format!("{namespace}: {grant:?}"));
             }
@@ -1111,10 +1141,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 24 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 25 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 24 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 25 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

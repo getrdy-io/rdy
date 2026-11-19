@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-document-forbidden"
+summary = "The group list is readable and the document of the version is not"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -248,6 +248,13 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
         Access::GetIn { namespace, name } => {
             format!("{prefix}/namespaces/{namespace}/{resource}/{name}")
         }
+        Access::GetInNamespace(only) => {
+            format!(
+                "{prefix}/namespaces/{}/{resource}/{}",
+                name(only),
+                name(&Only::Any)
+            )
+        }
     }
 }
 
@@ -256,8 +263,10 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            if matches!(access, Access::Get(_) | Access::GetIn { .. })
-                || entry.field_selector == FieldSelector::NotRequired
+            if matches!(
+                access,
+                Access::Get(_) | Access::GetIn { .. } | Access::GetInNamespace(_)
+            ) || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
                 assert_eq!(judge_get(&format!("{path}?limit=500")), Ok(()), "{path}");
@@ -287,6 +296,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             Access::List,
             Access::ListInNamespace(Only::Any),
             Access::Get(Only::Any),
+            Access::GetInNamespace(Only::Any),
             Access::GetIn {
                 namespace: "x",
                 name: "x",
@@ -297,7 +307,13 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 .access
                 .iter()
                 .any(|a| std::mem::discriminant(a) == std::mem::discriminant(&access));
-            if !listed {
+            // A get of one object in one namespace is inside a get in any namespace, when the entry has that.
+            let inside_a_wider_get = matches!(access, Access::GetIn { .. })
+                && entry
+                    .access
+                    .iter()
+                    .any(|a| matches!(a, Access::GetInNamespace(Only::Any)));
+            if !listed && !inside_a_wider_get {
                 let path = path_for(entry, &access);
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
@@ -582,6 +598,43 @@ fn lists_without_a_required_selector_and_gets_are_not_affected() {
         "/api/v1/namespaces/app",
     ] {
         assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+}
+
+#[test]
+fn an_operator_deployment_is_read_by_name_in_any_namespace_and_nothing_else_of_it() {
+    // k8s.crds: one Deployment by name, in the namespace the spec names.
+    for path in [
+        "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager",
+        "/apis/apps/v1/namespaces/kube-system/deployments/x",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for (path, rule) in [
+        // A list outside kube-system, a cluster-wide list or get, a subresource, and another kind.
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments",
+            RULE_NOT_ALLOWED,
+        ),
+        ("/apis/apps/v1/deployments/cert-manager", RULE_NOT_ALLOWED),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager/scale",
+            RULE_SUBRESOURCE,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager/status",
+            RULE_SUBRESOURCE,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/statefulsets/x",
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/replicasets/x",
+            RULE_NOT_ALLOWED,
+        ),
+    ] {
+        assert_eq!(judge_get(path), Err(rule), "{path}");
     }
 }
 
@@ -1243,7 +1296,7 @@ async fn unlisted_resources_subresources_and_hostile_requests_are_refused() {
             RULE_NOT_ALLOWED,
         ),
         (
-            "/apis/apps/v1/namespaces/kube-system/deployments/x",
+            "/apis/apps/v1/namespaces/kube-system/statefulsets/x",
             RULE_NOT_ALLOWED,
         ),
         (

@@ -48,6 +48,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0041](0041-repository-recreated-pr-numbers-restarted.md) | Repository recreated on 2026-10-30; PR numbers restarted | Accepted, code-reviewed (PR #16) |
 | [0043](0043-k8s-dns-reads-and-the-role.md) | `k8s.dns` reads the cluster DNS by label, the Corefile from one named ConfigMap, and the OpenShift namespace through a second role file | Accepted, security-reviewed (PR #62) |
 | [0044](0044-k8s-ingress-reads-and-the-role.md) | `k8s.ingress` reads classes, Gateway API classes and the Services of the target namespace, by three lists and no role of its own | Accepted, security-reviewed (PR #65) |
+| [0045](0045-k8s-crds-discovery-and-one-deployment-get.md) | `k8s.crds` reads definitions from API discovery, not from the CRD objects, and operators with one `get deployments` grant | Proposed (M1-164) |
 | [0042](0042-guard-entry-for-every-resource-of-the-gatekeeper-constraints-group.md) | The read guard admits a list of every resource in `constraints.gatekeeper.sh/v1beta1` | Accepted, security-reviewed (PR #48) |
 | [0047](0047-install-only-blocks-and-the-redirect-of-unsigned.md) | Install-only blocks run against the newest published release, and the `/unsigned` redirect is a declared file | Accepted (M1-133, PR #85) |
 | [0048](0048-docs-test-markers-and-the-readme-goldens.md) | Docs-test markers, the run folder, and README transcript goldens | Proposed (M1-136) |

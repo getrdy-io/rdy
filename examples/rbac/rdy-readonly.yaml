@@ -9,7 +9,8 @@
 # deployments can return literal environment variable values, and those often hold credentials. rdy keeps
 # only the fields it judges (for pods: requests, node name and phase) and drops the rest.
 # Webhook configurations carry a CA bundle (a public certificate) and policies carry rules: rdy keeps
-# names, match rules and actions only. The token is still a credential, so keep it short
+# names, match rules and actions only. The optional rdy-readonly-operator.yaml adds a get of one named
+# operator Deployment for k8s.crds, with the same caveat. The token is still a credential, so keep it short
 # lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test

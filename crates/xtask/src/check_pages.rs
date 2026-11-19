@@ -88,6 +88,9 @@ pub fn api_read_line(entry: &Allowed) -> String {
             Access::List => "list",
             Access::ListInNamespace(_) => "list in a namespace",
             Access::Get(_) | Access::GetIn { .. } => "get",
+            Access::GetInNamespace(_) => {
+                "get by name in the spec's namespace, granted by the optional examples/rbac/rdy-readonly-operator.yaml"
+            }
         };
         if !verbs.contains(&verb) {
             verbs.push(verb);

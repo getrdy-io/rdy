@@ -2,8 +2,9 @@
 //!
 //! The role is the second line behind the guard. If the two drift, either rdy asks for something the
 //! role does not grant (a check fails with 403 on a cluster that uses the role) or the role grants
-//! something rdy never reads. Both directions are tested. The role is two files: the main one, and the
-//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162), which is read together with it.
+//! something rdy never reads. Both directions are tested. The role is three files: the main one, the
+//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162) and the optional operator template
+//! (`rdy-readonly-operator.yaml`, M1-164), which are read together with it.
 
 #![allow(clippy::expect_used)]
 // This test reads the example role file from the repository, which the lint wall bans in the rest of
@@ -18,7 +19,12 @@ use rdy_checks_k8s::client::guard::{ALLOWED, Access, Only};
 use serde_json::Value;
 
 /// The example files, under `examples/rbac/`.
-const FILES: [&str; 2] = ["rdy-readonly.yaml", "rdy-readonly-openshift-dns.yaml"];
+const FILES: [&str; 3] = [
+    "rdy-readonly.yaml",
+    "rdy-readonly-openshift-dns.yaml",
+    // The optional operator template, which holds the Role of the `k8s.crds` read.
+    "rdy-readonly-operator.yaml",
+];
 
 /// The documents of the example files, parsed.
 fn documents() -> Vec<Value> {
@@ -84,6 +90,16 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::Get(Only::Any) => ("get", None, String::new()),
                 // A get of one name is granted by name, so the role cannot read any other object.
                 Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
+                // A get of a named object in a namespace the spec names: the optional operator template,
+                // a Role of one namespace and one name.
+                Access::GetInNamespace(Only::Any) => (
+                    "get",
+                    Some("<operator-namespace>".to_owned()),
+                    " name=<operator-deployment>".to_owned(),
+                ),
+                Access::GetInNamespace(Only::Name(ns)) => {
+                    ("get", Some((*ns).to_owned()), String::new())
+                }
                 Access::ListInNamespace(Only::Any) => ("list", None, String::new()),
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())
@@ -179,7 +195,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 3);
+    assert_eq!(bindings.len(), 4);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]

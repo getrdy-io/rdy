@@ -2,12 +2,13 @@
 
 use rdy_engine::check::CheckInfo;
 
-use crate::{access, admission, dns, ingress, namespace, nodes, rbac, storageclass, version};
+use crate::{access, admission, crds, dns, ingress, namespace, nodes, rbac, storageclass, version};
 
 /// Every `k8s.*` check this crate has built, in catalog order.
-static INFOS: [&CheckInfo; 9] = [
+static INFOS: [&CheckInfo; 10] = [
     &access::INFO,
     &admission::INFO,
+    &crds::INFO,
     &dns::INFO,
     &ingress::INFO,
     &namespace::INFO,

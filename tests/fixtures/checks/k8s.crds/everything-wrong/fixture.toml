@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-everything-wrong"
+summary = "A missing group, an operator that is not ready, and an operator below the minimum"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

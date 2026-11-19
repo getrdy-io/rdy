@@ -1,0 +1,111 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/pki.acme.example/v1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "pki.acme.example/v1",
+    "resources": [
+      {
+        "name": "certificates",
+        "singularName": "certificate",
+        "namespaced": true,
+        "kind": "Certificate",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "shortNames": [
+          "cert",
+          "certs"
+        ],
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "certificates/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "Certificate",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      },
+      {
+        "name": "issuers",
+        "singularName": "issuer",
+        "namespaced": true,
+        "kind": "Issuer",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "issuers/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "Issuer",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      },
+      {
+        "name": "clusterissuers",
+        "singularName": "clusterissuer",
+        "namespaced": true,
+        "kind": "ClusterIssuer",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "clusterissuers/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "ClusterIssuer",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      }
+    ]
+  }
+}

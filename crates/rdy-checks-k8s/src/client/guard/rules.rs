@@ -114,6 +114,9 @@ pub enum Access {
     /// One object of a cluster-scoped resource by name, or a `Namespace` by name:
     /// `/<prefix>/<resource>/<name>`.
     Get(Only),
+    /// One object of a namespaced resource, by name, in the namespaces `Only` admits:
+    /// `/<prefix>/namespaces/<namespace>/<resource>/<name>`. The name is any valid name.
+    GetInNamespace(Only),
     /// One named object of one namespace: `/<prefix>/namespaces/<namespace>/<resource>/<name>`. Both are
     /// fixed in the table, so a role can grant it with `resourceNames` in a `Role` of that namespace and
     /// nothing more.
@@ -315,9 +318,12 @@ pub const ALLOWED: &[Allowed] = &[
         group: "apps",
         version: "v1",
         resource: "deployments",
-        access: &[Access::ListInNamespace(Only::Name("kube-system"))],
-        checks: &["k8s.nodes", "k8s.dns"],
-        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label",
+        access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::GetInNamespace(Only::Any),
+        ],
+        checks: &["k8s.nodes", "k8s.dns", "k8s.crds"],
+        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -1084,6 +1090,7 @@ fn check_get(
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
+            (Access::GetInNamespace(only), Some(namespace), Some(_)) => only.admits(namespace),
             (
                 Access::GetIn {
                     namespace: ns,
