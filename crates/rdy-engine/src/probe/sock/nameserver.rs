@@ -47,7 +47,15 @@
 //! entry, once per check.
 
 use std::net::{IpAddr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// The remaining budget is measured on tokio's clock when tokio is in the build, the clock the backend's
+// timeout runs on. It is the real clock in a normal run. Under a paused test clock, a real-clock
+// measurement would take real milliseconds off a virtual limit and cut the call early.
+#[cfg(not(any(feature = "runtime", feature = "loopback")))]
+use std::time::Instant;
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+use tokio::time::Instant;
 
 use rdy_spec::result::ActionKind;
 use rdy_spec::scalar::Host;
