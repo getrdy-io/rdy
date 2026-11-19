@@ -35,6 +35,15 @@ nightly run, within a day. The fix is a follow-up PR. A red `macos-intel` run on
 release until it is fixed or explained. If `macos-15` gets no runner, the `macos-arm64` leg queues and
 blocks PRs: see the revert below.
 
+## Suspended (2026-11-18)
+
+From about 08:33 UTC on 2026-11-18, GitHub assigned no runner to `macos-15` jobs for this account. Each
+job waited 15 minutes and was cancelled, while `macos-15-intel` jobs ran. After about 10 hours the
+founder chose to switch. Only step 1 of the revert below is applied: the two PR legs are `macos-x64`
+(full tests) and `macos-arm64-compile` (compile only), both on `macos-15-intel`. `macos-intel.yml`
+stays. This ADR stays in force. When `macos-15` gets runners again, swap the two matrix lines in
+`ci.yml` back and remove this section.
+
 ## How to revert
 
 1. In `ci.yml`, replace the two macOS legs with `macos-x64` on `macos-15-intel` (full tests) and a
