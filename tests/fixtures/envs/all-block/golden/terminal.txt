@@ -36,6 +36,7 @@ cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
                                    fix from the spec file (not verified): Run the install with an
                                    identity that can create namespaces.
   WARN     k8s.storageclass        not verified: could not read the CSINode list
+                                   missing grants: list csinodes (storage.k8s.io)
                                    fix from rdy: Ask the cluster admin to grant this identity: list
                                    csinodes (storage.k8s.io). Check each with `kubectl auth can-i
                                    list csinodes.storage.k8s.io`.
