@@ -831,3 +831,22 @@ async fn a_run_reads_at_most_32_discovery_documents_and_then_says_so() {
     assert!(rig.paths().is_empty());
     rig.audit();
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[tokio::test]
+async fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    crate::client::mock::hits::clear();
+    let rig_one = rig("operator-ready");
+    let _ = rig_one.finding(json!({"operators": [operator(None)]})).await;
+    // The audit records the hits.
+    rig_one.audit();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.crds"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.crds is read by no fixture of the tests listed here"
+    );
+}

@@ -308,7 +308,13 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 .access
                 .iter()
                 .any(|a| std::mem::discriminant(a) == std::mem::discriminant(&access));
-            if !listed {
+            // A get of one object in one namespace is inside a get in any namespace, when the entry has that.
+            let inside_a_wider_get = matches!(access, Access::GetIn { .. })
+                && entry
+                    .access
+                    .iter()
+                    .any(|a| matches!(a, Access::GetInNamespace(Only::Any)));
+            if !listed && !inside_a_wider_get {
                 let path = path_for(entry, &access);
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }

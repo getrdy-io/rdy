@@ -194,7 +194,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 3);
+    assert_eq!(bindings.len(), 4);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]

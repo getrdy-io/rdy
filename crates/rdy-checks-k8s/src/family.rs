@@ -42,6 +42,7 @@ use crate::client::{
     ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
+use crate::crds::CrdsCheck;
 use crate::dns::DnsCheck;
 use crate::ingress::IngressCheck;
 use crate::namespace::NamespaceCheck;
@@ -544,6 +545,7 @@ pub(crate) fn build_check(
         CheckParams::K8sNamespace(params) => Ok(Built::new(Box::new(NamespaceCheck::new(
             params, namespace, cluster,
         )))),
+        CheckParams::K8sCrds(params) => Ok(Built::new(Box::new(CrdsCheck::new(params, cluster)))),
         CheckParams::K8sDns(params) => Ok(Built::new(Box::new(DnsCheck::new(params, cluster)))),
         CheckParams::K8sIngress(params) => Ok(Built::new(Box::new(IngressCheck::new(
             params, namespace, cluster,
