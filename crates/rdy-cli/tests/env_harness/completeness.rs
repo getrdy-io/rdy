@@ -9,7 +9,13 @@
 //! | `Pass` | always | a case whose `expect.json` has `result.level` `pass` |
 //! | `NonPass` | always | a case whose `result.level` is `warn` or `fail` |
 //! | `Partial` | the check has a `Root` want | a case with `caps.root = false` and `result.partial` set |
-//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case with `result.timed_out_ms` whose `native`, `commands`, `api` or `net.json` files hold a `blackhole` or a `delay_ms` of at least the check's timeout |
+//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case whose `native`, `commands`, `api`, `net.json` or `chain.json` files hold a `blackhole` (or a `silent` chain) or a `delay_ms` of at least the check's timeout, and whose `expect.json` has `result.timed_out_ms` (the scheduler ended the check) or a `result.notes` entry that names the hang (the check cut the source itself and still gave its verdict) |
+//!
+//! A note names the hang when it holds `timed out` or `no reply within` (`HANG_NOTES`). A hang with neither
+//! `timed_out_ms` nor such a note proves nothing about how the check ended, so it does not count.
+//! The rule does not link the hang to the host a note names, so a case with a blackhole for one host and an
+//! unrelated `timed out` note also counts. The reviewed `expect.json` of each case keeps that honest.
+//! `has_silent_peer` reads only `chain.json`, which only `net.tls_intercept` has.
 //!
 //! A case counts only through its `expect.json`, the reviewed result. A case that loads but has no
 //! `expect.json` proves nothing about what the check says, so it is not counted. The shape of the `result`
@@ -52,7 +58,7 @@ impl fmt::Display for Class {
                 "a no-privilege partial case (caps.root false, result.partial set)"
             }
             Self::Timeout => {
-                "a Timeout case (result.timed_out_ms, and a blackhole or a delay_ms at the check's timeout in its files)"
+                "a Timeout case (a blackhole or a delay_ms at the check's timeout in its files, and result.timed_out_ms or a result.notes entry that names the hang)"
             }
         })
     }
@@ -69,6 +75,9 @@ pub struct Pending {
     /// Why they are not there.
     pub why: &'static str,
 }
+
+/// What a note says when the check cut a hung source itself. A note holding one of these names the hang.
+const HANG_NOTES: [&str; 2] = ["timed out", "no reply within"];
 
 /// The time the engine gives `info` before it ends the check: its own default, or 10 s, and never more
 /// than 60 s (`CheckInfo::default_timeout`).
@@ -242,13 +251,26 @@ fn classes_of(
         if !fixture.manifest().caps.root && result.get("partial").is_some_and(|p| !p.is_null()) {
             have.insert(Class::Partial);
         }
-        if result.get("timed_out_ms").is_some_and(Value::is_number)
+        if (result.get("timed_out_ms").is_some_and(Value::is_number) || names_the_hang(result))
             && holds_a_hang(&case_dir, timeout_ms)?
         {
             have.insert(Class::Timeout);
         }
     }
     Ok(have)
+}
+
+/// Whether a `result.notes` entry names a hang the check survived.
+fn names_the_hang(result: &Value) -> bool {
+    result
+        .get("notes")
+        .and_then(Value::as_array)
+        .is_some_and(|notes| {
+            notes
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|note| HANG_NOTES.iter().any(|marker| note.contains(marker)))
+        })
 }
 
 /// Whether the case in `dir` scripts a hang: a `delay_ms` of at least `timeout_ms` in a `native`,
@@ -268,7 +290,17 @@ fn holds_a_hang(dir: &Path, timeout_ms: u128) -> Result<bool, String> {
         }
     }
     let net = dir.join("net.json");
-    Ok(net.is_file() && has_blackhole(&read_json(&net)?))
+    if net.is_file() && has_blackhole(&read_json(&net)?) {
+        return Ok(true);
+    }
+    let chain = dir.join("chain.json");
+    Ok(chain.is_file() && has_silent_peer(&read_json(&chain)?))
+}
+
+/// A `chain` of `silent` in a `chain.json`: the in-memory peer of `net.tls_intercept` that never answers
+/// the ClientHello. It is the same hang as a `blackhole`, with no address to write it on.
+fn has_silent_peer(chain: &Value) -> bool {
+    chain.get("chain").and_then(Value::as_str) == Some("silent")
 }
 
 /// Every `.json` file below `dir`, in name order.

@@ -1302,6 +1302,27 @@ fn a_sysctl_written_with_dots_and_with_slashes_is_one_parameter() {
     );
     assert!(message.contains("same kernel parameter"), "{message}");
     assert!(message.contains("vm.max_map_count"), "{message}");
+    // The first separator decides, so a dot first makes a slash stand for a dot of the interface name.
+    assert_eq!(
+        name("net.ipv4.conf.eth0/100.rp_filter").canonical(),
+        "net/ipv4/conf/eth0.100/rp_filter"
+    );
+    let message = bad_value(
+        "host.sysctl",
+        &json!({"expect": {
+            "net.ipv4.conf.eth0/100.rp_filter": 1, "net/ipv4/conf/eth0.100/rp_filter": 2
+        }}),
+    );
+    assert!(message.contains("same kernel parameter"), "{message}");
+    assert!(message.contains("eth0/100"), "{message}");
+    // Only `a./b` is newly refused: the others were refused before the first-separator rule.
+    for bad_name in ["a.b/.c", "a.b//c", "a./b", "a.b/", "a.b/-c"] {
+        let reason = why("host.sysctl", &json!({"expect": {bad_name: "1"}}));
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { .. }),
+            "{bad_name}: {reason:?}"
+        );
+    }
     // Different parameters stay different.
     typed(
         "host.sysctl",

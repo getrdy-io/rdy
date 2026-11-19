@@ -194,8 +194,10 @@ the equality easier to see in a diff.
 - **Raw bytes** live only in memory owned by the collector task and the redactor: no temp file, and no raw
   value in the action log, `tracing` or an error.
 - **M2.** A failed entry is dropped (`redactor_error`). A residual scan re-checks stored bytes and prints "this
-  is a bug in rdy" on a hit. Entry names are redacted in a filename-safe form. On Linux, `rdy bundle` and
-  `rdy upload` call `rustix::process::set_dumpable_behavior(NotDumpable)`.
+  is a bug in rdy" on a hit. Entry names are redacted in a filename-safe form. On Linux every command calls
+  `rustix::process::set_dumpable_behavior(NotDumpable)` right after the INV-10 privilege gate passes, before
+  any password prompt. Never earlier: the gate reads `/proc/self/auxv` and start-up lists `/proc/self/fd`
+  first. M2-104 lists descriptors before the flag or uses `close_range` (correction-46).
 - **Versions.** Each rule has a version; changing what it matches bumps it and needs security-reviewer
   approval. The manifest lists the set id (`rdy-redact/1`) and every rule version.
 - **Emails in bundles: on by default, customer opt-out.** Only the customer can turn it off, with
@@ -706,7 +708,7 @@ M2 and later (coarser; split to four hours or less when M2 is planned):
 - [M2] Bundle rules for emails and SaaS tokens and cloud credentials | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing and PEM state | exit test: new cases pass and `--keep-emails` sets `groups_off_by_flags`.
 - [M2] Bundle rules for entropy and IPv4 and IPv6 and MAC | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing and PEM state | exit test: opt-in groups stay off unless asked and false positives are under 2%.
 - [M2] Spec and CLI additions for redact_patterns and max_size and redact-pattern | owner: rust-engineer | est: 2h | depends on: Streaming redactor with line framing and PEM state | exit test: 33 patterns or an unknown group exit 64.
-- [M2] Residual scan and per-entry fail-closed handling and non-dumpable process | owner: rust-engineer | est: 4h | depends on: Streaming redactor with line framing and PEM state | exit test: a planted rule gap shows `residual_hits` and Linux shows `Dumpable: 0`.
+- [M2] Residual scan and per-entry fail-closed handling and non-dumpable process | owner: rust-engineer | est: 4h | depends on: Streaming redactor with line framing and PEM state | exit test: a planted rule gap shows `residual_hits`, and the real binary run as non-root on Linux reports `Dumpable: 0`, exits 0 and still gives the inherited-descriptor warning (M2-060 in `11-backlog.md` has the order rule).
 - [M2] SEC-44 Full redaction corpus with chunk-boundary cases | owner: qa-engineer | est: 7h | depends on: Bundle rules for emails and SaaS tokens and cloud credentials | exit test: the 60 cases pass at every split offset, CI fails under 25 MiB/s or over 128 MiB RSS, and a pinned second-opinion scanner finds only allowlisted false positives.
 - [M2] Bundle manifest wire types and schema in rdy-spec | owner: rust-engineer | est: 4h | depends on: Generate JSON schemas with schemars and check drift in CI | exit test: the Appendix C sample validates and no field holds a raw hash.
 - [M2] Collector trait and registry and caps and truncation markers | owner: rust-engineer | est: 8h | depends on: Bundle manifest wire types and schema in rdy-spec | exit test: unknown kinds are skipped and every cut carries the 5.2 marker.
