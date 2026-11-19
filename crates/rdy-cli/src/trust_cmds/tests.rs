@@ -119,7 +119,8 @@ impl Terminal for Transcript {
         }))
     }
 
-    fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+    fn read_hidden(&mut self, prompt: &str) -> Result<Secret, PromptError> {
+        self.screen.borrow_mut().push_str(prompt);
         let text = self.hidden.pop_front().unwrap_or_default();
         // The typed text is not shown. The terminal ends the line itself.
         self.screen.borrow_mut().push('\n');
