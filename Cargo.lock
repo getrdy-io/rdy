@@ -3524,6 +3524,7 @@ dependencies = [
  "clap",
  "jsonschema",
  "rdy",
+ "rdy-checks-host",
  "rdy-checks-k8s",
  "rdy-engine",
  "rdy-spec",

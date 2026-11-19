@@ -20,6 +20,27 @@ on:
 permissions: {}
 
 jobs:
+  # A catalog entry whose vendor page nobody read in 180 days stops the release (03 Appendix B, M1-173).
+  # It runs here and not in ci.yml: in a pull request workflow every pull request would turn red on
+  # day 181. The date is the day of this run, in UTC. It is its own job because it builds xtask from
+  # cold, which does not belong in the 15 minutes of the artifact checker. Both jobs belong to this
+  # reusable workflow, so release.yml's `custom-check-release-artifacts` fails if either fails, and
+  # sign-release waits for that job. The `--today` line is pinned by tests/lint-wall (no `--max-days`).
+  agents-stale:
+    name: security-agent catalog is fresh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Check the security-agent catalog is fresh
+        run: cargo run --locked --quiet --package xtask -- agents-stale --today "$(date -u +%F)"
+
   check:
     name: check release artifacts
     runs-on: ubuntu-24.04

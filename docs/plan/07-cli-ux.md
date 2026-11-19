@@ -277,8 +277,10 @@ is signed in C.4. That is a different machine.
 `--quiet` drops the header, PASS and not-applicable lines, the file list and the progress. It keeps the
 banner, every problem with its fix, the summary, the folder line and the verdict (C.1). `--verbose` adds
 under each entry `expected`, `observed` (scalars as `key=value`, lists as `key=list(N)`, objects as
-`key=map(N)`) and `took` lines, a `needs` block under the header, one plain line as each check finishes (on a
-pipe too), and an `actions` count (C.2). `--dry-run` (M2) verifies the spec, prints what each check would
+`key=map(N)`) and `took` lines, a `needs` row under the header, one plain line as each check finishes (on a
+pipe too, printed before the header, see C.2), and an `actions` count (C.2). `--verbose` turns the live
+line off, as `--quiet` does (section 3). `--quiet` keeps the `Tip:` and the macOS or Windows folder note, because they are about
+the run and not the list. `--dry-run` (M2) verifies the spec, prints what each check would
 read, contact and need, and ends with `Dry run: nothing was run.` It reads only rdy's own process state and
 the trust store, opens no socket and creates no folder (C.3).
 
@@ -287,8 +289,8 @@ the trust store, opens no socket and creates no folder (C.3).
 Progress uses `indicatif`. A run can take ten seconds or more (a check timeout is 10 s by default), and a
 silent terminal looks hung. It is never needed to read a result. The live line below is the only progress display (PC-54: it replaced the earlier static line).
 
-The live line draws only when stderr is a TTY, `TERM` is not `dumb`, and none of `--quiet`, `--progress never`,
-`RDY_PROGRESS=never` and `RUST_LOG` is set. `--verbose` adds plain event lines on any stream.
+The live line draws only when stderr is a TTY, `TERM` is not `dumb`, and none of `--quiet`, `--verbose`, `--progress never`,
+`RDY_PROGRESS=never` and `RUST_LOG` is set. `--verbose` prints plain event lines on any stream instead (C.2).
 
 It draws one line, redrawn at most 10 times a second, no bar, nothing else on screen:
 
@@ -776,6 +778,11 @@ Verdict:
   NOT READY if anything blocks or a required check could not run.
   READY with warnings if only optional things are wrong.
   READY if every check ran and passed.
+
+Words in the list:
+  BLOCK: fix before install.
+  WARN: fix if you can.
+  SKIP: rdy could not check it.
 
 Examples:
   Run a spec your vendor signed:
@@ -1854,14 +1861,27 @@ Every report from this run is marked UNSIGNED SPEC.
 Report written to ./rdy-report-acme-platform-20270309T143005Z/
 WARNING: UNSIGNED SPEC
 NOT READY
+$ echo $?
+2
 ```
 
 ### C.2 The READY run with `--verbose`
 
-Exit 0. The `.. finished` lines are printed as checks finish, so on a pipe they appear before the list.
+Exit 0. The `.. finished` lines are printed as checks finish, on a pipe too, so they come first: the header
+and the list are printed when the run ends, because the header holds facts that are known only then (the
+`needs` row). A check the plan skipped never ran, so it has no line (`host.disk/system`). A time under
+10 s is in milliseconds, and from 10 s on in whole seconds. The `expected` and `observed` pairs are in key
+order, as in the JSON file (01 section 5.5), so the text does not depend on how the build orders a map. `--verbose` turns the live progress line off,
+because these lines say the same thing. When a family prints its cluster line (ADR 0031), it can land inside
+the event block, between two whole lines.
 
 ```console
 $ rdy run acme-quickstart.yaml --verbose
+  .. finished host.memory (PASS, 1 ms)
+  .. finished host.cpu (PASS, 2 ms)
+  .. finished host.disk/root (PASS, 3 ms)
+  .. finished net.egress (PASS, 190 ms)
+
 rdy 0.1.0
 spec    acme-quickstart >=1.0   (acme-quickstart.yaml)
 sig     verified, key 9F3A6C21D4E87B05, trusted by you, signed 2027-03-02
@@ -1870,35 +1890,30 @@ user    jdoe (not root)
 proxy   http://proxy.corp.example:3128
 needs   network: available
 
-  .. finished host.memory (PASS, 1 ms)
-  .. finished host.cpu (PASS, 2 ms)
-  .. finished host.disk/root (PASS, 3 ms)
-  .. finished net.egress (PASS, 190 ms)
-
   PASS     host.cpu          8 vCPUs found, 4 needed
                              expected  min=4
-                             observed  logical_cores=8 physical_cores=4 arch=x86_64 hypervisor=true
+                             observed  arch=x86_64 hypervisor=true logical_cores=8 physical_cores=4
                              took      2 ms
   PASS     host.memory       15.4 GiB found, 8 GiB needed
-                             expected  min_bytes=8589934592 band_bytes=429496729
-                             observed  total_bytes=16496934912 available_bytes=12884901888
-                                       swap_total_bytes=0 cgroup_limit_bytes=null
+                             expected  band_bytes=429496729 min_bytes=8589934592
+                             observed  available_bytes=12884901888 cgroup_limit_bytes=null
+                                       swap_total_bytes=0 total_bytes=16496934912
                              took      1 ms
   PASS     host.disk/root    60.0 GiB free on /, 20 GiB needed
                              expected  min_free_bytes=21474836480 recommended_free_bytes=25769803776
-                             observed  path=/ mount=/ fstype=xfs free_bytes=64424509440
-                                       free_inodes=31205120 options=list(2)
+                             observed  free_bytes=64424509440 free_inodes=31205120 fstype=xfs
+                                       mount=/ options=list(2) path=/
                              took      3 ms
   PASS     net.egress        2 of 2 endpoints reachable through the proxy
-                             expected  via_proxy=auto reachable=list(2)
-                             observed  via=proxy proxy=http://proxy.corp.example:3128
-                                       endpoints=list(2)
+                             expected  reachable=list(2) via_proxy=auto
+                             observed  endpoints=list(2) proxy=http://proxy.corp.example:3128
+                                       via=proxy
                              took      190 ms
   SKIP     host.disk/system  Does not apply here. This check is for windows only.
                              took      0 ms
 
-actions  11 recorded; the JSON report lists them
-took     241 ms
+actions 11 recorded; the JSON report lists them
+took    241 ms
 
 0 blocks, 0 warnings, 4 passed, 1 not applicable
 
@@ -1908,6 +1923,8 @@ Report written to ./rdy-report-acme-quickstart-20270309T101502Z/
   spec.yaml
   spec.yaml.minisig
 READY
+$ echo $?
+0
 ```
 
 ### C.3 Dry run (M2)

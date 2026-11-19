@@ -310,6 +310,19 @@ struct Findings {
     /// call that does not start with a literal (a macro variable, say) has an empty string first, which
     /// no prefix matches. Comments and strings are not code, so a decoy in them is not a call.
     include_calls: Vec<Vec<String>>,
+    /// The file defines or imports a macro named `concat`, `include`, `include_str` or `include_bytes`
+    /// (`macro_rules! concat`, or a `use` of such a name from anywhere but `std` or `core`). Such a macro
+    /// takes the place of the built-in one, so the literals of `include_str!(concat!("../data/", "x"))`
+    /// no longer say what path the build reads. Every include check refuses a file that does it.
+    shadows_include_macro: bool,
+    /// An `extern crate` item, with or without `#[macro_use]` (`#[cfg_attr(all(), macro_use)]` and
+    /// `#[r#macro_use]` are the same thing in other clothes). It can bring in every macro of a crate, under
+    /// names the source does not show. A check crate has none.
+    extern_crate: bool,
+    /// An item or import named `std` or `core` (`mod std { pub use dep::*; }`, `use dep as core;`). It
+    /// makes `std::include_str!` mean some other crate's macro, which the path check trusts. A check crate
+    /// has none.
+    shadows_std: bool,
     /// The string literals in the arguments of every `fx!` call (the firewall tests) and every `expect!`
     /// call (the disk tests), with any delimiter.
     fx_literals: Vec<String>,
@@ -355,6 +368,87 @@ fn starts_with_literal(tokens: &proc_macro2::TokenStream) -> bool {
     }
 }
 
+/// The built-in macros that decide what file an include reads: the includes themselves and the `concat!`
+/// that builds their path. A local macro with one of these names replaces it.
+const INCLUDE_MACROS: &[&str] = &["concat", "include", "include_str", "include_bytes"];
+
+/// Notes every `use` leaf that brings in or renames a macro to one of `INCLUDE_MACROS`, except a plain
+/// import from `std` or `core` (`use core::concat;` is the built-in itself). `path` is the segments above
+/// the tree.
+fn note_use_shadow(findings: &mut Findings, tree: &syn::UseTree, path: &mut Vec<String>) {
+    match tree {
+        syn::UseTree::Path(p) => {
+            path.push(p.ident.to_string());
+            note_use_shadow(findings, &p.tree, path);
+            path.pop();
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                note_use_shadow(findings, item, path);
+            }
+        }
+        syn::UseTree::Name(n) => {
+            if matches!(n.ident.to_string().as_str(), "std" | "core") && !path.is_empty() {
+                findings.shadows_std = true;
+            }
+            let name = n.ident.to_string().replace("r#", "");
+            let builtin = matches!(path.first().map(String::as_str), Some("std" | "core"));
+            if INCLUDE_MACROS.contains(&name.as_str()) && !builtin {
+                findings.shadows_include_macro = true;
+            }
+        }
+        syn::UseTree::Rename(r) => {
+            // `use core::include_str as data; data!("../secret")` reads a file under a name no check
+            // looks for, and `use core::concat as c;` hides the `concat!` that builds a path. So a rename
+            // of one of the names, from any path, shadows, and so does a rename TO one of the names.
+            let renamed = |ident: &proc_macro2::Ident| {
+                INCLUDE_MACROS.contains(&ident.to_string().replace("r#", "").as_str())
+            };
+            if matches!(r.rename.to_string().as_str(), "std" | "core") {
+                findings.shadows_std = true;
+            }
+            if renamed(&r.ident) || renamed(&r.rename) {
+                findings.shadows_include_macro = true;
+            }
+        }
+        // A plain `use a::*` that brings in a macro named like a built-in is refused by rustc (E0659,
+        // ambiguous with the built-in). An `extern crate` is refused in a check crate (`extern_crate`), and
+        // so is an item or import named `std` or `core` (`shadows_std`), which would make a `std::`
+        // path mean something else. A macro of the crate's own is found where it is defined, in any
+        // file of the crate (see the reach test).
+        syn::UseTree::Glob(_) => {}
+    }
+}
+
+/// Notes a call `head::..::name!(..)` whose path is longer than the name: when the name is one of
+/// `INCLUDE_MACROS` and the first segment is not `std` or `core`, it is some other crate's or module's
+/// macro and not the built-in. `head` is the first segment of the path, `None` for a bare name.
+fn note_qualified(findings: &mut Findings, name: &str, head: Option<&str>) {
+    if let Some(head) = head
+        && INCLUDE_MACROS.contains(&name)
+        && !matches!(head.replace("r#", "").as_str(), "std" | "core")
+    {
+        findings.shadows_include_macro = true;
+    }
+}
+
+/// The first segment of the path that ends at `trees[at]`: it walks back over `ident ::` pairs. `None`
+/// when the name stands alone.
+fn path_head(trees: &[proc_macro2::TokenTree], at: usize) -> Option<String> {
+    use proc_macro2::TokenTree;
+    let mut head = None;
+    let mut j = at;
+    while j >= 3
+        && matches!(&trees[j - 1], TokenTree::Punct(p) if p.as_char() == ':')
+        && matches!(&trees[j - 2], TokenTree::Punct(p) if p.as_char() == ':')
+        && let TokenTree::Ident(id) = &trees[j - 3]
+    {
+        head = Some(id.to_string());
+        j -= 3;
+    }
+    head
+}
+
 /// The macro names that read a file at build time. `args` is the token stream between the delimiters of
 /// the call, when the call has one.
 fn note_macro(findings: &mut Findings, name: &str, args: Option<proc_macro2::TokenStream>) {
@@ -380,6 +474,30 @@ fn note_macro(findings: &mut Findings, name: &str, args: Option<proc_macro2::Tok
             }
         }
         _ => {}
+    }
+}
+
+/// Notes every `name!(..)` call in the tokens, looking through every group: the macro calls inside the
+/// arguments of an attribute, which syn does not parse.
+fn note_macro_calls(findings: &mut Findings, tokens: proc_macro2::TokenStream) {
+    use proc_macro2::TokenTree;
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    for (i, tree) in trees.iter().enumerate() {
+        match tree {
+            TokenTree::Group(g) => note_macro_calls(findings, g.stream()),
+            TokenTree::Ident(id) => {
+                if matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '!') {
+                    let args = match trees.get(i + 2) {
+                        Some(TokenTree::Group(g)) => Some(g.stream()),
+                        _ => None,
+                    };
+                    let plain = id.to_string().replace("r#", "");
+                    note_qualified(findings, &plain, path_head(&trees, i).as_deref());
+                    note_macro(findings, &plain, args);
+                }
+            }
+            TokenTree::Punct(_) | TokenTree::Literal(_) => {}
+        }
     }
 }
 
@@ -463,6 +581,70 @@ fn scan_with(
             TokenTree::Ident(id) => {
                 let bang =
                     matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '!');
+                let plain = id.to_string().replace("r#", "");
+                let next_ident = match trees.get(i + 1) {
+                    Some(TokenTree::Ident(n)) => Some(n.to_string().replace("r#", "")),
+                    _ => None,
+                };
+                // `macro_rules` is a name a metavariable can stand in for (`$m! $n { .. }` with
+                // `def!(macro_rules concat ())`), so a `macro_rules` that is not followed by `!` is refused,
+                // and so is `$m!` below.
+                if plain == "macro_rules" && !bang {
+                    findings.shadows_include_macro = true;
+                }
+                // `extern crate`, and an item or an import named `std` or `core`, written in macro tokens.
+                if plain == "extern" && next_ident.as_deref() == Some("crate") {
+                    findings.extern_crate = true;
+                }
+                if matches!(next_ident.as_deref(), Some("std" | "core"))
+                    && matches!(
+                        plain.as_str(),
+                        "mod"
+                            | "struct"
+                            | "enum"
+                            | "union"
+                            | "trait"
+                            | "type"
+                            | "fn"
+                            | "const"
+                            | "static"
+                            | "as"
+                    )
+                {
+                    findings.shadows_std = true;
+                }
+                // `macro_rules! concat { .. }` inside the tokens of another macro, or with a name that a
+                // metavariable fills in (`macro_rules! $n { .. }`, then `def!(concat)`).
+                if bang
+                    && id == "macro_rules"
+                    && match trees.get(i + 2) {
+                        Some(TokenTree::Ident(name)) => {
+                            INCLUDE_MACROS.contains(&name.to_string().replace("r#", "").as_str())
+                        }
+                        Some(TokenTree::Punct(p)) => p.as_char() == '$',
+                        _ => false,
+                    }
+                {
+                    findings.shadows_include_macro = true;
+                }
+                // A bare `concat` or `include_str` in macro tokens, not a call, can be the name a macro
+                // hands to `macro_rules! $n`. `macro_rules! concat` itself is also found above.
+                // A method call (`a.concat()`), a field or path (`include.contains(..)`, `a::include`) and a
+                // function call are not that, so only an argument that stands as a name is refused.
+                let joined_to = |tree: Option<&TokenTree>| matches!(tree, Some(TokenTree::Punct(p)) if p.as_char() == '.' || p.as_char() == ':');
+                let before = i.checked_sub(1).and_then(|j| trees.get(j));
+                let called = matches!(trees.get(i + 1), Some(TokenTree::Group(_)));
+                if !bang
+                    && INCLUDE_MACROS.contains(&plain.as_str())
+                    && !joined_to(before)
+                    && !joined_to(trees.get(i + 1))
+                    && !called
+                {
+                    findings.shadows_include_macro = true;
+                }
+                if bang {
+                    note_qualified(findings, &plain, path_head(&trees, i).as_deref());
+                }
                 if bang {
                     let args = match trees.get(i + 2) {
                         Some(TokenTree::Group(g)) => Some(g.stream()),
@@ -474,6 +656,13 @@ fn scan_with(
             // `$h [$a]`: the hash of an attribute is a `tt` the caller passes. Nothing in the source
             // of the macro says what the attribute is, so it is refused.
             TokenTree::Punct(p) if p.as_char() == '$' => {
+                // `$m!`: a macro whose name a metavariable fills in can be `macro_rules`, or `include_str`
+                // under another name.
+                if matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
+                    && matches!(trees.get(i + 2), Some(TokenTree::Punct(b)) if b.as_char() == '!')
+                {
+                    findings.shadows_include_macro = true;
+                }
                 if matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
                     && let Some(TokenTree::Group(g)) = trees.get(i + 2)
                     && g.delimiter() == Delimiter::Bracket
@@ -526,6 +715,15 @@ struct Finder {
     findings: Findings,
 }
 
+impl Finder {
+    /// Notes an item named `std` or `core`.
+    fn note_std(&mut self, ident: &proc_macro2::Ident) {
+        if matches!(ident.to_string().replace("r#", "").as_str(), "std" | "core") {
+            self.findings.shadows_std = true;
+        }
+    }
+}
+
 impl<'ast> syn::visit::Visit<'ast> for Finder {
     fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
         let name = attr
@@ -549,11 +747,95 @@ impl<'ast> syn::visit::Visit<'ast> for Finder {
         if name == "cfg_attr" && text.contains("path=") {
             self.findings.path_attribute = true;
         }
+        // syn keeps the arguments of an attribute as raw tokens, so `#[cfg_attr(all(), doc =
+        // include_str!("../../x"))]` is not a macro call to the visitor below. Read the calls from the
+        // tokens. (`#[doc = include_str!(..)]` is a name-value attribute: syn parses it, and the visitor
+        // sees the call.)
+        if let syn::Meta::List(list) = &attr.meta {
+            note_macro_calls(&mut self.findings, list.tokens.clone());
+        }
         syn::visit::visit_attribute(self, attr);
+    }
+
+    fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+        let defined = item
+            .ident
+            .as_ref()
+            .map(|ident| ident.to_string().replace("r#", ""));
+        if item.mac.path.is_ident("macro_rules")
+            && defined.is_some_and(|name| INCLUDE_MACROS.contains(&name.as_str()))
+        {
+            self.findings.shadows_include_macro = true;
+        }
+        syn::visit::visit_item_macro(self, item);
+    }
+
+    fn visit_item_extern_crate(&mut self, item: &'ast syn::ItemExternCrate) {
+        self.findings.extern_crate = true;
+        syn::visit::visit_item_extern_crate(self, item);
+    }
+
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_mod(self, item);
+    }
+
+    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_struct(self, item);
+    }
+
+    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_enum(self, item);
+    }
+
+    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_union(self, item);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_trait(self, item);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_type(self, item);
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        self.note_std(&item.sig.ident);
+        syn::visit::visit_item_fn(self, item);
+    }
+
+    fn visit_item_const(&mut self, item: &'ast syn::ItemConst) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_const(self, item);
+    }
+
+    fn visit_item_static(&mut self, item: &'ast syn::ItemStatic) {
+        self.note_std(&item.ident);
+        syn::visit::visit_item_static(self, item);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        note_use_shadow(&mut self.findings, &item.tree, &mut Vec::new());
+        syn::visit::visit_item_use(self, item);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
         if let Some(last) = mac.path.segments.last() {
+            if mac.path.segments.len() > 1
+                && let Some(first) = mac.path.segments.first()
+            {
+                note_qualified(
+                    &mut self.findings,
+                    &last.ident.to_string().replace("r#", ""),
+                    Some(&first.ident.to_string()),
+                );
+            }
             note_macro(
                 &mut self.findings,
                 &last.ident.to_string().replace("r#", ""),
@@ -591,6 +873,24 @@ fn findings_of(source: &str) -> Findings {
                     stripped.matches("include_str!").count()
                         + stripped.matches("include_bytes!").count()
                 ],
+                // Whitespace is gone from `stripped`, so this is `macro_rules!concat` or `..as concat;`.
+                extern_crate: stripped.contains("externcrate"),
+                shadows_std: [
+                    "mod", "struct", "enum", "union", "trait", "type", "fn", "const", "static",
+                ]
+                .iter()
+                .any(|kw| {
+                    stripped.contains(&format!("{kw}std"))
+                        || stripped.contains(&format!("{kw}core"))
+                }) || stripped.contains("asstd")
+                    || stripped.contains("ascore"),
+                shadows_include_macro: stripped.contains("macro_rules!$")
+                    || INCLUDE_MACROS.iter().any(|name| {
+                        stripped.contains(&format!("macro_rules!{name}"))
+                            || [";", ",", "}"]
+                                .iter()
+                                .any(|end| stripped.contains(&format!("as{name}{end}")))
+                    }),
                 fx_literals: vec!["..".to_owned()]
                     .into_iter()
                     .filter(|_| stripped.contains("fx!") || stripped.contains("expect!"))
@@ -698,6 +998,23 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             if found.path_attribute || found.include_code {
                 bad.push(format!("{rel}: #[path] or include!"));
             }
+            // A `macro_rules! concat` in any file of the crate can reach the include in another file
+            // (`#[macro_use] mod`), so this is judged for every file, not only those that include.
+            if found.shadows_include_macro {
+                bad.push(format!(
+                    "{rel}: defines or imports a macro named concat, include, include_str or include_bytes"
+                ));
+            }
+            if found.extern_crate {
+                bad.push(format!(
+                    "{rel}: extern crate can bring in macros under names this scan cannot see"
+                ));
+            }
+            if found.shadows_std {
+                bad.push(format!(
+                    "{rel}: an item or import named std or core makes `std::include_str!` mean another macro"
+                ));
+            }
             if found.include_data
                 && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel)
                 && !INCLUDE_SHIPPED_DATA_ALLOWED
@@ -727,6 +1044,27 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             "{path} embeds data but is not a #[cfg(test)] module: declare it, or the module above it, under #[cfg(test)] ({why})"
         );
     }
+}
+
+#[test]
+fn no_crate_of_the_workspace_shadows_concat_or_the_includes() {
+    // A macro named `concat` or `include_str` in any crate could be brought into a check crate by name
+    // (`#[macro_export]` and a path, or a re-export), and no crate needs those names. So the definition
+    // is refused in every `.rs` file of the repository, not only in the check crates.
+    let base = root();
+    let files = repo_rust_files(&base);
+    assert!(files.len() > 50, "found only {} source files", files.len());
+    let mut bad = Vec::new();
+    for file in files {
+        let found = findings_of(&std::fs::read_to_string(&file).expect("read source"));
+        if found.shadows_include_macro {
+            bad.push(relative(&base, &file));
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "these files define or import a macro named concat, include, include_str or include_bytes: {bad:#?}"
+    );
 }
 
 #[test]
@@ -765,12 +1103,18 @@ fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
     }
 }
 
+/// Why a file that defines its own `concat!` or `include_str!` fails the include checks.
+const SHADOWED: &str = "it defines or imports a macro named concat, include, include_str or include_bytes, which replaces the built-in one, so the path literals no longer say what file the build reads. Rename the macro";
+
 /// The checks of an `INCLUDE_DATA_ALLOWED` entry, on what syn read from the tokens of the calls (so a
 /// decoy in a comment or a string is not seen, and a call in any delimiter is). The file embeds something,
 /// every call's first literal starts with one of `prefixes`, and past that prefix nothing climbs out of it:
 /// not in the first literal, not in a later literal of the call, not in the joined text, and not in an
 /// argument of an `fx!` or `expect!` call.
 fn check_prefixed_includes(found: &Findings, prefixes: &[&str]) -> Result<(), String> {
+    if found.shadows_include_macro {
+        return Err(SHADOWED.to_owned());
+    }
     if found.include_calls.is_empty() {
         return Err("it is on the list but embeds nothing now".to_owned());
     }
@@ -800,6 +1144,9 @@ fn check_prefixed_includes(found: &Findings, prefixes: &[&str]) -> Result<(), St
 /// The checks of an `INCLUDE_SHIPPED_DATA_ALLOWED` entry: exactly one include call, in any delimiter, and
 /// its only literal is `literal`.
 fn check_single_include(found: &Findings, literal: &str) -> Result<(), String> {
+    if found.shadows_include_macro {
+        return Err(SHADOWED.to_owned());
+    }
     if found.include_calls.len() != 1 {
         return Err(format!(
             "it must hold exactly one include_str! or include_bytes! call, in any delimiter, and it holds {}",
@@ -1264,6 +1611,289 @@ fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
     let planted = format!("fn f() {{ include_str!(\"{prefix}a\"); expect![\"../b\"]; }}");
     assert!(check_prefixed_includes(&findings_of(&planted), &[prefix]).is_err());
     assert!(check_prefixed_includes(&findings_of("fn f() {}"), &[prefix]).is_err());
+}
+
+#[test]
+fn a_shadowed_concat_or_include_macro_fails_the_include_checks() {
+    // SEC-4. The honest literals of this call pass both checks, but the local `concat!` decides the
+    // path, so the call reads `../../secret`.
+    let call = "const C: &str = include_str!(concat!(\"../data/\", \"agents.toml\"));";
+    let honest = findings_of(call);
+    assert!(!honest.shadows_include_macro);
+    assert!(check_prefixed_includes(&honest, &["../data/"]).is_ok());
+    let shadowed = [
+        (
+            "macro_rules at the top",
+            "macro_rules! concat { ($($t:tt)*) => { \"../../secret\" }; }",
+        ),
+        (
+            "macro_rules in a function",
+            "fn f() { macro_rules! concat { ($($t:tt)*) => { \"../../secret\" }; } }",
+        ),
+        (
+            "macro_rules in a module",
+            "mod m { #[macro_export] macro_rules! include_str { ($($t:tt)*) => { \"\" }; } }",
+        ),
+        (
+            "macro_rules inside another macro",
+            "macro_rules! m { () => { macro_rules! concat { ($($t:tt)*) => { \"x\" }; } }; }",
+        ),
+        (
+            "a raw identifier",
+            "macro_rules! r#concat { ($($t:tt)*) => { \"x\" }; }",
+        ),
+        ("include", "macro_rules! include { () => { \"x\" }; }"),
+        (
+            "include_bytes",
+            "macro_rules! include_bytes { () => { b\"\" }; }",
+        ),
+        ("an import", "use shim::concat;"),
+        ("an import in a group", "use shim::{a, concat};"),
+        ("a rename to the name", "use shim::other as concat;"),
+        (
+            "a rename of the built-in",
+            "use core::concat as include_str;",
+        ),
+        ("a nested group", "use shim::{inner::{include_bytes}};"),
+        // A rename of a built-in, from any path, hides it under a name no check looks for.
+        ("include_str renamed", "use core::include_str as data;"),
+        ("include renamed", "use core::include as code;"),
+        ("include_bytes renamed", "use std::include_bytes as bytes;"),
+        ("concat renamed", "use std::concat as c;"),
+        (
+            "renamed in a group",
+            "use std::{include_str as data, line};",
+        ),
+        // A path to another crate's macro of the same name.
+        (
+            "a qualified include_str",
+            "const X: &str = shim::include_str!(\"x\");",
+        ),
+        (
+            "a qualified include",
+            "fn f() { crate::include!(\"x.rs\"); }",
+        ),
+        (
+            "a qualified concat inside",
+            "const X: &str = include_str!(shim::concat!(\"a\", \"b\"));",
+        ),
+        (
+            "a deeper path",
+            "const X: &str = a::b::include_bytes!(\"x\");",
+        ),
+        (
+            "qualified in a macro body",
+            "macro_rules! m { () => { shim::include_str!(\"x\") }; }",
+        ),
+        (
+            "qualified in cfg_attr",
+            "#[cfg_attr(all(), doc = shim::include_str!(\"x\"))] struct S;",
+        ),
+        // A macro hands the name to `macro_rules!`.
+        (
+            "a metavariable name",
+            "macro_rules! def { ($n:ident) => { macro_rules! $n { () => { \"x\" }; } }; }",
+        ),
+        ("the name as an argument", "def!(concat);"),
+        ("a name in a list", "def!(a, include_str, b);"),
+        // A metavariable can be `macro_rules` itself, or the name of a macro call.
+        (
+            "a metavariable for macro_rules",
+            "macro_rules! def { ($m:ident $n:ident ()) => { $m! $n { ($lit:literal) => { \"../secret.txt\" } } }; } def!(macro_rules concat ());",
+        ),
+        (
+            "a metavariable call",
+            "macro_rules! m { ($m:ident) => { $m!(\"x\") }; }",
+        ),
+        ("macro_rules alone", "def!(macro_rules, x);"),
+    ];
+    for (what, definition) in shadowed {
+        let found = findings_of(&format!("{definition}\n{call}"));
+        assert!(found.shadows_include_macro, "{what}: not seen");
+        let err = check_prefixed_includes(&found, &["../data/"]).unwrap_err();
+        assert!(err.contains("replaces the built-in"), "{what}: {err}");
+        let err = check_single_include(&found, "../data/agents.toml").unwrap_err();
+        assert!(err.contains("replaces the built-in"), "{what}: {err}");
+    }
+    // A file that does not parse is judged by its text.
+    let unparsed = findings_of("fn ( macro_rules! concat { () => {} } include_str![\"x\"]");
+    assert!(unparsed.shadows_include_macro);
+    let unparsed = findings_of("fn ( use a::b as concat; include_str![\"x\"]");
+    assert!(unparsed.shadows_include_macro);
+    // The built-in under its own name, a macro of another name and a name that only contains one are
+    // not shadows.
+    for (what, source) in [
+        ("core", "use core::concat;"),
+        (
+            "std group",
+            "use std::{concat, include_str, include_bytes};",
+        ),
+        ("another name", "macro_rules! fx { () => { \"x\" }; }"),
+        (
+            "a longer name",
+            "macro_rules! concat_all { () => { \"x\" }; }",
+        ),
+        ("a call", "fn f() { let a = concat!(\"a\", \"b\"); }"),
+        (
+            "a qualified std call",
+            "const X: &str = core::include_str!(\"x\");",
+        ),
+        (
+            "a rooted std call",
+            "const X: &str = ::std::concat!(\"a\");",
+        ),
+        ("a macro argument", "def!(other, names);"),
+        ("a method in an argument", "foo!(a.concat(), b);"),
+        ("a field in an argument", "foo!(include.contains(x));"),
+        ("a path in an argument", "foo!(a::include_str);"),
+    ] {
+        assert!(!findings_of(source).shadows_include_macro, "{what}");
+    }
+}
+
+#[test]
+fn an_extern_crate_and_an_item_named_std_or_core_are_seen() {
+    for (what, source, extern_crate, std) in [
+        ("macro_use", "#[macro_use] extern crate shim;", true, false),
+        (
+            "with a list",
+            "#[macro_use(a, b)] extern crate shim;",
+            true,
+            false,
+        ),
+        (
+            "in cfg_attr",
+            "#[cfg_attr(all(), macro_use)] extern crate shim;",
+            true,
+            false,
+        ),
+        (
+            "a raw name",
+            "#[r#macro_use] extern crate shim;",
+            true,
+            false,
+        ),
+        ("no attribute", "extern crate alloc;", true, false),
+        (
+            "in a macro body",
+            "macro_rules! m { () => { extern crate shim; }; }",
+            true,
+            false,
+        ),
+        ("unparsed", "fn ( extern crate shim;", true, false),
+        (
+            "a module named std",
+            "mod std { pub use dep::*; }",
+            false,
+            true,
+        ),
+        ("a module named core", "mod core {}", false, true),
+        ("a struct", "struct std;", false, true),
+        ("a function", "fn core() {}", false, true),
+        ("a const", "const std: u8 = 1;", false, true),
+        ("a use rename", "use dep as std;", false, true),
+        ("a use leaf", "use dep::core;", false, true),
+        (
+            "in a macro body",
+            "macro_rules! m { () => { mod std {} }; }",
+            false,
+            true,
+        ),
+        (
+            "a rename in a macro body",
+            "macro_rules! m { () => { use a as core; }; }",
+            false,
+            true,
+        ),
+        ("unparsed module", "fn ( mod std { }", false, true),
+        // Not shadows.
+        ("a std path", "use std::fs;", false, false),
+        ("a std group", "use std::{io, fmt};", false, false),
+        (
+            "a core path call",
+            "fn f() { core::mem::drop(1); }",
+            false,
+            false,
+        ),
+        ("another module", "mod standard {}", false, false),
+        (
+            "another attribute",
+            "#[allow(unused)] mod m {}",
+            false,
+            false,
+        ),
+    ] {
+        let found = findings_of(source);
+        assert_eq!(found.extern_crate, extern_crate, "{what}: extern crate");
+        assert_eq!(found.shadows_std, std, "{what}: std or core");
+    }
+}
+
+#[test]
+fn an_include_inside_cfg_attr_is_read_like_any_other() {
+    // SEC-5. `#[cfg_attr(.., doc = include_str!(..))]` keeps its arguments as raw tokens, so the include is
+    // not a macro call for the visitor. It is read from the tokens.
+    let escape = "#[cfg_attr(all(), doc = include_str!(\"../../../etc/passwd\"))] struct S;";
+    let found = findings_of(escape);
+    assert!(found.include_data, "the include was not seen");
+    assert_eq!(found.include_calls, [["../../../etc/passwd"]]);
+    let err = check_single_include(&found, "../data/agents.toml").unwrap_err();
+    assert!(err.contains("../../../etc/passwd"), "{err}");
+    let err = check_prefixed_includes(&found, &["../data/"]).unwrap_err();
+    assert!(err.contains("does not start with"), "{err}");
+    for (what, source, calls) in [
+        (
+            "a nested cfg_attr",
+            "#[cfg_attr(unix, cfg_attr(all(), doc = include_str!(\"x\")))] struct S;",
+            vec![vec!["x"]],
+        ),
+        (
+            "an inner attribute",
+            "#![cfg_attr(all(), doc = include_str![\"x\"])]",
+            vec![vec!["x"]],
+        ),
+        (
+            "braces and a concat",
+            "#[cfg_attr(all(), doc = include_bytes!{concat!(\"../a/\", \"b\")})] struct S;",
+            vec![vec!["../a/", "b"]],
+        ),
+        (
+            "on a field",
+            "struct S { #[cfg_attr(all(), doc = include_str!(\"y\"))] f: u8 }",
+            vec![vec!["y"]],
+        ),
+        (
+            "in a macro body",
+            "macro_rules! m { () => { #[cfg_attr(all(), doc = include_str!(\"z\"))] struct S; }; }",
+            vec![vec!["z"]],
+        ),
+        (
+            "an attribute that is not cfg_attr",
+            "#[something(include_str!(\"w\"))] struct S;",
+            vec![vec!["w"]],
+        ),
+    ] {
+        assert_eq!(findings_of(source).include_calls, calls, "{what}");
+    }
+    // `include!` inside cfg_attr pulls in code, which no check crate may do.
+    let code = findings_of("#[cfg_attr(all(), doc = include!(\"x.rs\"))] struct S;");
+    assert!(code.include_code);
+    // The plain name-value form was always seen, and is still seen once.
+    assert_eq!(
+        findings_of("#[doc = include_str!(\"x\")] struct S;").include_calls,
+        [["x"]]
+    );
+    // An honest cfg_attr include passes the single-include check, and a second call fails it.
+    let honest = "#[cfg_attr(all(), doc = include_str!(\"../data/agents.toml\"))] struct S;";
+    assert!(check_single_include(&findings_of(honest), "../data/agents.toml").is_ok());
+    let two = format!("{honest}\nconst C: &str = include_str!(\"../data/agents.toml\");");
+    assert!(check_single_include(&findings_of(&two), "../data/agents.toml").is_err());
+    // A cfg_attr without an include is not one.
+    assert!(
+        findings_of("#[cfg_attr(test, derive(Debug))] struct S;")
+            .include_calls
+            .is_empty()
+    );
 }
 
 #[test]

@@ -282,9 +282,11 @@ where
                                 registry,
                                 color: cli.global.color,
                                 progress: cli.global.progress,
-                                quiet: cli.global.quiet,
-                                verbose: cli.global.verbose,
                                 rig,
+                                detail: terminal::Detail::from_flags(
+                                    cli.global.quiet,
+                                    cli.global.verbose,
+                                ),
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
                         }
