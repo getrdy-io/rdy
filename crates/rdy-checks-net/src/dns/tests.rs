@@ -19,31 +19,32 @@ use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
 use super::judge::{Answer, Looked, Problem, Rule, Source};
+use super::split;
 use super::*;
 
 // ---- the harness --------------------------------------------------------------------------------
 
-struct Ran {
-    outcome: CheckOutcome,
-    ctx: CheckContext,
-    entry: CheckSpec,
-    run: TestRun,
+pub(super) struct Ran {
+    pub(super) outcome: CheckOutcome,
+    pub(super) ctx: CheckContext,
+    pub(super) entry: CheckSpec,
+    pub(super) run: TestRun,
 }
 
 impl Ran {
-    fn finding(&self) -> &Finding {
+    pub(super) fn finding(&self) -> &Finding {
         self.outcome.as_ref().expect("a finding")
     }
 
-    fn name(&self, at: usize) -> &Value {
+    pub(super) fn name(&self, at: usize) -> &Value {
         &self.finding().observed["names"][at]
     }
 
-    fn result(&self) -> CheckResult {
+    pub(super) fn result(&self) -> CheckResult {
         map_outcome(&INFO, &self.entry, &self.ctx, self.outcome.clone(), 0, 0)
     }
 
-    fn everything_text(&self) -> String {
+    pub(super) fn everything_text(&self) -> String {
         let finding = self.finding();
         format!(
             "{} {} {:?} {:?} {:?}",
@@ -52,6 +53,16 @@ impl Ran {
             finding.fix,
             finding.notes,
             self.run.action_log()
+        )
+    }
+
+    /// The finding as text, without the action log. The log is the facade's, and it names the nameserver
+    /// it asked (ADR 0051). The result never does.
+    pub(super) fn result_text(&self) -> String {
+        let finding = self.finding();
+        format!(
+            "{} {} {:?} {:?} {:?}",
+            finding.message, finding.observed, finding.fix, finding.notes, finding.partial
         )
     }
 
@@ -80,10 +91,30 @@ fn check_of(entry: &CheckSpec) -> DnsCheck {
     }
 }
 
-async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Need]) -> Ran {
+pub(super) async fn run_with(
+    run: TestRun,
+    names: Value,
+    extra: Value,
+    os: Os,
+    needs: &[Need],
+) -> Ran {
+    run_with_deadline(run, names, extra, os, needs, Duration::from_secs(60)).await
+}
+
+pub(super) async fn run_with_deadline(
+    run: TestRun,
+    names: Value,
+    extra: Value,
+    os: Os,
+    needs: &[Need],
+    deadline: Duration,
+) -> Ran {
     let entry = entry(&names, &extra);
     let check = check_of(&entry);
-    let ctx = run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts());
+    let ctx = run.with_deadline(
+        run.context_for_hosts(&INFO, "net.dns", os, needs.iter().cloned(), check.hosts()),
+        deadline,
+    );
     let outcome = check.run(&ctx).await;
     assert_within_manifest("net.dns", &INFO, &run.action_log());
     Ran {
@@ -94,18 +125,18 @@ async fn run_with(run: TestRun, names: Value, extra: Value, os: Os, needs: &[Nee
     }
 }
 
-async fn run_on(replay: Replay, names: Value, extra: Value) -> Ran {
+pub(super) async fn run_on(replay: Replay, names: Value, extra: Value) -> Ran {
     run_with(TestRun::new(replay), names, extra, Os::Linux, NET).await
 }
 
 /// The machine of a fixture case.
-fn case(name: &str) -> Replay {
+pub(super) fn case(name: &str) -> Replay {
     Fixture::load(&fixtures_dir(), &format!("checks/net.dns/{name}"))
         .expect("the fixture loads")
         .into_replay()
 }
 
-const NET: &[Need] = &[Need::Network];
+pub(super) const NET: &[Need] = &[Need::Network];
 
 // ---- found --------------------------------------------------------------------------------------
 
@@ -186,7 +217,7 @@ async fn a_stopped_getent_is_a_timeout_with_the_resolver_settings() {
         finding.notes
     );
     // The addresses of the nameservers are not copied into the result.
-    assert!(!ran.everything_text().contains("192.0.2.53"));
+    assert!(!ran.result_text().contains("192.0.2.53"));
 }
 
 // ---- the fallback ---------------------------------------------------------------------------------
@@ -268,7 +299,9 @@ async fn on_macos_the_facade_lookup_is_the_system_answer_and_no_command_runs() {
     let n = ran.name(0);
     assert_eq!(n["source"], "getaddrinfo");
     assert!(n.get("fallback").is_none());
-    assert!(finding.notes.is_empty(), "{:?}", finding.notes);
+    // The one note says no direct queries were sent (M2-010). There is no other.
+    assert_eq!(finding.notes.len(), 1, "{:?}", finding.notes);
+    assert!(finding.notes[0].contains("no direct nameserver queries"));
     assert_eq!(ran.execs(), 0);
 }
 
@@ -293,7 +326,7 @@ async fn a_name_that_reads_as_an_option_is_rejected_before_any_command_runs() {
             [Need::Network],
             HostSet::empty(),
         );
-        let looked = look_up(&ctx, bad).await.expect("a result, not an error");
+        let looked = look_up(&ctx, bad, 0).await.expect("a result, not an error");
         assert!(
             matches!(looked.answer, Answer::Rejected(_)),
             "{bad:?}: {:?}",
@@ -318,7 +351,14 @@ async fn a_rejected_name_blocks_with_its_own_text_and_is_never_sent() {
         ),
         ..Looked::new("-x")
     }];
-    let finding = judge::judge(Os::Linux, &rules, &looked, Duration::from_millis(500), None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &looked,
+        Duration::from_millis(500),
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
     assert!(
         finding.message.contains("not a valid name"),
@@ -338,7 +378,10 @@ fn the_command_table_is_the_only_door_and_lists_net_dns() {
     );
     assert_eq!(INFO.commands.len(), 1);
     assert_eq!(INFO.commands[0].program, "getent");
-    assert_eq!(INFO.peers, &[PeerClass::SpecHosts]);
+    assert_eq!(
+        INFO.peers,
+        &[PeerClass::SpecHosts, PeerClass::SystemResolver]
+    );
     // The table refuses the same names the check does.
     for bad in ["-x", "a b", "a\nb"] {
         assert!(
@@ -485,16 +528,37 @@ fn a_slow_lookup_warns_and_the_boundary_passes() {
         found("a.acme.test", &["192.0.2.1"], 500),
         found("b.acme.test", &["192.0.2.2"], 501),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Warn);
     assert_eq!(
         finding.message,
         "`b.acme.test` took 501 ms to resolve, above 500 ms"
     );
-    let ok = judge::judge(Os::Linux, &rules[..1], &at[..1], MAX, None);
+    let ok = judge::judge(
+        Os::Linux,
+        &rules[..1],
+        &at[..1],
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(ok.level, Level::Pass);
     // The spec's own limit replaces the default.
-    let loose = judge::judge(Os::Linux, &rules, &at, Duration::from_secs(2), None);
+    let loose = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        Duration::from_secs(2),
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(loose.level, Level::Pass);
 }
 
@@ -508,7 +572,14 @@ fn a_failure_outranks_a_slow_answer() {
         found("a.acme.test", &["192.0.2.1"], 900),
         with("b.acme.test", Answer::NotFound),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
     assert!(finding.notes.iter().any(|n| n.contains("took 900 ms")));
 }
@@ -518,7 +589,14 @@ fn many_failures_are_named_five_at_a_time() {
     let names: Vec<String> = (0..8).map(|n| format!("n{n}.acme.test")).collect();
     let rules: Vec<Rule> = names.iter().map(|n| rule(n, &[], None)).collect();
     let at: Vec<Looked> = names.iter().map(|n| with(n, Answer::NotFound)).collect();
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert!(finding.message.starts_with("8 of 8 names do not resolve: "));
     assert!(
         finding.message.ends_with("and 3 more"),
@@ -540,7 +618,14 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
         found("a.acme.test", &["192.0.2.1"], 10),
         with("b.acme.test", Answer::NotTried),
     ];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Pass);
     assert_eq!(finding.message, "1 of 2 names resolve");
     let partial = finding.partial.expect("partial");
@@ -551,6 +636,7 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
         &[with("b.acme.test", Answer::NotTried)],
         MAX,
         None,
+        &split::Machine::default(),
     );
     assert_eq!(none.message, "no name was looked up");
 }
@@ -559,7 +645,14 @@ fn names_the_check_ran_out_of_time_for_are_partial_and_not_a_pass() {
 fn a_range_of_the_other_family_never_matches() {
     let rules = [rule("a.acme.test", &["10.0.0.0/8"], None)];
     let at = [found("a.acme.test", &["2001:db8::1"], 1)];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     assert_eq!(finding.level, Level::Fail);
 }
 
@@ -596,7 +689,14 @@ fn text_from_the_machine_in_a_note_is_escaped() {
         "a.acme.test",
         Answer::Failed("bad\u{1b}[2Jtext".to_owned()),
     )];
-    let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+    let finding = judge::judge(
+        Os::Linux,
+        &rules,
+        &at,
+        MAX,
+        None,
+        &split::Machine::default(),
+    );
     let all = format!("{:?}", finding.notes);
     assert!(!all.contains('\u{1b}'), "{all}");
 }
@@ -616,6 +716,7 @@ fn sources_have_stable_ids() {
         }],
         MAX,
         None,
+        &split::Machine::default(),
     );
     assert_eq!(v.observed["names"][0]["source"], "rdy_resolver");
     assert_eq!(
@@ -642,8 +743,9 @@ macro_rules! expect {
 
 /// Every case of `tests/fixtures/checks/net.dns/`, with the check run by the real scheduler on a paused
 /// clock and given its host set, as `rdy run` gives it. A new directory is a new line here.
-const CASES: [(&str, &str); 14] = [
+const CASES: [(&str, &str); 18] = [
     expect!("aaaa-only"),
+    expect!("direct-nxdomain"),
     expect!("found-dual-stack"),
     expect!("getent-broken"),
     expect!("getent-empty"),
@@ -653,9 +755,12 @@ const CASES: [(&str, &str); 14] = [
     expect!("getent-signal"),
     expect!("mixed"),
     expect!("not-found"),
+    expect!("nsswitch-sss-mdns"),
     expect!("offline"),
     expect!("resolv-link-systemd"),
     expect!("resolv-link-undeclared"),
+    expect!("slow-first-nameserver"),
+    expect!("split-horizon"),
     expect!("timeout"),
 ];
 
@@ -688,7 +793,11 @@ fn run_case(
     fixture
         .ensure_answers("net.dns")
         .expect("it answers net.dns");
-    let test_run = TestRun::for_fixture(&fixture);
+    // The cases that have nameservers in `resolv.conf` get scripted servers (they cannot live in a file).
+    let test_run = TestRun::new(super::direct_tests::with_servers(
+        case,
+        fixture.replay().clone(),
+    ));
     let scheduler = test_run.scheduler(1, fixture.os(), fixture.available_needs());
     let planned = rdy_engine::sched::Planned::new(std::sync::Arc::new(check.clone()), "net.dns")
         .with_hosts(check.hosts());
@@ -730,15 +839,16 @@ fn the_case_list_is_every_directory_of_the_fixtures() {
 
 #[test]
 fn no_case_connects_anywhere() {
-    // The host set carries port 443 as a placeholder, so nothing but exec, lookup and read may appear.
+    // The host set carries port 443 as a placeholder, so nothing but exec, lookup, read and the facade's nameserver `dns` calls may appear.
     for (case, _) in CASES {
         let (_, _, log) = run_case(case);
         for action in &log.actions {
             assert!(
                 action.kind == ActionKind::Exec
                     || action.kind == ActionKind::Lookup
-                    || action.kind == ActionKind::Read,
-                "{case}: {:?} is not exec, lookup or read",
+                    || action.kind == ActionKind::Read
+                    || action.kind == ActionKind::Dns,
+                "{case}: {:?} is not exec, lookup, read or dns",
                 action.kind
             );
         }
@@ -809,7 +919,14 @@ fn a_timeout_note_names_the_name_and_matches_the_source() {
             answer: Answer::Timeout,
             ..Looked::new("a.acme.test")
         }];
-        let finding = judge::judge(Os::Linux, &rules, &at, MAX, None);
+        let finding = judge::judge(
+            Os::Linux,
+            &rules,
+            &at,
+            MAX,
+            None,
+            &split::Machine::default(),
+        );
         let note = &finding.notes[0];
         assert!(note.starts_with("`a.acme.test` timed out: "), "{note}");
         assert!(!note.contains("getent"), "{note}");

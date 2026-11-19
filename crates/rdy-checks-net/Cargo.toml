@@ -20,6 +20,9 @@ serde_json = { workspace = true, features = ["std"] }
 x509-parser = { workspace = true }
 
 [dev-dependencies]
+# The test oracle for the hand-written DNS codec of net.dns (M1-155, ADR 0052): it encodes replies and decodes
+# our queries, and the codec must agree. Dev only: it is not in the `rdy` binary.
+hickory-proto = { workspace = true }
 # The test run applies the real probe policy and writes the real action log. `loopback` adds the TLS server
 # with a generated CA, the dual-stack case and the reset-after-hello server (ADR 0035).
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }

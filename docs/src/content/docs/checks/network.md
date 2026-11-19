@@ -74,7 +74,7 @@ Ask the network team to bypass TLS inspection for the host named in the result, 
 - **Wants:** none
 - **Timeout:** 60 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
-- **Reads:** `/etc/resolv.conf`, `/run/systemd/resolve/resolv.conf`, `/run/systemd/resolve/stub-resolv.conf`
+- **Reads:** `/etc/resolv.conf`, `/run/systemd/resolve/resolv.conf`, `/run/systemd/resolve/stub-resolv.conf`, `/run/resolvconf/resolv.conf`, `/run/NetworkManager/resolv.conf`, `/run/NetworkManager/no-stub-resolv.conf`, `/etc/nsswitch.conf`
 
 **Remediation**
 

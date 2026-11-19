@@ -633,6 +633,21 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
     }
 
+    /// Sends one DNS query to the nameserver at `to` over `transport` and reads one reply of at most
+    /// `max_reply` bytes within `timeout`. Over TCP the backend adds and strips the two byte length
+    /// prefix. The probe has already applied the admission rules (M1-155). The provided body refuses.
+    fn dns_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        transport: sock::DnsTransport,
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        let _ = (to, payload, transport, max_reply, timeout);
+        Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
+    }
+
     /// Sends `GET path` over the unix socket at `socket` and reads the reply within `timeout`. The
     /// probe has already checked the socket, the method and the path against the policy. The provided
     /// body refuses.
