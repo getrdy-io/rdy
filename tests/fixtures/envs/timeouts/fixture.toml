@@ -1,16 +1,16 @@
 schema = 1
 name = "timeouts"
-summary = "An NFS mount whose statvfs never returns: host.disk times out, and net.egress blocks on a black-hole endpoint"
+summary = "An NFS mount whose statvfs never returns: host.disk times out, and net.egress blocks on a black-hole endpoint, and a cluster whose /version never answers"
 origin = "hand"
 os = "linux"
 arch = "x86_64"
-answers = ["host.disk", "net.egress"]
+answers = ["host.disk", "net.egress", "k8s.version"]
 spec = "spec.yaml"
 
 [caps]
 root = false
 network = true
-kube = false
+kube = true
 
 [run]
 clock = "2026-11-02T09:00:00Z"
