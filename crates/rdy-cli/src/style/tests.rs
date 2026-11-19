@@ -25,6 +25,23 @@ type Row = (
 );
 
 #[test]
+fn a_console_size_gives_the_width_and_a_missing_or_empty_one_gives_none() {
+    // `console` reports (rows, columns).
+    assert_eq!(columns_from_size(Some((30, 120))), Some(120));
+    assert_eq!(columns_from_size(Some((30, 80))), Some(80));
+    assert_eq!(columns_from_size(Some((30, 0))), None);
+    assert_eq!(columns_from_size(None), None);
+    // And it feeds the wrap width: clamped to 60 to 100, and a missing size falls back to COLUMNS.
+    let none = env(&[]);
+    assert_eq!(wrap_width(columns_from_size(Some((30, 120))), &none), 100);
+    assert_eq!(wrap_width(columns_from_size(Some((30, 72))), &none), 72);
+    assert_eq!(
+        wrap_width(columns_from_size(None), &env(&[("COLUMNS", "70")])),
+        70
+    );
+}
+
+#[test]
 fn colour_rules_first_match_wins() {
     use ColorChoice::{Always, Auto, Never};
     // (rule of 07 section 6, choice, variables, stream is a terminal, colour?)
