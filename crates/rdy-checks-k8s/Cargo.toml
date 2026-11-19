@@ -9,6 +9,13 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "data/**", "Cargo.toml", "LICENSE", "NOTICE", "clippy.toml"]
 
+[features]
+# Serves a scripted cluster in process (M1-185): the kube mock of `client::mock` behind a public
+# `testing` module, and `K8sFamily` built over it. Test-only, like the `testing` feature of rdy-engine,
+# which it turns on. A release build with it does not compile (see `lib.rs`), CI keeps it out of the
+# shipped binary's feature graph, and the shipped family has no hook that reaches the mock.
+testing = ["rdy-engine/testing"]
+
 [dependencies]
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 # The typed parameters of the checks (`K8sVersion`, `K8sAccess`, `K8sStorageClass` and their scalars) and the
