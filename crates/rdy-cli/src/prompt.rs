@@ -182,8 +182,8 @@ pub trait Terminal {
     /// Show `prompt` and read one line with echo off, without its line ending.
     ///
     /// The implementation turns echo off before it writes `prompt`, so keys typed or pasted as soon
-    /// as the prompt shows are never echoed and never wait in the terminal's line buffer. The typed text is never shown. When the line is done the cursor is at the start of a new
-    /// line, so the implementation ends the line itself (the Enter key is not echoed either).
+    /// as the prompt shows are never echoed and never wait in the terminal's line buffer. The typed
+    /// text is never shown. When the line is done the cursor is at the start of a new line, so the implementation ends the line itself (the Enter key is not echoed either).
     ///
     /// # Errors
     /// [`PromptError::Cancelled`] on Ctrl-C or Ctrl-D, [`PromptError::TooLong`] past the cap, and
@@ -339,14 +339,26 @@ fn read_hidden_session(
         hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
         // The signal thread puts these back if a signal ends the process during the read.
         *state = TerminalState::Hidden(saved.clone());
-        let changed = tcsetattr(fd, OptionalActions::Now, &hidden);
+        let secret_modes =
+            LocalModes::ECHO | LocalModes::ECHONL | LocalModes::ICANON | LocalModes::ISIG;
+        // `tcsetattr` may succeed in part (POSIX), so read the modes back before the prompt shows.
+        let changed = tcsetattr(fd, OptionalActions::Now, &hidden)
+            .map_err(io::Error::from)
+            .and_then(|()| {
+                let now = tcgetattr(fd).map_err(io::Error::from)?;
+                if now.local_modes.intersects(secret_modes) {
+                    Err(io::Error::other("the terminal did not turn echo off"))
+                } else {
+                    Ok(())
+                }
+            });
         drop(state);
         // Built after the lock is let go: a drop of `Restore` takes the lock itself.
         let restore = Restore { fd, saved };
         if let Err(e) = changed {
             // The guard goes first, so a failure half way through `tcsetattr` is also undone.
             drop(restore);
-            return Err(PromptError::Io(e.into()));
+            return Err(PromptError::Io(e));
         }
         restore
     };
@@ -892,6 +904,7 @@ mod tests {
         use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
         use rustix::termios::{LocalModes, Termios, tcgetattr};
         use std::fs::File;
+        use std::io::Read;
         use std::os::fd::AsFd;
 
         /// The prompt stream. The first write is the prompt: it records the slave's modes at that
@@ -925,12 +938,14 @@ mod tests {
 
         fn pty() -> io::Result<(File, File)> {
             let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+            // Not inherited by `sh` or `mkfifo` that other tests spawn.
+            rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC)?;
             grantpt(&master)?;
             unlockpt(&master)?;
             let name = ptsname(&master, Vec::new())?;
             let slave = open(
                 name.as_c_str(),
-                OFlags::RDWR | OFlags::NOCTTY,
+                OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
                 Mode::empty(),
             )?;
             Ok((File::from(master), File::from(slave)))
@@ -977,8 +992,13 @@ mod tests {
                     "{flag:?} was still on at the prompt"
                 );
             }
-            // What was typed as the prompt showed is read, and was never echoed.
+            // What was typed as the prompt showed is read.
             assert_eq!(result.unwrap().expose(), "typed-at-once");
+            // And it was never echoed: nothing came back to the master.
+            let flags = rustix::fs::fcntl_getfl(&spy.master).expect("flags");
+            rustix::fs::fcntl_setfl(&spy.master, flags | OFlags::NONBLOCK).expect("nonblock");
+            let err = (&spy.master).read(&mut [0_u8; 64]).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
             assert_eq!(spy.written, b"Password: \n");
             assert_eq!(before.local_modes, after.local_modes);
         }
