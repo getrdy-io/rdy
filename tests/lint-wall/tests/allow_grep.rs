@@ -41,6 +41,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "tests of the client module: a mock API server, kubeconfig files, plugin scripts",
     ),
     (
+        "crates/rdy-checks-k8s/tests/family.rs",
+        "tests of the k8s family probe against a mock API server, with kubeconfig files and a plugin script (M1-107)",
+    ),
+    (
         "crates/rdy-checks-k8s/tests/guard.rs",
         "tests of the read-only guard on the real client stack: a mock API server and kubeconfig files",
     ),
@@ -203,7 +207,17 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
     ),
     (
+        "crates/rdy-checks-net/src/dns/tests.rs",
+        &["../../../../tests/fixtures/checks/net.dns/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/net.dns, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-net/src/family/tests.rs",
+        &["../../../../examples/specs/acme-platform.yaml"],
+        "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
+        "crates/rdy-checks-net/src/tls_intercept/tests.rs",
         &["../../../../examples/specs/acme-platform.yaml"],
         "embeds examples/specs/acme-platform.yaml for a test",
     ),

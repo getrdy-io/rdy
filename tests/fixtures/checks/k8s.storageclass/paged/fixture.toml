@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-paged"
+summary = "The default class is on the second page of the class list"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

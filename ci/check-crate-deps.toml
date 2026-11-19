@@ -12,7 +12,7 @@
 # - Every `crates/rdy-checks-*` crate has a section. A new check crate fails the test until it has one.
 # - A change to this file needs the `security-review` label (CODEOWNERS covers /ci/).
 # - Never add tokio, cap-std, cap-primitives, rustix, nix, socket2, hyper, hyper-util, walkdir, tempfile,
-#   sysinfo, which, ureq, reqwest or hickory-*. The test refuses them. A check needs the machine through
+#   sysinfo, which, ureq, reqwest or hickory-*. The test refuses them. hickory-proto is a dev-dependency of rdy-checks-net only (ADR 0052). A check needs the machine through
 #   the Probe, not through a crate.
 # - One section, then one `allow = [..]` line, sorted. Nothing else is read.
 

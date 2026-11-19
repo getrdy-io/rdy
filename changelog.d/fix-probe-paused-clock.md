@@ -1,0 +1,1 @@
+- Internal: the socket probe measures a call's remaining time on the same clock as its timeout. No change to the binary's behavior.

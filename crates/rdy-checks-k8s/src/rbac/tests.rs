@@ -970,3 +970,21 @@ fn the_window_is_eight_and_the_cap_is_a_hundred() {
     assert_eq!(IN_FLIGHT, 8);
     assert_eq!(ask::MAX_REVIEWS, 100);
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    a_forbidden_rules_review_only_leaves_out_its_note();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.rbac"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.rbac is read by no fixture of the tests listed here"
+    );
+}

@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "web.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 names resolve",
+    "notes": [],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "2001:db8::10",
+            "192.0.2.10"
+          ],
+          "addresses_total": 2,
+          "ipv4": 1,
+          "ipv6": 1,
+          "ms": 0,
+          "name": "web.acme.test",
+          "result": "found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

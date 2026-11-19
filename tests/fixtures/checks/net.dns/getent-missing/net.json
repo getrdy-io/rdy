@@ -1,0 +1,8 @@
+{
+  "dns": {
+    "web.acme.test": [
+      "192.0.2.10"
+    ],
+    "gone.acme.test": "NXDOMAIN"
+  }
+}

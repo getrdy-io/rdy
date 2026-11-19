@@ -81,7 +81,7 @@ export TUF_ROOT
 
 fetch() {
     # fetch <base url> <file name> <expected sha256> <local path under $tmp>
-    if ! curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 --retry 3 -fsSL -o "$tmp/$4" "$1/$2"; then
+    if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 --retry 3 -fsSL -o "$tmp/$4" "$1/$2"; then
         bad "download $1/$2"
         echo "fix: check the network. The test needs the release host and Sigstore's TUF mirror."
         exit 1

@@ -1,0 +1,51 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "limit=500&fieldSelector=status.phase!=Succeeded,status.phase!=Failed"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "web-1",
+          "namespace": "app"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "registry.acme.example/acme/app:1",
+              "resources": {
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "256Mi",
+                  "ephemeral-storage": "1Gi"
+                }
+              }
+            }
+          ],
+          "nodeName": "acme-node-1",
+          "overhead": {
+            "cpu": "250m"
+          },
+          "resources": {
+            "requests": {
+              "cpu": "3",
+              "memory": "1Gi"
+            }
+          }
+        },
+        "status": {
+          "phase": "Running"
+        }
+      }
+    ]
+  }
+}

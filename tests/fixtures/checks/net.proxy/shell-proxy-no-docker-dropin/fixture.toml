@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-shell-proxy-no-docker-dropin"
+summary = "A shell proxy with Docker installed and no drop-in, a docker client config with a planted auths secret"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

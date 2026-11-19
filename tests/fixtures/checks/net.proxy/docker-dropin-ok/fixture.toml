@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-docker-dropin-ok"
+summary = "A shell proxy and a Docker drop-in with the same proxy and a NO_PROXY"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses",
+    "query": "continue=tok-more&limit=500"
+  },
+  "status": 503,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "the server is overloaded, try again",
+    "reason": "ServiceUnavailable",
+    "details": {},
+    "code": 503
+  }
+}

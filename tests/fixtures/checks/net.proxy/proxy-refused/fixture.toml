@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-proxy-refused"
+summary = "The proxy host answers and its port is closed"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

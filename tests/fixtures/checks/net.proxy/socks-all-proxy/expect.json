@@ -1,0 +1,61 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": "Set the proxy variable to the proxy's http://host:port address, or ask the network team for one. rdy supports plain http:// proxies with Basic authentication.",
+    "level": "warn",
+    "message": "ALL_PROXY uses socks5://, which rdy does not support in M1, so it was not probed",
+    "notes": [],
+    "observed": {
+      "conflicts": [],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": true,
+          "sources": "",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "set": false
+      },
+      "no_proxy_coverage": [],
+      "os": "linux",
+      "reach": {
+        "state": "no_proxy"
+      },
+      "shell_proxy": null,
+      "variables": [
+        {
+          "scheme": "socks5",
+          "state": "unsupported_scheme",
+          "var": "ALL_PROXY"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

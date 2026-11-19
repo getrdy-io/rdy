@@ -1,0 +1,8 @@
+WARNING: UNSIGNED SPEC
+spec.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+error: cannot create the report folder ro/rdy-report-acme-quickstart-<stamp> (permission denied)
+fix: use --out-dir <a folder you can write to>, or --no-report to skip the files

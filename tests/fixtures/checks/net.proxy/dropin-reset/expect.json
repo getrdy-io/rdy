@@ -1,0 +1,69 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": "Docker does not see the proxy. Create `/etc/systemd/system/docker.service.d/http-proxy.conf` with `[Service]` and `Environment=\"HTTP_PROXY=http://proxy.acme.test:3128\" \"HTTPS_PROXY=http://proxy.acme.test:3128\" \"NO_PROXY=localhost,127.0.0.1\"`, then run `systemctl daemon-reload && systemctl restart docker`. The proxy URL of this shell has a user name and password. Add them to the URLs in the drop-in if the proxy needs them. rdy does not print them.",
+    "level": "warn",
+    "message": "Docker is installed and has no proxy in a systemd drop-in or daemon.json, so it does not see the proxy this shell uses",
+    "notes": [
+      "NO_PROXY is not set, so every destination, cluster-internal ones included, goes through the proxy."
+    ],
+    "observed": {
+      "conflicts": [],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": true,
+          "sources": "/etc/systemd/system/docker.service.d/10-proxy.conf, /etc/systemd/system/docker.service.d/20-reset.conf",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "set": false
+      },
+      "no_proxy_coverage": [],
+      "os": "linux",
+      "reach": {
+        "ms": 0,
+        "proxy": "http://proxy.acme.test:3128",
+        "state": "connected"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

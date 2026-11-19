@@ -30,7 +30,7 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
    `168.63.129.16/32`, the Azure host-services address. The Azure address serves the VM agent's settings
    and certificates, so no spec host may be it. It is also the Azure VM's `resolv.conf` nameserver, so
    the `SystemResolver` peer class may reach it on port 53, UDP and TCP, and only when the address came
-   from the OS nameserver list; ports 80 and 32526 stay refused. That class is not built yet (M1-155).
+   from the OS nameserver list; ports 80 and 32526 stay refused. Built in M1-155 as `Probe::nameserver_exchange` (ADR 0051).
    Name lookups through the OS resolver are unaffected, because the OS makes that connection. The
    decision and its residual are in 05.)
 3. **TLS verifier.** Net checks verify against the system root store loaded by the facade (PEM bundles
@@ -91,12 +91,25 @@ configuration: a `WebPkiServerVerifier` on the system roots (`NativeCall::System
 `http/1.1` only. A chain the roots refuse fails the handshake before a request byte
 (`NetFailure::TlsUntrusted`). (b) hyper is a direct dependency of `rdy-engine` (`client`, `http1`; `deny.toml`
 lists `rdy-engine` as a wrapper), reached through a safe `Io` adapter, with no `hyper-util`. (c) A plain
-`http://` target through the proxy is refused until M1-097 writes the absolute form. (d) A `testing`-gated
+`http://` target through the proxy was refused until M1-097, which built the absolute form: the request line
+holds the full URL, `Proxy-Authorization` rides on that one request to the proxy (marked sensitive, never
+logged), and no `CONNECT` is sent. A 407 to it is `NetFailure::ProxyAuthRequired`; a 403 is a status. (d) A `testing`-gated
 hub clock (`ProbeHub::pin_clock`) feeds the `time_provider` of both the recording and the strict
 configuration. (e) `Probe::trust_store` gives a check the OS store's sources and the SHA-256 of each root.
 It is a probe call like any other: it writes one `native` entry (`api: system_roots`) with the check's id,
 and a call after the check ended is denied and logged. (f) A connection that ends after the reply head
 does not lose the status: the head is data, and the body is cut (`body_cut`).
+
+**Amendment (M1-098).** Three additions to decision 2, all inside the peers INV-11 already lists. (a)
+`Probe::proxy_reach` opens one TCP connection to the run's proxy and closes it, with no `CONNECT` and no
+byte written. It needs `PeerClass::Proxy` and no spec host, the proxy's name is the one name resolved here,
+and the address rule of decision 2 applies to it (`RULE_PROXY_ADDRESS`). `--no-network` refuses it. (b)
+`rdy_engine::probe::NoProxy` is the one `NO_PROXY` matcher (Go's `httpproxy` rules plus CIDR entries, the
+loopback rule, bounded at 256 entries and 8 KiB). `ProbeHub::set_proxy_from_env` reads `NO_PROXY` (else
+`no_proxy`) with the proxy, and `Probe::route_for` gives a host `Route::Direct` when the list or the loopback
+rule exempts it, else `Route::ViaProxy` when the run has a proxy. `proxy_only` ignores the list. The k8s
+client moves onto the same matcher in M1-107. (c) The hub also records which proxy variables are set in two
+spellings that differ (`env_conflicts`, names only) and hides the password of an `ALL_PROXY` URL. Because the set must hide it, an `ALL_PROXY` password too short to register makes the run exit 70, although rdy never uses `ALL_PROXY`.
 
 ## Consequences
 

@@ -39,6 +39,63 @@
     "metadata",
     "checks"
   ],
+  "examples": [
+    {
+      "apiVersion": "rdy/v1",
+      "kind": "Readiness",
+      "metadata": {
+        "product": "acme-quickstart",
+        "version": ">=1.0"
+      },
+      "checks": [
+        {
+          "id": "host.cpu",
+          "min": 4,
+          "severity": "block",
+          "fix": "Use a machine with at least 4 CPU cores."
+        },
+        {
+          "id": "host.memory",
+          "min": "8Gi",
+          "severity": "block",
+          "fix": "Add RAM or choose a larger node class."
+        },
+        {
+          "id": "host.disk",
+          "name": "root",
+          "os": [
+            "linux",
+            "macos"
+          ],
+          "path": "/",
+          "min": "20Gi",
+          "severity": "warn",
+          "fix": "Free space on / or mount a larger volume."
+        },
+        {
+          "id": "host.disk",
+          "name": "system",
+          "os": [
+            "windows"
+          ],
+          "path": "C:\\",
+          "min": "20Gi",
+          "severity": "warn",
+          "fix": "Free space on C: or use a larger disk."
+        },
+        {
+          "id": "net.egress",
+          "endpoints": [
+            "registry.acme.example:443",
+            "license.acme.example:443"
+          ],
+          "via_proxy": "auto",
+          "severity": "block",
+          "fix": "Ask your network team to allow these endpoints through the proxy."
+        }
+      ]
+    }
+  ],
   "$defs": {
     "AbsPath": {
       "description": "An absolute path: /... on Unix, C:\\... on Windows. No control characters.",
@@ -2218,7 +2275,7 @@
                     "default": false
                   },
                   "expect_status": {
-                    "description": "The statuses that count as reachable, for a URL target. At most 16.",
+                    "description": "The statuses that count as reachable, for a URL target. At most 16. With none listed, 2xx, 3xx and 4xx count as reachable except 407; a 407 and any 5xx fail. A 3xx, 401, 404 and other 4xx get a note and a 403 warns, because a proxy's deny page looks the same.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 16,
