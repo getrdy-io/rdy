@@ -1205,7 +1205,7 @@
       ]
     },
     "SysctlName": {
-      "description": "A kernel parameter name such as vm.max_map_count. Parts are separated by dots, or by slashes when a part has a dot, as in net/ipv4/conf/eth0.100/rp_filter.",
+      "description": "A kernel parameter name such as vm.max_map_count. The first dot or slash in the name is its separator. Parts are separated by dots, or by slashes when a part has a dot, as in net/ipv4/conf/eth0.100/rp_filter. net.ipv4.conf.eth0/100.rp_filter is the same parameter.",
       "type": "string",
       "maxLength": 128,
       "pattern": "^([A-Za-z0-9_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_][A-Za-z0-9_-]*)*|[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)+)$"
