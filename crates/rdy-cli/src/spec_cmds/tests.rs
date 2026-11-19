@@ -64,7 +64,8 @@ impl Terminal for Scripted {
         Ok(None)
     }
 
-    fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+    fn read_hidden(&mut self, prompt: &str) -> Result<Secret, PromptError> {
+        self.prompts.borrow_mut().push(prompt.to_owned());
         let text = self.hidden.pop_front().unwrap_or("");
         Ok(Secret::new(text.to_owned()))
     }

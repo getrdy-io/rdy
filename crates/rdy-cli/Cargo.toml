@@ -83,6 +83,8 @@ tokio = { workspace = true, features = ["rt", "macros", "net", "time", "test-uti
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
+# The order test in src/prompt.rs opens its own pseudo-terminal.
+rustix = { workspace = true, features = ["std", "fs", "pty", "termios"] }
 
 # A named pipe server for the Windows spec-read test (M1-183).
 [target.'cfg(windows)'.dev-dependencies]
