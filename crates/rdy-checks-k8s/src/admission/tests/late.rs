@@ -17,7 +17,7 @@ fn spec() -> Value {
 // ---- webhooks ---------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_fail_webhook_with_an_empty_endpointslice_blocks() {
+pub(super) async fn a_fail_webhook_with_an_empty_endpointslice_blocks() {
     let rig = rig("webhook-fail-empty");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Fail, "{finding:?}");
@@ -54,7 +54,7 @@ async fn a_fail_webhook_with_an_empty_endpointslice_blocks() {
 }
 
 #[tokio::test]
-async fn a_webhook_with_no_failure_policy_fails_closed() {
+pub(super) async fn a_webhook_with_no_failure_policy_fails_closed() {
     // `failurePolicy` defaults to Fail in admissionregistration.k8s.io/v1.
     let rig = rig("webhook-default-fail");
     let finding = rig.finding(spec()).await;
@@ -67,7 +67,7 @@ async fn a_webhook_with_no_failure_policy_fails_closed() {
 }
 
 #[tokio::test]
-async fn ready_unset_means_ready_and_one_ready_endpoint_is_enough() {
+pub(super) async fn ready_unset_means_ready_and_one_ready_endpoint_is_enough() {
     let rig = rig("webhook-ready");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -87,7 +87,7 @@ async fn ready_unset_means_ready_and_one_ready_endpoint_is_enough() {
 }
 
 #[tokio::test]
-async fn endpoints_that_are_all_not_ready_block() {
+pub(super) async fn endpoints_that_are_all_not_ready_block() {
     let rig = rig("webhook-not-ready");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Fail, "{finding:?}");
@@ -102,7 +102,7 @@ async fn endpoints_that_are_all_not_ready_block() {
 }
 
 #[tokio::test]
-async fn a_mutating_webhook_blocks_the_same_way() {
+pub(super) async fn a_mutating_webhook_blocks_the_same_way() {
     let rig = rig("webhook-mutating");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Fail, "{finding:?}");
@@ -122,7 +122,7 @@ async fn a_mutating_webhook_blocks_the_same_way() {
 }
 
 #[tokio::test]
-async fn a_service_that_does_not_exist_blocks_and_its_slices_are_not_asked() {
+pub(super) async fn a_service_that_does_not_exist_blocks_and_its_slices_are_not_asked() {
     let rig = rig("webhook-service-missing");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Fail, "{finding:?}");
@@ -138,7 +138,7 @@ async fn a_service_that_does_not_exist_blocks_and_its_slices_are_not_asked() {
 }
 
 #[tokio::test]
-async fn match_conditions_make_the_empty_backend_a_warning_that_says_not_evaluated() {
+pub(super) async fn match_conditions_make_the_empty_backend_a_warning_that_says_not_evaluated() {
     let rig = rig("webhook-match-conditions");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -168,7 +168,7 @@ async fn match_conditions_make_the_empty_backend_a_warning_that_says_not_evaluat
 }
 
 #[tokio::test]
-async fn an_object_selector_makes_the_empty_backend_a_warning_too() {
+pub(super) async fn an_object_selector_makes_the_empty_backend_a_warning_too() {
     let rig = rig("webhook-object-selector");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -183,7 +183,7 @@ async fn an_object_selector_makes_the_empty_backend_a_warning_too() {
 }
 
 #[tokio::test]
-async fn a_url_webhook_is_an_external_backend_not_verified() {
+pub(super) async fn a_url_webhook_is_an_external_backend_not_verified() {
     let rig = rig("webhook-url");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -210,7 +210,7 @@ async fn a_url_webhook_is_an_external_backend_not_verified() {
 }
 
 #[tokio::test]
-async fn an_external_name_service_is_not_verified() {
+pub(super) async fn an_external_name_service_is_not_verified() {
     let rig = rig("webhook-external-name");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -226,7 +226,7 @@ async fn an_external_name_service_is_not_verified() {
 }
 
 #[tokio::test]
-async fn a_webhook_that_fails_open_is_listed_and_never_judged() {
+pub(super) async fn a_webhook_that_fails_open_is_listed_and_never_judged() {
     let rig = rig("webhook-ignore");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -240,7 +240,7 @@ async fn a_webhook_that_fails_open_is_listed_and_never_judged() {
 }
 
 #[tokio::test]
-async fn webhooks_that_do_not_match_a_pod_create_here_are_not_judged() {
+pub(super) async fn webhooks_that_do_not_match_a_pod_create_here_are_not_judged() {
     // Another namespace, deployments only, update only and a pod subresource: none applies.
     let rig = rig("webhook-not-matching");
     let finding = rig.finding(spec()).await;
@@ -257,7 +257,7 @@ async fn webhooks_that_do_not_match_a_pod_create_here_are_not_judged() {
 }
 
 #[tokio::test]
-async fn forbidden_webhook_lists_give_partial_with_both_grants() {
+pub(super) async fn forbidden_webhook_lists_give_partial_with_both_grants() {
     let rig = rig("webhooks-forbidden");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -290,7 +290,7 @@ async fn forbidden_webhook_lists_give_partial_with_both_grants() {
 }
 
 #[tokio::test]
-async fn forbidden_endpoint_slices_are_not_evaluated_and_never_a_block() {
+pub(super) async fn forbidden_endpoint_slices_are_not_evaluated_and_never_a_block() {
     let rig = rig("webhook-slices-forbidden");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -306,7 +306,7 @@ async fn forbidden_endpoint_slices_are_not_evaluated_and_never_a_block() {
 }
 
 #[tokio::test]
-async fn forbidden_services_are_not_evaluated_and_never_a_block() {
+pub(super) async fn forbidden_services_are_not_evaluated_and_never_a_block() {
     let rig = rig("webhook-services-forbidden");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -316,7 +316,7 @@ async fn forbidden_services_are_not_evaluated_and_never_a_block() {
 }
 
 #[tokio::test]
-async fn at_most_eight_services_are_read() {
+pub(super) async fn at_most_eight_services_are_read() {
     let rig = rig("webhook-many-services");
     let finding = rig.finding(spec()).await;
     let paths = rig.every_path();
@@ -343,7 +343,7 @@ async fn at_most_eight_services_are_read() {
 // ---- ValidatingAdmissionPolicy ----------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_denying_binding_that_matches_pods_warns_by_name() {
+pub(super) async fn a_denying_binding_that_matches_pods_warns_by_name() {
     let rig = rig("vap-deny");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -366,7 +366,7 @@ async fn a_denying_binding_that_matches_pods_warns_by_name() {
 }
 
 #[tokio::test]
-async fn bindings_that_only_warn_or_do_not_match_reject_nothing() {
+pub(super) async fn bindings_that_only_warn_or_do_not_match_reject_nothing() {
     for case in ["vap-warn-only", "vap-not-matching", "vap-other-namespace"] {
         let rig = rig(case);
         let finding = rig.finding(spec()).await;
@@ -382,7 +382,7 @@ async fn bindings_that_only_warn_or_do_not_match_reject_nothing() {
 }
 
 #[tokio::test]
-async fn a_cluster_that_does_not_serve_the_policy_api_has_none() {
+pub(super) async fn a_cluster_that_does_not_serve_the_policy_api_has_none() {
     let rig = rig("vap-not-served");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -396,7 +396,7 @@ async fn a_cluster_that_does_not_serve_the_policy_api_has_none() {
 }
 
 #[tokio::test]
-async fn forbidden_policy_lists_give_partial_with_the_grant() {
+pub(super) async fn forbidden_policy_lists_give_partial_with_the_grant() {
     let rig = rig("vap-forbidden");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
@@ -419,7 +419,7 @@ async fn forbidden_policy_lists_give_partial_with_the_grant() {
 // ---- the engines' own policies ----------------------------------------------------------------------------
 
 #[tokio::test]
-async fn the_policies_of_both_engines_are_named() {
+pub(super) async fn the_policies_of_both_engines_are_named() {
     let rig = rig("engine-policies");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -485,7 +485,7 @@ async fn the_policies_of_both_engines_are_named() {
 }
 
 #[tokio::test]
-async fn forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block() {
+pub(super) async fn forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block() {
     let rig = rig("engine-policies-forbidden");
     let finding = rig.finding(spec()).await;
     // The engine is still found, so the level is the engine's warn.
@@ -523,7 +523,7 @@ async fn forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block() {
 }
 
 #[tokio::test]
-async fn a_kyverno_group_that_serves_only_policy_exceptions_lists_no_policy() {
+pub(super) async fn a_kyverno_group_that_serves_only_policy_exceptions_lists_no_policy() {
     let rig = rig("kyverno-exception-only");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -540,7 +540,7 @@ async fn a_kyverno_group_that_serves_only_policy_exceptions_lists_no_policy() {
 }
 
 #[tokio::test]
-async fn an_engine_whose_kinds_could_not_be_read_lists_no_policy() {
+pub(super) async fn an_engine_whose_kinds_could_not_be_read_lists_no_policy() {
     let rig = rig("engine-forbidden");
     let finding = rig.finding(spec()).await;
     assert_eq!(finding.observed["engine_policies"], json!([]));
@@ -556,7 +556,7 @@ async fn an_engine_whose_kinds_could_not_be_read_lists_no_policy() {
 }
 
 #[tokio::test]
-async fn at_most_six_constraint_kinds_are_listed_and_real_kinds_come_first() {
+pub(super) async fn at_most_six_constraint_kinds_are_listed_and_real_kinds_come_first() {
     let rig = rig("many-kinds");
     let finding = rig.finding(spec()).await;
     let lists: Vec<String> = rig
@@ -589,7 +589,7 @@ async fn at_most_six_constraint_kinds_are_listed_and_real_kinds_come_first() {
 }
 
 #[tokio::test]
-async fn kyverno_cel_policies_are_read_in_v1alpha1_too() {
+pub(super) async fn kyverno_cel_policies_are_read_in_v1alpha1_too() {
     // Kyverno 1.14 and 1.15 serve `policies.kyverno.io` only as `v1alpha1`.
     let rig = rig("kyverno-cel-alpha");
     let finding = rig.finding(spec()).await;
@@ -610,7 +610,7 @@ async fn kyverno_cel_policies_are_read_in_v1alpha1_too() {
 // ---- the guard test ---------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn across_the_fixture_set_the_check_makes_no_call_that_is_not_a_get() {
+pub(super) async fn across_the_fixture_set_the_check_makes_no_call_that_is_not_a_get() {
     // The exit test of M1-160: the only non-GET calls are the three review kinds, and this check asks for
     // none, so the set is empty. Every cluster of the folder is run and every request is looked at.
     const REVIEWS: [&str; 3] = [
