@@ -31,32 +31,31 @@ use rdy_engine::family::{
     BuildError, Built, FAMILY_PROBE_LIMIT, Family, FamilyFatal, FamilyProbe, HostSet,
 };
 use rdy_engine::probe::Probe;
-use rdy_spec::check::CheckParams;
+use rdy_spec::check::{CheckParams, K8sName};
 use rdy_spec::result::{ActionOutcome, Capability, CheckResult, KubeIdentity};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::access::{AccessCheck, Dial, DialOutcome, Dialed};
+use crate::admission::AdmissionCheck;
 use crate::client::{
     ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions,
     ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
+use crate::namespace::NamespaceCheck;
+use crate::nodes::NodesCheck;
+use crate::rbac::RbacCheck;
 use crate::registry;
+use crate::storageclass::StorageClassCheck;
 use crate::version::VersionCheck;
 
 #[cfg(test)]
 mod tests;
 
-/// The ids of this crate that the family does not build yet. The planner skips each as `not_in_build`.
-/// Their checks exist. M1-175 gives them a spec entry (the target namespace of the k8s block of the spec for
-/// three of them), adds the arm to [`K8sFamily::build`] and takes the id off this list.
-static NOT_BUILT: [&str; 5] = [
-    "k8s.admission",
-    "k8s.namespace",
-    "k8s.nodes",
-    "k8s.rbac",
-    "k8s.storageclass",
-];
+/// The ids of this crate that the family does not build. The planner skips each as `not_in_build`. Empty
+/// since M1-175: every check registered in the registry is built. A check that lands later (`k8s.dns`,
+/// `k8s.crds`, `k8s.ingress`, `k8s.cni`) registers its info and adds its arm to `build_check` in one change.
+static NOT_BUILT: [&str; 0] = [];
 
 /// The most time the probe spends on the OpenShift group list.
 const OPENSHIFT_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
@@ -76,6 +75,12 @@ static NOT_ATTEMPTED: DialOutcome = DialOutcome::NoNetwork;
 #[derive(Debug)]
 pub struct K8sFamily {
     holder: Arc<Holder>,
+    /// The family namespace: the target namespace of the checks that look at one. `k8s.admission` and
+    /// `k8s.namespace` use it when their entry has no `namespace` (the entry's wins). `k8s.storageclass` has
+    /// no `namespace` key, so it always uses this one. `rdy run` has no source for it in M1 (the spec has
+    /// no k8s block and `--namespace` belongs to `rdy bundle`), so it is `None` unless
+    /// [`K8sFamily::with_namespace`] set it.
+    namespace: Option<K8sName>,
 }
 
 impl K8sFamily {
@@ -85,6 +90,7 @@ impl K8sFamily {
     pub fn new() -> Self {
         Self {
             holder: Arc::new(Holder::new(None)),
+            namespace: None,
         }
     }
 
@@ -102,7 +108,16 @@ impl K8sFamily {
     pub fn with_env(env: Env) -> Self {
         Self {
             holder: Arc::new(Holder::new(Some(env))),
+            namespace: None,
         }
+    }
+
+    /// Sets the family namespace: the target namespace of `k8s.storageclass` (which has no `namespace` key)
+    /// and of `k8s.admission` and `k8s.namespace` when their entry has no `namespace` of its own.
+    #[must_use]
+    pub fn with_namespace(mut self, namespace: K8sName) -> Self {
+        self.namespace = Some(namespace);
+        self
     }
 }
 
@@ -431,10 +446,6 @@ impl Family for K8sFamily {
     ) -> Result<Built, BuildError> {
         let holder = Arc::clone(&self.holder);
         match params {
-            CheckParams::K8sVersion(params) => Ok(Built::new(Box::new(VersionCheck::new(
-                params,
-                holder as Arc<dyn Cluster>,
-            )))),
             CheckParams::K8sAccess(params) => AccessCheck::new(&params, holder as Arc<dyn Dial>)
                 .map(|check| Built::new(Box::new(check)).with_hosts(HostSet::empty()))
                 .map_err(|_| {
@@ -442,10 +453,38 @@ impl Family for K8sFamily {
                         "the `expect` pattern is not a valid pattern".to_owned(),
                     )
                 }),
-            _ => Err(BuildError::Unsupported(
-                "not a k8s check this rdy can build".to_owned(),
-            )),
+            params => build_check(params, self.namespace.as_ref(), holder as Arc<dyn Cluster>),
         }
+    }
+}
+
+/// Builds every check of the family that reads the cluster through a [`Cluster`], from its parameters.
+/// `namespace` is the family namespace. `k8s.access` is built by [`K8sFamily::build`], because it reads the
+/// dial and not the cluster. The fixture tests call this with a cluster over the kube mock.
+pub(crate) fn build_check(
+    params: CheckParams,
+    namespace: Option<&K8sName>,
+    cluster: Arc<dyn Cluster>,
+) -> Result<Built, BuildError> {
+    let namespace = namespace.cloned();
+    match params {
+        CheckParams::K8sVersion(params) => {
+            Ok(Built::new(Box::new(VersionCheck::new(params, cluster))))
+        }
+        CheckParams::K8sStorageClass(params) => Ok(Built::new(Box::new(StorageClassCheck::new(
+            params, namespace, cluster,
+        )))),
+        CheckParams::K8sRbac(params) => Ok(Built::new(Box::new(RbacCheck::new(params, cluster)))),
+        CheckParams::K8sNodes(params) => Ok(Built::new(Box::new(NodesCheck::new(params, cluster)))),
+        CheckParams::K8sAdmission(params) => Ok(Built::new(Box::new(AdmissionCheck::new(
+            params, namespace, cluster,
+        )))),
+        CheckParams::K8sNamespace(params) => Ok(Built::new(Box::new(NamespaceCheck::new(
+            params, namespace, cluster,
+        )))),
+        _ => Err(BuildError::Unsupported(
+            "not a k8s check this rdy can build".to_owned(),
+        )),
     }
 }
 

@@ -8,9 +8,9 @@
 //! - `net`: registered with `net.egress` (M1-095) and `net.mtu` (M1-157). The other `net.*` ids are not built, so the planner skips
 //!   them as `not_in_build`. The check declares the `network` need, so `--no-network` skips it as
 //!   `missing_need`.
-//! - `k8s`: registered (M1-107) with `k8s.version` and `k8s.access`. The family probes `kube_context` once
-//!   per run, and only when the plan holds a runnable k8s check. Its other ids are not built into the
-//!   family yet, so the planner skips them as `not_in_build`.
+//! - `k8s`: registered (M1-107) with every k8s check of the crate (M1-175): `k8s.version`, `k8s.access`,
+//!   `k8s.storageclass`, `k8s.rbac`, `k8s.nodes`, `k8s.admission` and `k8s.namespace`. The family probes
+//!   `kube_context` once per run, and only when the plan holds a runnable k8s check.
 //!
 //! Each family ticket adds its line here, and nowhere else.
 
