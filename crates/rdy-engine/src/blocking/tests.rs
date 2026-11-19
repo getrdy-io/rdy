@@ -42,3 +42,12 @@ async fn nothing_runs_before_the_first_poll() {
     future.await.expect("runs");
     assert!(ran.load(Ordering::SeqCst));
 }
+
+#[tokio::test(start_paused = true)]
+async fn within_returns_the_output_or_none_when_the_time_runs_out() {
+    use std::time::Duration;
+    let done = super::within(Duration::from_secs(1), async { 7 }).await;
+    assert_eq!(done, Some(7));
+    let never = super::within(Duration::from_secs(1), std::future::pending::<u8>()).await;
+    assert_eq!(never, None);
+}

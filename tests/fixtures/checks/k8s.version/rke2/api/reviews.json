@@ -1,0 +1,15 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "nodes"
+        }
+      },
+      "status": {
+        "allowed": true
+      }
+    }
+  ]
+}

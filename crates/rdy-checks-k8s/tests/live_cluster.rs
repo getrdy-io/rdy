@@ -35,7 +35,10 @@
 //!   exist, where the point is that the answer is not a 403). The same role, asked through the
 //!   server's own access review, may not write, read Secrets, mint tokens, exec, impersonate or bind.
 //!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
-//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding.
+//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding. The
+//!   same review's `nonResourceRules` hold only the `get` of the URLs of the default ClusterRoles
+//!   `system:discovery`, `system:public-info-viewer` and `system:service-account-issuer-discovery`
+//!   (`NON_RESOURCE_DEFAULTS`).
 //!   The guard's refusals need no cluster and are tested without one.
 //!
 //! Not covered here, and carried:
@@ -72,7 +75,7 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, ResourceQuota, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
@@ -406,7 +409,6 @@ type Grant = (String, String, String, String);
 const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("get", "", "namespaces", ""),
     ("list", "", "nodes", ""),
-    ("list", "", "pods", ""),
     ("list", "", "persistentvolumeclaims", ""),
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
@@ -480,6 +482,95 @@ const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
     ("watch", "certificates.k8s.io", "clustertrustbundles", ""),
 ];
 
+/// The URLs the Kubernetes project lets every signed-in user `get` outside the role file: the rules of the
+/// ClusterRoles `system:discovery` and `system:public-info-viewer`, bound to the group
+/// `system:authenticated`. `/healthz/*`, `/livez/*`, `/readyz/*` and `/metrics` belong to
+/// `system:monitoring` only, so they are surprises here. They are discovery, health and version documents, and hold no secret. The role
+/// file has no `nonResourceURLs` rule of its own, so any other URL, any other verb and any wildcard verb
+/// is a grant the role file did not make. The identity is a service account, so it also gets the
+/// ClusterRole `system:service-account-issuer-discovery`, which Kubernetes binds to the group
+/// `system:serviceaccounts` by default: the public OIDC discovery document and its key set, which hold no
+/// secret either.
+const NON_RESOURCE_DEFAULTS: &[&str] = &[
+    "/api",
+    "/api/*",
+    "/apis",
+    "/apis/*",
+    "/healthz",
+    "/livez",
+    "/readyz",
+    "/version",
+    "/version/",
+    "/openapi",
+    "/openapi/*",
+    "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/",
+    "/openid/v1/jwks",
+    "/openid/v1/jwks/",
+];
+
+/// What the server grants the identity on non-resource URLs in `namespace`, one entry per verb and URL.
+fn non_resource_grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<(String, String)> {
+    let status = answer
+        .status
+        .as_ref()
+        .expect("the server fills the status of a rules review");
+    let mut out = Vec::new();
+    for rule in &status.non_resource_rules {
+        let urls = rule.non_resource_urls.clone().unwrap_or_default();
+        assert!(
+            !urls.is_empty(),
+            "{namespace}: a non-resource rule with no URL: {rule:?}"
+        );
+        for verb in &rule.verbs {
+            for url in &urls {
+                out.push((verb.clone(), url.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The grants of `grants` that are not a `get` of a URL of [`NON_RESOURCE_DEFAULTS`].
+fn unexpected_non_resource(namespace: &str, grants: &[(String, String)]) -> Vec<String> {
+    grants
+        .iter()
+        .filter(|(verb, url)| verb != "get" || !NON_RESOURCE_DEFAULTS.contains(&url.as_str()))
+        .map(|(verb, url)| format!("{namespace}: {verb} {url}"))
+        .collect()
+}
+
+#[test]
+fn only_a_get_of_a_default_url_is_an_expected_non_resource_grant() {
+    let grant = |verb: &str, url: &str| (verb.to_owned(), url.to_owned());
+    // What a stock server reports for a signed-in service account.
+    let stock: Vec<_> = NON_RESOURCE_DEFAULTS
+        .iter()
+        .map(|url| grant("get", url))
+        .collect();
+    assert!(unexpected_non_resource("default", &stock).is_empty());
+    // Another verb, another URL, a wildcard URL or a wildcard verb are each a surprise.
+    let surprises = [
+        grant("post", "/healthz"),
+        grant("get", "/metrics"),
+        grant("get", "*"),
+        grant("get", "/logs/*"),
+        grant("*", "/version"),
+        grant("get", "/apis/*/extra"),
+        grant("get", "/healthz/*"),
+        grant("get", "/livez/*"),
+        grant("get", "/readyz/*"),
+        grant("get", "/metrics"),
+    ];
+    for surprise in surprises {
+        assert_eq!(
+            unexpected_non_resource("kube-system", std::slice::from_ref(&surprise)),
+            [format!("kube-system: {} {}", surprise.0, surprise.1)],
+            "{surprise:?}"
+        );
+    }
+}
+
 /// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
 /// The server may merge rules, so the answer is expanded before it is compared.
 fn grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<Grant> {
@@ -530,10 +621,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let check = run.context("k8s.nodes", Os::Linux, []);
     let client = connected.read_only(check.probe());
     let all = ListParams::default().limit(50);
-    // The selectors the guard requires on these two lists (02 Appendix B, section 4).
-    let pods = all
-        .clone()
-        .fields("status.phase!=Succeeded,status.phase!=Failed");
+    // The selector the guard requires on the event list (02 Appendix B, section 4).
     let events = all
         .clone()
         .fields("involvedObject.kind=PersistentVolumeClaim");
@@ -542,7 +630,6 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     //    the rules review are GA on every supported minor, so a 404 there fails too. The one tolerated
     //    404 is the get of a storage class that does not exist (the point is that it is not a 403).
     assert_served("nodes", false, &client.all::<Node>().list(&all).await);
-    assert_served("pods", false, &client.all::<Pod>().list(&pods).await);
     assert_served(
         "pvc",
         false,
@@ -813,6 +900,17 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         unexpected.is_empty(),
         "the server grants the rdy-readonly identity more than the role file lists: {unexpected:#?}"
     );
+    //    The same for URLs. The role file grants none, so every non-resource rule the server reports is a
+    //    default the project gives every signed-in user (`NON_RESOURCE_DEFAULTS`), and a `get` only.
+    let mut unexpected_urls = Vec::new();
+    for (namespace, answer) in &rules_answers {
+        let urls = non_resource_grants(namespace, answer);
+        unexpected_urls.extend(unexpected_non_resource(namespace, &urls));
+    }
+    assert!(
+        unexpected_urls.is_empty(),
+        "the server grants the rdy-readonly identity non-resource URLs beyond the discovery, public-info-viewer and issuer-discovery defaults: {unexpected_urls:#?}"
+    );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
     let error = client
@@ -834,10 +932,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 18 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 17 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 18 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 17 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

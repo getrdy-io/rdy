@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-nodes-review-undecided"
+summary = "A 1.29 cluster whose authorizer cannot decide the list nodes review: the list is tried"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

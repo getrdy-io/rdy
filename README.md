@@ -2,14 +2,13 @@
 
 **Install day should be boring.**
 
-rdy checks a machine, a Kubernetes cluster or a cloud account against a software vendor's written
-requirements, before the install. It tells you what is wrong and how to fix it. It ships as one signed
-binary with no runtime, and it works offline.
+rdy checks a machine, a Kubernetes cluster or (later) a cloud account against a software vendor's
+written requirements, before the install. It tells you what is wrong and how to fix it. One signed
+binary. No runtime. Works offline.
 
-> **Pre-release.** rdy is under active development. `rdy run`, the command that does the main job,
-> works on `main` today, with thirteen host checks and two network checks. There is no tagged release
-> yet, so the install command below is the shape it will have, and for now you build from source. See
-> [Status](#status) for what works and what is coming.
+> **Pre-release.** No release is tagged yet. `rdy run` works on `main` today with host,
+> network and Kubernetes checks. The install command below is the shape it will have. Until a tag exists you
+> build from source. [Status](#status) says what works and what is planned.
 
 ## The problem
 
@@ -17,68 +16,101 @@ Installs fail because the environment isn't ready, not because the product is br
 A proxy that blocks the registry. A storage class that cannot do ReadWriteMany. Somebody finds out on
 install day, on a call, with the customer watching.
 
-rdy moves that discovery earlier. The vendor writes down what the product needs, as a short YAML
-file called a spec, and signs it. The customer's platform or IT engineer runs one command. They get a
-list of what is wrong, with a fix under each problem, and a report to send back. Today the report is JSON,
-and HTML is next.
+rdy runs those checks first. The vendor writes down what the product needs, as a short YAML file
+called a spec, and signs it. The customer runs one command and gets a list of what is wrong, with a
+fix under each problem, and a report to send back.
 
-You might be reading this because a vendor sent you a spec and asked you to run it. Or you are a
-sales engineer who is tired of finding out about the proxy on install day. Both are the audience.
+You might be reading this because a vendor sent you a spec and asked you to run it. Or you sell or
+support software that ships into customer environments, and you are tired of finding out about the
+proxy on install day. Both are the audience.
 
-## Install and first run
+## What it looks like
 
-Releases are signed. The M1 install path is the `install.sh` file attached to a pinned GitHub release.
-It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.1.3 or newer on your
-PATH. Without it, the script stops and installs nothing. It checks the signature of the checksum file
-and the sha256 of the archive before it installs anything. It never runs `sudo`. It writes one file,
-`rdy`, to `$HOME/.local/bin`, or to the folder in `RDY_INSTALL_DIR`. As root, it refuses unless you
-pass `--allow-root`, and then it writes `/usr/local/bin/rdy`, unless `RDY_INSTALL_DIR` is set. On
-Windows, download the `.zip` from the release page and check its sha256 by hand.
+A vendor signs its spec. rdy refuses a spec with no signature. This block runs against a spec in this
+repo, from the repo root:
 
-There is no tagged release yet. When there is one, the command is this, with the version filled in:
-
-```sh skip=placeholder
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL \
-  https://github.com/getrdy-io/rdy/releases/download/v<VERSION>/install.sh | sh
-"$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
+```console tested exit=64 shape=^fix:\s transcript=tests/fixtures/readme/refusal-unsigned.txt
+$ rdy run examples/specs/acme-quickstart.yaml
+error: no signature found at examples/specs/acme-quickstart.yaml.minisig
+fix: ask the vendor for examples/specs/acme-quickstart.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned
+$ echo $?
+64
 ```
 
-Root shells need `sh -s -- --allow-root` after the pipe, and then run `/usr/local/bin/rdy`, not
-`"$HOME/.local/bin/rdy"`. A shorter `getrdy.io/install` address comes later, in M2.
+The example specs in this repo are not signed. `--allow-unsigned` runs a spec that has no signature,
+and nothing else: a signature that does not match is still refused. Each run that uses it prints a
+banner first and again above the verdict, and marks the reports. The rest of this page uses it.
 
-Until then, build from source ([below](#build-from-source)).
+The next two runs come from synthetic test machines recorded in the test suite. They are not from a
+live host or cluster, and the spec files `not-ready.yaml` and `ready.yaml` are test fixtures, not
+files in `examples/`. Your output will differ. Problems come first, each with its fix under it.
+Passing checks come last.
 
-### Try it on an example spec
-
-This run uses
-[`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
-so it needs `--allow-unsigned`. A spec from your vendor does not:
-
-```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-quickstart.txt
-$ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
+```console skip=page-test transcript=tests/fixtures/readme/run-not-ready.txt
+$ rdy run not-ready.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
-examples/specs/acme-quickstart.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
-(three more lines of warning left out here)
+not-ready.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
 
-rdy 0.1.0-alpha.0
-spec    acme-quickstart >=1.0   (examples/specs/acme-quickstart.yaml)
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
+rdy <version>
+spec    acme-platform >=1.0   (not-ready.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    vm   linux   x86_64
+host    all-block.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
 
-  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443 (dns),
-                             license.acme.example:443 (dns)
-                             fix from the spec file (not verified): Ask your network team to allow
-                             these endpoints through the proxy.
-  WARN     host.disk/root    `/` has 22.9 GiB free on `/` (ext4). 24 GiB is recommended and 20 GiB
-                             is the least.
-                             fix from the spec file (not verified): Free space on / or mount a
-                             larger volume.
-  PASS     host.cpu          4 vCPUs found, 4 needed
-  PASS     host.memory       13.4 GiB found, 8 GiB needed
-  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+  BLOCK    host.memory             7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB
+                                   wanted, the box is busy
+                                   fix from the spec file (not verified): Add RAM or choose a larger
+                                   VM size.
+  BLOCK    host.disk               `/var/lib/acme` has 0 bytes free on `/var` (xfs), 20 GiB needed.
+                                   fix from rdy: Run `df -h /var/lib/acme` to see the volume. If
+                                   `/dev/mapper/rhel-var` is an LVM volume, grow it with `lvextend
+                                   -r -L +24G /dev/mapper/rhel-var`. Otherwise grow the volume, or
+                                   point the install at a larger disk.
+  BLOCK    host.ports              Port 6443/tcp is held by `kube-apiserver` (pid 950).
+                                   fix from rdy: Port 6443/tcp is held by `kube-apiserver` (pid
+                                   950). Stop it, or change the product's port setting.
+  BLOCK    net.egress              1 of 1 endpoints unreachable: web.acme.test:8080 (refused)
+                                   fix from rdy: web.acme.test:8080 refused the connection: nothing
+                                   listens there, or a firewall rejects it. Check the port in the
+                                   spec, and ask the network team to allow tcp/8080 to web.acme.test
+                                   from this machine.
+  BLOCK    k8s.version             Server v1.24.9 is older than the 1.27 minimum
+                                   fix from the spec file (not verified): Upgrade the cluster to
+                                   Kubernetes 1.27 or newer.
+  BLOCK    k8s.rbac                The kubeconfig identity cannot `create namespaces`: not allowed
+                                   fix from the spec file (not verified): Run the install with an
+                                   identity that can create namespaces.
+  WARN     k8s.storageclass        not verified: could not read the CSINode list
+                                   missing grants: list csinodes (storage.k8s.io)
+                                   fix from rdy: Ask the cluster admin to grant this identity: list
+                                   csinodes (storage.k8s.io). Check each with `kubectl auth can-i
+                                   list csinodes.storage.k8s.io`.
+  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
+  PASS     host.cpu                8 vCPUs found, 8 needed
+  PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
+                                   required modules are loaded or built in. BTF type information is
+                                   present.
+  PASS     host.cgroups            cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids`
+                                   available
+  PASS     host.sysctl             4 kernel parameters have the wanted value and are set at boot.
+                                   Services get an open files limit of 1048576
+                                   (`DefaultLimitNOFILE=1048576` in
+                                   `/etc/systemd/system.conf.d/10-acme.conf`).
+  PASS     host.lsm                SELinux is enforcing. AppArmor is off.
+  PASS     host.time_sync          Clock is synchronized, under 1 ms away from chrony's reference
+                                   `192.0.2.30`.
+  PASS     host.security_agents    No known security software process was found among 7 processes.
+  PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
+                                   driver overlayfs).
+  PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
+  PASS     net.mtu                 `eth0` has MTU 1500.
 
-1 block, 1 warning, 2 passed, 1 not applicable
+6 blocks, 1 warning, 11 passed
 
 WARNING: UNSIGNED SPEC
 NOT READY
@@ -86,50 +118,228 @@ $ echo $?
 2
 ```
 
-This is a real run from a build of `main`, on a Linux VM. Two things were cut for width: the long
-warning text, and a note on the memory line about the cgroup the shell runs in. Your numbers will differ.
+The team adds RAM, resizes the disk, frees the port and opens the firewall rule. They upgrade the
+cluster and grant the install identity what it lacked. They run it again.
 
-Read it like this. Problems come first, each with its fix under it. The `registry.acme.example` name is
-made up and does not resolve, so `net.egress` blocks, and the verdict is `NOT READY`. The example is
-unsigned, so you get the warning. Real specs are signed, and then you drop `--allow-unsigned`. To see
-what a run looks like with no network, add `--no-network`. Then `net.egress` is reported as not run, and
-a required check that did not run is never a pass: the verdict stays `NOT READY`.
+```console skip=page-test transcript=tests/fixtures/readme/run-ready.txt
+$ rdy run ready.yaml --allow-unsigned --no-report
+WARNING: UNSIGNED SPEC
+ready.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
 
-`READY` exits 0, `READY with warnings` exits 1, `NOT READY` exits 2. Exit 64 means the input must
-change (a bad flag, a spec with no valid signature). Exit 70 means rdy itself failed. Without
-`--no-report`, rdy also writes a new report folder with the JSON report and a copy of the spec. With
-`--json`, stdout carries only the JSON result, the same bytes as the file.
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
+rdy <version>
+spec    acme-platform >=1.0   (ready.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    all-pass.example   rhel 9.3   x86_64
+user    uid 0 (root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
 
-On `main` today the terminal shows the per-check list, the summary and the verdict. The report folder
-holds the JSON report and a copy of the spec. The HTML report is not written by `rdy run` yet.
+  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
+  PASS     host.memory             31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.cpu                8 vCPUs found, 8 needed
+  PASS     host.disk               `/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is
+                                   needed.
+  PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
+                                   required modules are loaded or built in. BTF type information is
+                                   present.
+  PASS     host.cgroups            cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids`
+                                   available
+  PASS     host.sysctl             4 kernel parameters have the wanted value and are set at boot.
+                                   Services get an open files limit of 1048576
+                                   (`DefaultLimitNOFILE=1048576` in
+                                   `/etc/systemd/system.conf.d/10-acme.conf`).
+  PASS     host.lsm                SELinux is enforcing. AppArmor is off.
+  PASS     host.time_sync          Clock is synchronized, under 1 ms away from chrony's reference
+                                   `192.0.2.30`.
+  PASS     host.ports              80/tcp, 443/tcp, 6443/tcp, 10250/tcp and 8472/udp are free.
+  PASS     host.security_agents    No known security software process was found among 6 processes.
+  PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
+                                   driver overlayfs).
+  PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
+  PASS     net.egress              1 of 1 endpoints reachable
+  PASS     net.mtu                 `eth0` has MTU 1500.
+  PASS     k8s.version             Server v1.29.4, 1.27 to 1.31 needed
+
+0 blocks, 0 warnings, 16 passed
+
+WARNING: UNSIGNED SPEC
+READY
+$ echo $?
+0
+```
+
+The last line is one of three, and each has an exit code: `READY` (0), `READY with warnings` (1),
+`NOT READY` (2). Exit 64 means the input must change, for example a missing signature. Exit 70 means
+rdy itself failed. Both print `error:` and `fix:` lines and no verdict.
+
+### A required check that cannot run is not a pass
+
+A check the spec marks `severity: block` that rdy cannot run is a required check not run. It never
+gives `READY`. The next run is a real run of an example spec on a recorded Linux machine with no
+kubeconfig. The spec also asks for GPU and AWS checks, which this version does not have. The
+`--no-report` flag keeps the transcript short by writing no report folder.
+
+```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-platform.txt
+$ rdy run examples/specs/acme-platform.yaml --allow-unsigned --no-report
+WARNING: UNSIGNED SPEC
+examples/specs/acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+rdy <version>
+spec    acme-platform >=4.2   (examples/specs/acme-platform.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    acme-platform.example   rhel 9.3   x86_64
+user    uid 0 (root)
+cluster no kubeconfig found
+
+  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443
+                             (reset_after_hello), license.acme.example:443 (reset_after_hello)
+                             fix from the spec file (not verified): Ask your network team to allow
+                             these endpoints through the proxy.
+  SKIP     k8s.version       Not run. No Kubernetes cluster was reachable. (required)
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  SKIP     gpu.cuda          Not run. This version of rdy has no gpu checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     aws.iam           Not run. This version of rdy has no aws checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     k8s.storageclass  Not run. No Kubernetes cluster was reachable.
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  PASS     host.cpu          8 vCPUs found, 8 needed
+  PASS     host.memory       31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.disk         `/var/lib` has 140 GiB free on `/var` (xfs). 100 GiB is needed.
+
+1 block, 0 warnings, 3 passed, 3 required checks not run, 1 optional check not run
+
+WARNING: UNSIGNED SPEC
+NOT READY
+$ echo $?
+2
+```
+
+A check marked `severity: warn` that did not run is an optional check not run. It gives
+`READY with warnings` at worst. A CI gate written as `[ $? -le 1 ]` therefore never passes a
+required check nobody ran.
+
+## Install and first run
+
+Releases are signed. The M1 install path is the `install.sh` file attached to a pinned GitHub release.
+It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.1.3 or newer on your
+PATH. Without it, the script stops and installs nothing. `RDY_INSECURE_SKIP_SIGNATURE=1` skips only the cosign signature check, prints a warning, and the sha256 check still runs. Otherwise the script checks the signature of the checksum file
+and the sha256 of the archive before it makes anything executable. It never runs `sudo` and never edits
+your shell profile. It writes one file, `rdy`, to `$HOME/.local/bin`, or to the folder in
+`RDY_INSTALL_DIR`, and prints a PATH hint. As root, it refuses unless you pass `--allow-root`, and then
+it writes `/usr/local/bin/rdy`, unless `RDY_INSTALL_DIR` is set.
+
+There is no tagged release yet. When there is one, the tags look like `v0.1.0-alpha.N` and the
+command is this:
+
+```sh skip=network
+TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL "https://github.com/getrdy-io/rdy/releases/download/$TAG/install.sh" | sh
+"$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
+```
+
+Root shells need `sh -s -- --allow-root` after the pipe, and then run `/usr/local/bin/rdy`, not
+`"$HOME/.local/bin/rdy"`. A shorter `curl ... https://getrdy.io/install | sh` comes later, in M2, when
+that address goes live.
+
+On Windows, download the `.zip` from the [releases page](https://github.com/getrdy-io/rdy/releases)
+and verify it by hand, as below. A PowerShell installer is planned for M3.
+
+### Rather not pipe to a shell?
+
+Download, verify and unpack by hand. The archive holds `rdy-<triple>/rdy`. One signed file,
+`SHA256SUMS`, lists every asset:
+
+```sh skip=network
+TAG=v0.1.0-alpha.N   # use the newest tag on the releases page
+BASE=https://github.com/getrdy-io/rdy/releases/download/$TAG
+F=rdy-x86_64-unknown-linux-musl.tar.gz   # pick the file for your platform
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL -O "$BASE/$F" -O "$BASE/SHA256SUMS" -O "$BASE/SHA256SUMS.sigstore.json"
+cosign verify-blob \
+  --bundle SHA256SUMS.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml@refs/tags/$TAG" \
+  --certificate-github-workflow-repository getrdy-io/rdy \
+  --certificate-github-workflow-ref "refs/tags/$TAG" \
+  --certificate-github-workflow-trigger push \
+  SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 -c on the matching line
+tar xzf "$F" && ./rdy-x86_64-unknown-linux-musl/rdy version
+```
+
+The last three `cosign` flags are required. Without them, a workflow in another repository could pass.
+
+### Try it on an example spec
+
+Until a release exists, build from source ([below](#build-from-source)). The example spec
+[`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml) describes a made-up
+product and is not signed. Check it, then run it from the repo root:
+
+```sh tested shape=^examples/specs/acme-quickstart\.yaml:\s0\serrors,\s0\swarnings$
+rdy spec lint examples/specs/acme-quickstart.yaml
+```
+
+```sh tested exit=2 shape=^NOT\sREADY
+rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
+```
+
+It takes a few seconds. rdy runs what it can, and says what it could not run and why. It never asks for
+sudo. Expect `NOT READY` and exit 2. The example talks to `registry.acme.example`, which does not exist,
+so `net.egress` blocks and names the endpoints it could not reach. On a small Linux machine you may also see
+`BLOCK` on `host.memory` or `WARN` on `host.disk`, each with its fix. `--no-network` opens no
+connections. Then `net.egress` is reported as not run, and the verdict is still `NOT READY`.
+
+rdy also writes a new folder in the current directory, and never overwrites one. It holds
+`rdy-report-<product>-<time>.html`, the same data as `.json`, and a copy of the spec. The HTML is one
+self-contained page you can email or print. `--out-dir <dir>` picks the parent folder and `--no-report`
+writes no files.
+
+To see green on Linux, copy the spec and point `net.egress` at a host you can reach. In a real install you fix
+the machine, not the spec. This is only so you can see a green run on whatever you are holding:
+
+```sh skip=network
+sed 's|\["registry.acme.example:443", "license.acme.example:443"\]|["github.com:443"]|' \
+  examples/specs/acme-quickstart.yaml > my-spec.yaml
+rdy run my-spec.yaml --allow-unsigned
+```
+
+On Linux, on a machine with 4 cores, 8 GiB of RAM, 20 GiB free and a route to github.com, that ends in `READY`
+and exit 0. If the disk is short, you get `READY with warnings` and exit 1.
 
 ## Why it is safe to run
 
 rdy runs inside your environment, sometimes on a production host. Do not take our word for what it
-does. The code is open (Apache-2.0). These are the rules it is built to. Items marked (M2) are
-not in the code yet.
+does. The code is open (Apache-2.0). These are the rules it is built to. Items marked (M2) are not in
+the code yet.
 
 - **Least privilege.** Every check declares what it needs: root, a kube context, cloud credentials.
-  rdy runs what it can and reports what it could not. It never asks for `sudo`. Checks only read. A
-  run writes one new report folder and nothing else. In a cluster it reads, plus three self-review
-  requests, and never reads Secrets.
+  rdy runs what it can and reports what it could not. It never asks for `sudo`. A run writes one new
+  report folder and nothing else.
 - **Nothing leaves the machine by default.** Results are written to a local folder. Sending anything
   anywhere will be a separate, explicit step you choose (M2). The HTML report renderer is in this repo
-  and the upload client (M2) will be too, so a security reviewer can read exactly
-  what would leave the box. Secrets are redacted before anything is written to disk.
+  and the upload client (M2) will be too, so a security reviewer can read exactly what would leave the
+  box. Secrets are redacted before anything is written to disk.
 - **Specs are signed.** The vendor signs the spec with an ed25519 key (a standard minisign signature).
-  You pin the vendor's key once, after you check its fingerprint by another route. rdy will refuse a spec
-  whose signature does not verify, always. It refuses an unsigned spec unless you pass
-  `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
+  You pin the vendor's key once with `rdy trust add`, after you check its fingerprint by another route.
+  rdy refuses a spec whose signature does not verify, always. It refuses an unsigned spec unless you
+  pass `--allow-unsigned`, and then it prints a warning and marks every report. `rdy verify <spec>`
+  checks a signature without running any check.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
-  lists, your proxy, your DNS servers and the Kubernetes API server you chose. On `main` three
-  checks can reach the network. `net.egress` and `net.tls_intercept` do, and `--no-network` skips them. `host.time_sync` sends
-  an SNTP packet only to servers the spec lists, and with `--no-network` it skips that measurement and
-  runs on local data. `net.mtu` reads local interface and route data and runs offline. `net.egress`
-  makes no HTTP request yet, so there is no redirect to follow. The rule for the HTTP path, when it lands, is
-  that redirects are recorded and never followed. A vendor portal is planned, and it is optional.
-- **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
-- **No telemetry.**
+  lists, your proxy, your DNS servers and the Kubernetes API server you chose. `--no-network` turns
+  off every check that would open a connection, and says so in the result.
+- **One static binary.** No runtime to install, no OpenSSL. The design is musl on Linux and rustls
+  everywhere. Release binaries come with the first tagged release.
+- **No telemetry.** There is none.
 
 The threat model is in [`docs/plan/05-threat-model.md`](docs/plan/05-threat-model.md). To report a
 vulnerability, read [`SECURITY.md`](SECURITY.md).
@@ -137,40 +347,45 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 ## How it works
 
 - A **spec** is a YAML file of requirements: a product name, then a list of checks. Each check has a
-  severity, `block` (required) or `warn` (optional), and an optional `fix` message. See
-  [`examples/specs/`](examples/specs/) for five made-up examples.
-- A **check** measures one thing: memory, free disk, a storage class, an RBAC permission. The check
+  severity, `block` (required) or `warn` (optional), and an optional `fix` message.
+- A **check** measures one thing: memory, free disk, a storage class, an RBAC permission. The result
   says what it found next to what the spec asked for.
-- A **report** is a new folder with a JSON file and a copy of the spec, plus a verdict. HTML is next.
+- A **report** is a new folder with an HTML page, a JSON file and a copy of the spec, plus a verdict.
   The JSON is the same data for scripts.
 - Human output goes to stderr. With `--json`, stdout carries only the JSON result, so you can use rdy
-  as a CI gate.
+  as a CI gate:
+
+```sh skip=placeholder
+rdy run spec.yaml --json > result.json
+echo $?   # 0 ready, 1 ready with warnings, 2 not ready, 64 usage, 70 internal
+```
+
+Scripts can rely on the exit code and on `verdict`, `summary` and `checks[].status` in the JSON. Do not
+parse `message` or `fix`.
 
 ## Check families
 
 | Family | Checks | Status |
 | --- | --- | --- |
-| Host | CPU, memory, disk, OS, kernel, cgroups, time sync, ports, SELinux and AppArmor, firewall, security agents, sysctl, container runtime | Runs in `rdy run` on Linux |
-| Network | egress (lookup, connect, TLS) | Runs in `rdy run`. Direct only: no HTTP request and no proxy yet |
-| Network | MTU | Runs in `rdy run` |
-| Network | TLS interception | Runs in `rdy run`. Classes only: no issuer name or root hash yet |
-| Network | egress through a proxy, proxy settings | Coming before 0.1.0. The probe layer under them is built |
+| Host | CPU, memory, disk, OS, kernel, cgroups, time sync, ports, SELinux and AppArmor, firewall, security agents, sysctl, container runtime | In `rdy run`, on Linux. On macOS and Windows they report not run |
+| Network | egress, proxy, MTU, TLS interception | In `rdy run` |
 | Network | DNS, registry, bandwidth | Planned after 0.1.0 |
-| Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission | Built and tested on fixtures. Not registered in `rdy run` yet |
-| Kubernetes | nodes | Coming before 0.1.0 |
-| Kubernetes | admission webhooks, namespace, DNS, ingress, CRDs, CNI | Planned after 0.1.0 |
+| Kubernetes | access, version, storage classes, RBAC for the install identity, Pod Security admission, namespace, nodes | In `rdy run`. Tested on recorded fixtures and on kind clusters in CI |
 | Diagnostics bundle | redacted collection and upload | Planned (M2) |
 | AWS account | IAM dry run, quotas, regions | Planned (M3) |
 | GPU | driver, CUDA, VRAM, device plugin | Planned (M4) |
 
 A spec may name a check this build does not have. rdy counts it as not run and never reports it as a
-pass. On `main` that includes every `k8s.*` check, the `net.*` checks other than `net.egress`,
-`net.mtu` and `net.tls_intercept`, and every `gpu.*` and `aws.*` check.
+pass. To see what your build has, run `rdy run` on a spec and read the SKIP lines.
+
+Missing a check that would have saved you an install? Open a check request. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Write your own spec
 
-Copy a file from [`examples/specs/`](examples/specs/) and edit it. The field reference is generated from
-the schema: [`docs/intro/reference-spec.md`](docs/intro/reference-spec.md) for specs and
+Copy a file from [`examples/specs/`](examples/specs/) (a quickstart, a full platform, Kubernetes only,
+an air-gapped host and a GPU workload) and edit it. The field reference is generated from the schema:
+[`docs/intro/reference-spec.md`](docs/intro/reference-spec.md) for specs and
 [`docs/intro/reference-result.md`](docs/intro/reference-result.md) for results. Check it, make a key and
 sign it:
 
@@ -180,9 +395,8 @@ rdy spec keygen acme-signing
 rdy spec sign my-spec.yaml --secret-key acme-signing.key
 ```
 
-`spec lint`, `spec keygen`, `spec sign` and `trust add|list|remove` work on `main` today. Customers pin
-your public key with `rdy trust add <product> --key acme-signing.pub`. `rdy run` then verifies the
-signature before it runs anything. A separate `rdy verify` command is coming before 0.1.0.
+Customers pin your public key with `rdy trust add <product> --key acme-signing.pub`, after you give them
+its fingerprint by a second route. `rdy run` then verifies the signature before it runs anything.
 
 ## Build from source
 
@@ -195,81 +409,25 @@ cargo install --path crates/rdy-cli --locked
 rdy spec lint examples/specs/acme-quickstart.yaml
 ```
 
-That lint run is real. It prints `examples/specs/acme-quickstart.yaml: 0 errors, 0 warnings` and exits 0.
-Now run a spec. `--no-network` opens no connections, and `--jobs N` sets how many checks run at once:
-
-```sh tested exit=2 shape=^NOT\sREADY
-rdy run examples/specs/acme-quickstart.yaml --allow-unsigned
-```
-
-```sh tested exit=2 shape=^NOT\sREADY
-rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-network --jobs 2
-```
-
-The example specs are unsigned, so rdy prints a warning. `rdy run examples/specs/acme-platform.yaml
---allow-unsigned` shows more of the output, because that spec names Kubernetes, GPU and AWS checks
-this build does not have, and rdy reports them as not run.
-
-## Status
-
-rdy is pre-release and under active development. The first release is planned as 0.1.0. The spec
-format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
-
-**Works on `main` today**
-
-- `rdy run <spec>`: it verifies the spec, runs the checks that exist, prints each result with its fix,
-  skips the rest as not run, writes the JSON report and exits 0, 1 or 2 by the verdict. `--json` puts
-  the report on stdout. `--no-network` and `--jobs` are there too.
-- Thirteen host checks, on Linux, registered in `rdy run`: `host.cpu`, `host.memory`, `host.disk`,
-  `host.os`, `host.kernel`, `host.cgroups`, `host.time_sync`, `host.ports`, `host.lsm` (SELinux and
-  AppArmor), `host.firewall`, `host.security_agents`, `host.sysctl` and `host.container_runtime`. On
-  macOS and Windows they report not run.
-- Two network checks, registered in `rdy run`: `net.egress` (name lookup, connect to every address, TLS
-  and ALPN, and the HTTP status of a URL endpoint, direct) and `net.mtu`. `--no-network` skips `net.egress` and says so. `net.mtu` reads
-  local data and runs offline.
-- The `net.tls_intercept` check, registered in `rdy run`. It does one TLS handshake per host, sends no
-  data, and says whether the chain is public, trusted by this machine only (warn), from an unknown CA
-  (block), or a clock or expiry problem (block, never called interception). `--no-network` skips it and
-  says so.
-- The spec format, the schema and a spec linter (`rdy spec lint`).
-- Signing: key generation, `rdy spec sign` and `rdy trust add|list|remove`. `rdy run` checks the
-  signature and refuses a bad one.
-- The check engine: scheduler, timeouts, privilege negotiation, the probe layer that all side effects go
-  through, and redaction of secrets in reports.
-- The JSON report, the verdict logic and the HTML report, which `rdy run` writes next to the JSON.
-- Kubernetes version, storage class, access, RBAC and Pod Security checks. These are tested against
-  recorded fixtures. They are not registered in `rdy run` yet.
-
-**Next**
-
-- Registering the Kubernetes checks in `rdy run`.
-- The egress proxy path, the proxy check, and Kubernetes nodes.
-
-**Before 0.1.0**
-
-- `rdy verify`.
-- Signed release binaries and an install script that checks them.
-- A first-run page and the quickstart spec, run end to end on a clean checkout, and golden
-  transcripts for this page.
-
-**After 0.1.0**
-
-- 0.1.x: the remaining host, network and Kubernetes checks in the table above.
-- M2: the redacted diagnostics bundle, `rdy upload`, and the hosted portal for vendors. The portal is
-  not needed to use the tool.
-- M3: AWS account checks, `spec init`, `self-update`.
-- M4: GPU checks and custom checks that run a command you approve.
-
-The five release targets are Linux x86_64 and aarch64 (musl), macOS aarch64 and x86_64, and Windows
-x86_64. In 0.1.0 the host checks read Linux data sources only. On macOS and Windows they report not
-run, which makes a required check NOT READY. Those data sources are planned for M2.
-
 ## Rdy and the Kubernetes-only preflight tool
 
 The open-source preflight and support-bundle tool for Kubernetes is a good project. If your target is
 one cluster, it may be all you need. rdy aims at a wider job: one binary that checks a VM, a cluster
 and, later, a cloud account, with signed specs and a report a non-engineer can read. Both run on the
 machine where you start them.
+
+## Status
+
+rdy is pre-release and under active development. The first release is planned as 0.1.0, and until
+then tags look like `v0.1.0-alpha.N`. The spec format (`rdy/v1`) can still change before 1.0, and the
+changelog will say so. Linux x86_64 is the best tested platform. The five release targets are Linux
+x86_64 and aarch64 (musl), macOS aarch64 and x86_64, and Windows x86_64. In the first releases the host
+checks read Linux data sources only. On macOS and Windows they report not run, which makes a required
+check `NOT READY`. Those data sources are planned for M2.
+
+Planned: the redacted diagnostics bundle, `rdy upload` and a hosted portal for vendors (M2, the CLI does
+not need the portal), AWS account checks and `spec init` (M3), GPU checks and custom checks that run a
+command you approve (M4).
 
 ## Contributing
 

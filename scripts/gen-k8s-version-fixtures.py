@@ -314,7 +314,6 @@ case = "nodes-forbidden"
 manifest(case, "EKS 1.29 where the identity may not list nodes")
 version(case, "v1.29.4-eks-abc123")
 apis(case, STANDARD)
-nodes(case, [], status=403)
 
 case = "skew"
 manifest(case, "1.29 with a kubelet five minors behind, one newer, one a minor behind and a virtual kubelet")
@@ -329,7 +328,7 @@ nodes(case, [
 ])
 
 case = "paged"
-manifest(case, "1.29 where the node list has a second page that the check does not read")
+manifest(case, "1.29 where the node list has a second page that the check reads")
 version(case, "v1.29.4")
 apis(case, STANDARD)
 nodes(case, [node("acme-vm-1", "v1.29.4")], cont="tok-page-2")

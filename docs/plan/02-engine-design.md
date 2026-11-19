@@ -167,12 +167,24 @@ elevation does not change what is read (ADR 0027). M2-105 revisits it.
 | `cloud_credentials` (M3) | the provider chain resolves | cloud family | assume a role without consent |
 
 Rules:
-- Plan, then probe, then run. All probes run concurrently before the first check, each under its own
-  timeout, and their results go into `capabilities` with a hint.
+- Plan, then probe, then run. The needs the engine knows are probed first. Then each family's `probe` runs
+  (one family after another in M1; only `k8s` has one), each under the engine's own timer, and their results go
+  into `capabilities` with a hint.
 - With `--no-network`, `kube_context` is unavailable and no kube client is built.
+- **As built in M1-107.** The hook is `Family::probe(FamilyProbe) -> Result<Vec<Capability>, FamilyFatal>` (default:
+  nothing), with `Family::probe_timed_out()` and `Family::kube_identity(&[CheckResult])` beside it. `Engine::execute`
+  calls it once per family that has a runnable check in the plan, so a spec with no `k8s.*` check reads no kubeconfig
+  and sends no request. The engine holds the 10 s limit (`FAMILY_PROBE_LIMIT`) with a tokio timer, so a plugin that
+  waits for a login is abandoned on the blocking pool and never holds a worker; the runtime shuts down without waiting
+  for it. A `FamilyFatal` (a kubeconfig or proxy secret the known-secret set refused) runs no check and exits 70.
+  The kube client's request timeout is the longest a check may take (60 s), not the 10 s of the probe: the
+  one client serves every check, and each check's own timer ends its requests (ADR 0031 decision 7).
+  The run's `read` entries (the kubeconfig files) and the one `exec` entry (`form: delegated`, the file found on
+  `PATH` for a bare name) come from `Probe::record_run_read` and `Probe::record_run_exec`. The cluster line goes to
+  stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
-  scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.
+  engine. A stuck plugin costs one abandoned blocking thread, never a worker.
 - A token refresh later in the run runs the plugin inside kube. Checked against kube 4.2.0 (M1-102,
   `auth/mod.rs`, `to_header`): the refresh runs `auth_exec` on `tokio::task::spawn_blocking`, so a stuck
   refresh holds one blocking thread and the one request that waited for it, never a worker. The
@@ -1279,7 +1291,7 @@ one clippy rule.
 Global rules, because `call` runs on kube's buffer worker without a check id.
 
 1. **Path pre-filter.** (M1-103 built the frame: method, POST rules, the fixed body, this pre-filter,
-   the query keys, the field selectors that `pods` and `events` lists must carry, the request header
+   the query keys, the field selectors that `pods` (with M1-159) and `events` lists must carry, the request header
    allow list of rule 8 and the table in section 4. M1-104 added the request-info parser of rule 2, the
    `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation test and the checks on
    decoded values. kube writes `?&k=v`, with a `&` before the first parameter and a bare `?` for none,
@@ -1321,7 +1333,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
-| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
+| core `pods` (not in `ALLOWED` until M1-159) | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes` free capacity, M1-159: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
 | core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |
