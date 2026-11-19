@@ -224,7 +224,8 @@ main). No document may name a person as owner, and no document may mention the f
 - #118 M1-155, #135 the probe clock fix, #121 the install redirects, #136 M1-154, #137 M1-162 (replaces #62,
   closed unmerged).
 - #60 M1-142, #61 M1-173, #68 M1-143, #65 M1-163, #64 M1-164, #78 M1-165, #75 correction-46, #76 M1-178.
-- #70 M1-179 (31aa9926), the last M1 code PR, and #120 correction-59 (a870ec3f).
+- #70 M1-179 (31aa9926), the last M1 code PR, #120 correction-59 (a870ec3f), #138 correction-60 (4e566dea)
+  and #139, the password prompt echo fix.
 
 **Progress.** 181 of 184 M1 tickets are merged on main, 400.5 of 405 h: 154 of 156 core (342.5 of 345 h)
 and 27 of 28 non-core. The 184 count M1-187 (correction-59) and leave out M1-156, M1-158 and M1-166, which
@@ -333,7 +334,7 @@ so CI runs one PR at a time.
   the five-minute quickstart on a clean VM.
 
 **Numbers.**
-- The next PR is #139. #138 is correction-60.
+- The next PR is #140. #138 is correction-60 and #139 is the prompt echo fix.
 - The next free ADR on main is 0053. ADRs 0043 to 0046 (#137, #65, #64, #78), 0047 (#85), 0048 (#111),
   0049 (correction-56, Proposed), 0050 (#110, suspended by #123), and 0051 and 0052 (#118) are on main.
 - The next ticket ids are M1-188 and M2-157, and the next correction is 61. #138 took M2-155 and M2-156 (#120 took M1-187 and M2-154).
@@ -341,11 +342,12 @@ so CI runs one PR at a time.
 
 **Definition of done** (the "Done means" paragraph at the top of this file), at main a870ec3f:
 - Every M1 ticket merged: the founder's. Only M1-138, M1-139 and M1-167 are left, all founder steps.
-- CI green on main: not met yet. The push run on 31aa9926 (#70) failed one test on `macos-x64`:
-  `rdy::prompt_pty a_password_over_the_cap_is_refused_with_exit_64` timed out at 300 s (run 44567636207),
-  the same macOS pty timeout class noted under "Notes carried to later tickets". The run on a870ec3f was
-  still going at the pause. 34466f6a passed all 18 checks, and 31aa9926 passes the full
-  `cargo test --workspace` on Linux.
+- CI green on main: met once #139 merges. The push runs on 31aa9926 and a870ec3f failed one test on
+  `macos-x64`, `rdy::prompt_pty a_password_over_the_cap_is_refused_with_exit_64` (300 s timeout). The cause
+  was a race: the prompt was written before echo and canonical mode went off, so on macOS a paste longer
+  than MAX_CANON (1024 bytes) lost its newline, and keys typed right after the prompt could echo. #139
+  turns hidden mode on before the prompt is written, checks the modes took effect, and adds deterministic
+  pty tests. 34466f6a passed all 18 checks, and 31aa9926 passes the full `cargo test --workspace` on Linux.
 - `cargo install --path crates/rdy-cli` builds: passing. Checked on main 34466f6a plus this PR's docs; the
   binary then ran `rdy run examples/specs/acme-platform.yaml --allow-unsigned` and exited 2, not ready.
 - `rdy run examples/specs/acme-platform.yaml` gives the expected report against the fixtures: passing on
@@ -438,6 +440,10 @@ so CI runs one PR at a time.
 ## Notes carried to later tickets
 
 Review findings that belong to a later ticket. Give each note to that ticket's implementer and reviewer.
+
+- Correction 61 (security review of #139): `StdinLock` reads through an 8 KiB `BufReader`, so a pasted
+  password stays in std's stdin buffer and is never zeroized. Read the hidden prompt through an unbuffered
+  dup, as `password.rs` does. File it as an M2 security ticket.
 
 - M1-024 and M1-025: a bare `- id: host.memory` with no threshold must decode to `unsupported_spec` with
   reason `no_threshold` (01 section 2.5). Add a per-struct test so the FIELDS lists cannot drift.
