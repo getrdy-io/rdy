@@ -178,6 +178,7 @@ mod windows {
     use std::process::Command;
 
     use super::common;
+    use super::common::NoProxyEnv;
 
     #[test]
     fn the_inherited_descriptor_warning_never_prints() {

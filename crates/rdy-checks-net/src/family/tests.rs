@@ -45,7 +45,13 @@ fn the_family_lists_its_checks_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
     assert_eq!(
         ids,
-        ["net.egress", "net.proxy", "net.mtu", "net.tls_intercept"]
+        [
+            "net.egress",
+            "net.proxy",
+            "net.mtu",
+            "net.tls_intercept",
+            "net.dns"
+        ]
     );
     let mut twice = registry();
     assert_eq!(
@@ -61,8 +67,8 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         assert_eq!(info.family, "net");
         let timeout = info.default_timeout.expect("a timeout from the catalog");
         assert!(timeout.as_secs() >= 1 && timeout <= rdy_engine::check::MAX_TIMEOUT);
-        // net.egress and net.tls_intercept need the network (`--no-network` skips them as `missing_need`);
-        // net.mtu reads the interface table and net.proxy reads the environment: they need nothing.
+        // net.egress, net.tls_intercept and net.dns need the network (`--no-network` skips them as
+        // `missing_need`); net.mtu reads the interface table and net.proxy reads the environment: they need nothing.
         let expected: &[Need] = if matches!(info.id, "net.mtu" | "net.proxy") {
             &[]
         } else {
@@ -170,4 +176,20 @@ fn every_remediation_passes_the_fix_text_audit() {
             panic!("{} has fix text that is not on the lists: {error}", info.id);
         }
     }
+}
+
+#[test]
+fn the_family_builds_net_dns_with_its_names_as_the_host_set() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "net.dns",
+        "names": ["Registry.Acme.Test", {"name": "api.acme.test", "expect_public": true}]
+    }))
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.dns");
+    let hosts: Vec<String> = built.hosts.iter().map(|t| t.host().to_string()).collect();
+    assert_eq!(hosts, ["registry.acme.test", "api.acme.test"]);
 }

@@ -42,7 +42,9 @@ pub(super) const ENGINES: &[(&str, &[&str])] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FoundGroup {
     pub(super) group: &'static str,
-    /// The group version discovery read, when it was read.
+    /// The group's preferred version, which is the one `kinds` was read from (the `v1` read of
+    /// `kyverno.io` adds its kinds but does not change this). `None` when the group listed no version, so
+    /// nothing was read.
     pub(super) version: Option<String>,
     /// The kinds that version serves, sorted, subresources left out, at most [`MAX_KINDS`]. Empty when
     /// the group version could not be read.
