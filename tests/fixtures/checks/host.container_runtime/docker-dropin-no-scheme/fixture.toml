@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-dropin-no-scheme"
+summary = "Docker down, with a proxy in a systemd drop-in that has no scheme"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

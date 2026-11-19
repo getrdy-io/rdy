@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-scaler-nap"
+summary = "One node in a GKE node auto-provisioning pool"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

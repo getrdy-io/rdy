@@ -19,6 +19,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 mod common;
+use common::NoProxyEnv;
 
 /// The run deadline of the shipped binary (`rdy_engine::sched::DEFAULT_DEADLINE`).
 const DEADLINE: Duration = Duration::from_secs(300);
@@ -56,6 +57,7 @@ fn the_shipped_binary_ends_a_json_run_into_an_unread_pipe_with_exit_70_and_a_par
         .args(["--allow-unsigned", "--json", "--out-dir"])
         .arg(&out)
         .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
         .env_remove("RUST_LOG")
         // Piped and never read until the process is gone: its stdout fills up and blocks.
         .stdout(Stdio::piped())

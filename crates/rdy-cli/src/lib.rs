@@ -3,9 +3,9 @@
 //! The binary in `src/main.rs` is a thin wrapper around [`run`]. Tests and the docs CLI reference
 //! use the same code (ADR 0011).
 //!
-//! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen`,
-//! `rdy spec sign`, `rdy trust add`, `list` and `remove` and `rdy run` (M1-057) do their jobs. `rdy
-//! verify` prints "not yet implemented in this build" and exits 70 until its own ticket lands.
+//! This is the M1 command tree (M1-029). Every command in it does its job: `rdy version`, `rdy spec
+//! lint`, `rdy spec keygen`, `rdy spec sign`, `rdy trust add`, `list` and `remove`, `rdy run` (M1-057)
+//! and `rdy verify` (M1-126).
 //!
 //! Exit codes (CLAUDE.md, Output): clap's own exit code is 2, but in rdy 2 means NOT READY. So rdy
 //! parses with [`clap::Parser::try_parse_from`] and maps the outcome itself. Help and version go to
@@ -27,6 +27,7 @@ pub mod entry;
 #[doc(hidden)]
 pub mod error;
 mod hooks;
+mod interrupt;
 #[doc(hidden)]
 pub mod lint;
 #[doc(hidden)]
@@ -60,11 +61,14 @@ pub mod style;
 pub mod terminal;
 
 mod spec_cmds;
+mod spec_load;
+mod static_line;
 
 #[doc(hidden)]
 pub mod trust;
 
 mod trust_cmds;
+mod verify_cmd;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
@@ -226,6 +230,32 @@ where
             // The hub is built from the run's redactor, so the log, the errors and the report share one
             // known-secret set.
             let hub = ProbeHub::new(backend, redactor.clone());
+            // A new hub forbids the network. Only `rdy run` may open sockets, and only without
+            // `--no-network`; the engine sets the same value again from the run options.
+            hub.set_network(matches!(&cli.command, Commands::Run(run) if !run.no_network));
+            // `rdy run`: the proxy of the process environment (`HTTPS_PROXY`, `HTTP_PROXY`, either case)
+            // goes into the hub now: after `ProbeHub::new`, before the privilege snapshot (the first
+            // probe read, after which `set_proxy` is `TooLate`) and before anything is printed or
+            // written, so its password is in the known-secret set before any string can hold it. A URL
+            // that does not parse is exit 64 (a note under `--no-network`); a password the set refuses is exit 70
+            // (M1-097).
+            if let Commands::Run(run) = &cli.command
+                && let Err(failure) = hub.set_proxy_from_env()
+            {
+                // Under `--no-network` no socket opens, so a URL that does not parse cannot hurt: it is a
+                // note, not exit 64 (offline first). A password the set refuses is still exit 70, because
+                // `net.proxy` and the report may show the variable.
+                let ignorable = run.no_network
+                    && matches!(failure.error, rdy_engine::probe::ProxyError::Url(_));
+                if !ignorable {
+                    return emit(&CliError::proxy_env(failure), json, stdout, stderr);
+                }
+                let _ = writeln!(
+                    stderr,
+                    "note: {} is not a usable proxy URL. It is ignored because --no-network is set.",
+                    failure.var
+                );
+            }
             // `rdy run`: the check families, and the value of every secret-named environment variable
             // they declare, go into the known-secret set before the first log event below and before
             // any check starts (M1-057, ADR 0015 decision 3). A value the set refuses ends the run.
@@ -250,6 +280,9 @@ where
                                 hooks,
                                 registry,
                                 color: cli.global.color,
+                                progress: cli.global.progress,
+                                quiet: cli.global.quiet,
+                                verbose: cli.global.verbose,
                                 rig,
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
@@ -262,7 +295,12 @@ where
                     json,
                     stdout,
                     stderr,
-                    |_privilege, stdout, stderr| dispatch(&cli.command, json, stdout, stderr),
+                    |privilege, stdout, stderr| match &cli.command {
+                        Commands::Verify(args) => {
+                            verify_cmd::run(args, privilege, cli.global.color, json, stdout, stderr)
+                        }
+                        other => dispatch(other, json, stdout, stderr),
+                    },
                 ),
             }
         }
@@ -321,10 +359,9 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
         // `run` is async and takes the whole privilege snapshot, so `run_code` calls it directly and
         // never gets here. If it ever did, that is a bug in `run_code`.
         Commands::Run(_) => emit(&CliError::bug(), json, stdout, stderr),
-        Commands::Verify(args) => {
-            tracing::debug!(spec = %args.spec.display(), "verify requested");
-            not_implemented("verify", json, stdout, stderr)
-        }
+        // `verify` needs the privilege snapshot for the trust store layout, so `run_code` calls it
+        // directly and never gets here. If it ever did, that is a bug in `run_code`.
+        Commands::Verify(_) => emit(&CliError::bug(), json, stdout, stderr),
         Commands::Spec { command } => match command {
             SpecCommand::Lint(args) => lint::run(&args.spec, json, stdout, stderr),
             SpecCommand::Sign(args) => spec_cmds::run_sign(args, json, stdout, stderr),
@@ -389,17 +426,6 @@ fn finish(written: std::io::Result<()>, stderr: &mut dyn Write) -> u8 {
             emit(&err, false, &mut std::io::sink(), stderr)
         }
     }
-}
-
-/// The error for a command a later ticket implements. Exit 70, with a fix line.
-fn not_implemented(
-    command: &'static str,
-    json: bool,
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> u8 {
-    let err = CliError::Internal(InternalKind::NotImplemented { command });
-    emit(&err, json, stdout, stderr)
 }
 
 /// Print a clap error the rdy way and return the exit code.

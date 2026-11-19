@@ -21,6 +21,8 @@ use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::*;
+
+mod no_proxy;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, Support};
 use crate::family::HostSet;
 use crate::probe::proxy::ProxyChallenge;
@@ -79,7 +81,9 @@ pub(super) fn direct_only() -> &'static CheckInfo {
 }
 
 pub(super) fn hub_over(backend: impl Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 pub(super) fn target(text: &str) -> Target {
@@ -1252,7 +1256,9 @@ pub(super) fn live_hub() -> ProbeHub {
 }
 
 fn hub_over_arc(backend: Arc<dyn Backend>) -> ProbeHub {
-    ProbeHub::new(backend, Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(backend, Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 #[tokio::test]
@@ -1438,4 +1444,161 @@ mod scheduler {
             2
         );
     }
+}
+
+// ---- the proxy from the process environment (M1-097) ----------------------------------------------
+
+#[tokio::test]
+async fn the_proxy_comes_from_the_first_set_variable_in_the_documented_order() {
+    type Vars = &'static [(&'static str, &'static str)];
+    let cases: [(Vars, Option<&str>); 6] = [
+        (&[], None),
+        (
+            &[("HTTP_PROXY", "http://a.acme.test:1")],
+            Some("HTTP_PROXY"),
+        ),
+        (
+            &[("http_proxy", "http://a.acme.test:1")],
+            Some("http_proxy"),
+        ),
+        (
+            &[
+                ("http_proxy", "http://a.acme.test:1"),
+                ("HTTP_PROXY", "http://b.acme.test:2"),
+            ],
+            Some("HTTP_PROXY"),
+        ),
+        (
+            &[
+                ("HTTP_PROXY", "http://a.acme.test:1"),
+                ("https_proxy", "http://b.acme.test:2"),
+            ],
+            Some("https_proxy"),
+        ),
+        // A blank value is not set.
+        (
+            &[
+                ("HTTPS_PROXY", "  "),
+                ("http_proxy", "http://b.acme.test:2"),
+            ],
+            Some("http_proxy"),
+        ),
+    ];
+    for (vars, want) in cases {
+        let replay = vars.iter().fold(Replay::new(), |replay, (name, value)| {
+            replay.env(name, value)
+        });
+        let hub = hub_over(replay);
+        assert_eq!(hub.set_proxy_from_env(), Ok(want), "{vars:?}");
+        // One set-up entry with the names and no value, and none at all when no variable is set.
+        assert_eq!(
+            entries(&hub)
+                .iter()
+                .filter(|a| a.kind == ActionKind::Env)
+                .count(),
+            usize::from(want.is_some())
+        );
+        let text = log_text(&hub);
+        assert!(!text.contains("acme.test"), "a value is in the log: {text}");
+    }
+}
+
+fn origin_of(hub: &ProbeHub) -> Option<String> {
+    hub.check_probe("net.egress", Os::Linux, Some(egress()))
+        .proxy_origin()
+}
+
+#[tokio::test]
+async fn a_proxy_read_from_the_environment_is_set_before_the_run_starts_and_hides_its_password() {
+    let replay = Replay::new().env("HTTPS_PROXY", &proxy_url(true));
+    let hub = hub_over(replay);
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    // The set-up entry does not make a later step `TooLate`, and the password is already hidden.
+    let probe = hub.run_probe();
+    let shown = probe
+        .file_text(&FileBytes::new(format!("pw {PASSWORD}").into_bytes()))
+        .expect("text")
+        .to_string();
+    assert!(!shown.contains(PASSWORD), "{shown}");
+    assert!(!log_text(&hub).contains(PASSWORD));
+    assert_eq!(
+        origin_of(&hub),
+        Some("http://proxy.acme.test:3128".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn the_environment_errors_name_the_variable_and_never_the_value() {
+    // A password the set refuses.
+    let hub = hub_over(Replay::new().env("https_proxy", "http://svc:pw@proxy.acme.test:3128"));
+    let error = hub.set_proxy_from_env().expect_err("refused");
+    assert_eq!(error.var, "https_proxy");
+    assert_eq!(error.error, ProxyError::SecretRefused);
+    assert!(!error.to_string().contains("pw@"));
+    assert_eq!(origin_of(&hub), None, "no proxy was set");
+
+    // A URL that does not parse.
+    let hub = hub_over(Replay::new().env("HTTP_PROXY", "socks5://svc:Canary-pw-1@p.acme.test:1"));
+    let error = hub.set_proxy_from_env().expect_err("scheme");
+    assert_eq!(error.var, "HTTP_PROXY");
+    assert!(matches!(error.error, ProxyError::Url(_)));
+    assert!(!error.to_string().contains("Canary"));
+    assert!(!log_text(&hub).contains("Canary"));
+
+    // The run already started: too late, not silent.
+    let hub = hub_over(Replay::new().env("HTTPS_PROXY", &proxy_url(true)));
+    let _check = hub.check_probe("net.egress", Os::Linux, Some(egress()));
+    let error = hub.set_proxy_from_env().expect_err("too late");
+    assert_eq!(error.error, ProxyError::TooLate);
+}
+
+#[tokio::test]
+async fn after_the_privilege_snapshot_the_proxy_can_no_longer_be_set() {
+    // The snapshot is the first probe read of a run. The order in `rdy run` (proxy first) is what keeps
+    // the proxy from being `TooLate`, and this is the proof that the other order fails.
+    let hub = hub_over(Replay::new().env("HTTPS_PROXY", &proxy_url(true)));
+    let _ = crate::privilege::Privilege::snapshot(&hub.run_probe()).await;
+    let error = hub.set_proxy_from_env().expect_err("too late");
+    assert_eq!(error.error, ProxyError::TooLate);
+
+    let hub = hub_over(Replay::new().env("HTTPS_PROXY", &proxy_url(true)));
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let _ = crate::privilege::Privilege::snapshot(&hub.run_probe()).await;
+}
+
+#[tokio::test]
+async fn the_source_variable_is_kept_and_every_variable_that_parses_has_its_secrets_hidden() {
+    let other = "http://admin:Other-canary-pw@other.acme.test:8080";
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(true))
+            .env("http_proxy", other),
+    );
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let probe = hub.check_probe("net.egress", Os::Linux, Some(egress()));
+    assert_eq!(probe.proxy_source(), Some("HTTPS_PROXY"));
+    let shown = hub
+        .run_probe()
+        .file_text(&FileBytes::new(b"x Other-canary-pw y".to_vec()))
+        .expect("text")
+        .to_string();
+    assert!(!shown.contains("Other-canary-pw"), "{shown}");
+
+    // A loser that does not parse is not an error. One whose password the set refuses is.
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(false))
+            .env("HTTP_PROXY", "socks5://x:y@z:1"),
+    );
+    assert_eq!(hub.set_proxy_from_env(), Ok(Some("HTTPS_PROXY")));
+    let hub = hub_over(
+        Replay::new()
+            .env("HTTPS_PROXY", &proxy_url(false))
+            .env("HTTP_PROXY", "http://svc:pw@z.acme.test:1"),
+    );
+    let error = hub.set_proxy_from_env().expect_err("refused");
+    assert_eq!(
+        (error.var, error.error),
+        ("HTTP_PROXY", ProxyError::SecretRefused)
+    );
 }

@@ -8,7 +8,7 @@
 //! - available memory below `min_available` is a warn;
 //! - swap on when the spec forbids it is a fail.
 
-use rdy_engine::check::{Finding, Level};
+use rdy_engine::check::{Finding, Level, Partial};
 use rdy_engine::units::{Band, SizeFit, format_bytes};
 use rdy_spec::Quantity;
 use rdy_spec::check::SwapPolicy;
@@ -49,6 +49,9 @@ pub(super) struct Cgroup {
     pub hierarchy: Option<&'static str>,
     pub limit: Option<Limit>,
     pub swap_limit: Option<Limit>,
+    /// Cgroup memory files that could not be read. A limit may have been missed, so the result is
+    /// partial.
+    pub unreadable: usize,
 }
 
 /// What the machine said.
@@ -299,6 +302,12 @@ pub(super) fn judge(rules: &Rules, facts: &Facts) -> Finding {
     }
     for note in notes {
         finding = finding.with_note(note);
+    }
+    if facts.cgroup.unreadable > 0 {
+        finding = finding.with_partial(Partial::new(
+            Vec::new(),
+            "Some cgroup memory files could not be read, so a cgroup limit may have been missed.",
+        ));
     }
     finding
 }

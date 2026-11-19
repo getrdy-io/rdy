@@ -65,7 +65,7 @@ use crate::client::guard::RULE_SECRETS;
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
 
-mod amount;
+pub(crate) mod amount;
 mod fix;
 mod judge;
 mod objects;

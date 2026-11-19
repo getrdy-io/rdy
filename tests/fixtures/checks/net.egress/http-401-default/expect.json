@@ -1,0 +1,55 @@
+{
+  "entry": {
+    "endpoints": [
+      {
+        "target": "http://api.acme.test:8080/v2/"
+      }
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 endpoints reachable",
+    "notes": [
+      "api.acme.test:8080 answered 401: the spec lists no expect_status, so it counts as reachable"
+    ],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "192.0.2.33",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 0
+            }
+          ],
+          "connect_ms": 0,
+          "endpoint": "api.acme.test:8080",
+          "http_stage": {
+            "expect_status": [],
+            "first_byte_ms": 0,
+            "method": "HEAD",
+            "status": 401,
+            "total_ms": 0
+          },
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 0,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "reached",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

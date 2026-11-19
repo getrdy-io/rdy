@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": []
+  }
+}

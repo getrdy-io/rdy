@@ -10,9 +10,14 @@
 //! that failed), `k8s.storageclass` ([`StorageClassCheck`], M1-110), `k8s.rbac` ([`RbacCheck`], M1-111,
 //! which can test as the spec's `as:` user) and `k8s.admission` ([`AdmissionCheck`], M1-114, the Pod
 //! Security, policy engine and SCC half) and `k8s.namespace` ([`NamespaceCheck`], M1-161, existence,
-//! terminating, quota and limit range) and `k8s.ingress` ([`IngressCheck`], M1-163, ingress classes by
+//! terminating, quota and limit range), `k8s.dns` ([`DnsCheck`], M1-162, the cluster DNS workload,
+//! Service, Corefile and restart evidence) and `k8s.ingress` ([`IngressCheck`], M1-163, ingress classes by
 //! controller, the Gateway API, the OpenShift Route API and pending load balancers) are built, and the
-//! others follow.
+//! others follow. [`K8sFamily`] (M1-107) lists them,
+//! builds `k8s.version` and `k8s.access` from a spec entry, and probes the `kube_context` need once per run.
+//!
+//! The `testing` feature (M1-185) adds the `testing` module: a scripted cluster that serves a fixture's `api/`
+//! tree in process, with the guard in front, for the env harness of `rdy`. The shipped binary never builds it.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -51,6 +56,18 @@ mod cluster;
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
+mod dns;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod family;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 mod ingress;
 #[forbid(
     clippy::disallowed_methods,
@@ -58,6 +75,12 @@ mod ingress;
     clippy::disallowed_macros
 )]
 mod namespace;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod nodes;
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -89,11 +112,24 @@ mod storageclass;
 )]
 mod version;
 
+// The scripted cluster of the env harness (M1-185). Only with the `testing` feature, which the shipped
+// binary never enables (the module holds the release-build guard).
+#[cfg(any(test, feature = "testing"))]
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+pub mod testing;
+
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
 pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
+pub use dns::DnsCheck;
+pub use family::K8sFamily;
 pub use ingress::IngressCheck;
 pub use namespace::NamespaceCheck;
+pub use nodes::NodesCheck;
 pub use rbac::RbacCheck;
 pub use storageclass::StorageClassCheck;
 pub use version::VersionCheck;

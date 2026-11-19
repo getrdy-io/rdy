@@ -167,12 +167,24 @@ elevation does not change what is read (ADR 0027). M2-105 revisits it.
 | `cloud_credentials` (M3) | the provider chain resolves | cloud family | assume a role without consent |
 
 Rules:
-- Plan, then probe, then run. All probes run concurrently before the first check, each under its own
-  timeout, and their results go into `capabilities` with a hint.
+- Plan, then probe, then run. The needs the engine knows are probed first. Then each family's `probe` runs
+  (one family after another in M1; only `k8s` has one), each under the engine's own timer, and their results go
+  into `capabilities` with a hint.
 - With `--no-network`, `kube_context` is unavailable and no kube client is built.
+- **As built in M1-107.** The hook is `Family::probe(FamilyProbe) -> Result<Vec<Capability>, FamilyFatal>` (default:
+  nothing), with `Family::probe_timed_out()` and `Family::kube_identity(&[CheckResult])` beside it. `Engine::execute`
+  calls it once per family that has a runnable check in the plan, so a spec with no `k8s.*` check reads no kubeconfig
+  and sends no request. The engine holds the 10 s limit (`FAMILY_PROBE_LIMIT`) with a tokio timer, so a plugin that
+  waits for a login is abandoned on the blocking pool and never holds a worker; the runtime shuts down without waiting
+  for it. A `FamilyFatal` (a kubeconfig or proxy secret the known-secret set refused) runs no check and exits 70.
+  The kube client's request timeout is the longest a check may take (60 s), not the 10 s of the probe: the
+  one client serves every check, and each check's own timer ends its requests (ADR 0031 decision 7).
+  The run's `read` entries (the kubeconfig files) and the one `exec` entry (`form: delegated`, the file found on
+  `PATH` for a bare name) come from `Probe::record_run_read` and `Probe::record_run_exec`. The cluster line goes to
+  stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
-  scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.
+  engine. A stuck plugin costs one abandoned blocking thread, never a worker.
 - A token refresh later in the run runs the plugin inside kube. Checked against kube 4.2.0 (M1-102,
   `auth/mod.rs`, `to_header`): the refresh runs `auth_exec` on `tokio::task::spawn_blocking`, so a stuck
   refresh holds one blocking thread and the one request that waited for it, never a worker. The
@@ -318,6 +330,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 
 - The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
   os-release, command stats, kubeconfig read) is logged with `check: null`.
+- A `denied` entry is a call the facade refused, not a connection. Under `--no-network` every network
+  call is logged as `denied` with `RULE_NO_NETWORK`, including a `connect`, `tls`, `http` or `dns` entry,
+  so "nothing connected" is tested as "no `connect` entry whose outcome is not `denied`".
 - `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
 - Kube entries open in the guard's `call` through `Probe::kube_call(method, path, via_proxy)` (M1-103) and are
   closed by the response future: `answered(status)`, `refused(rule)` or `failed(phrase)`. The path has no
@@ -327,7 +342,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
   (`check: null`).
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
-  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
+  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01, added by
+  M2-138. Until then rdy-spec has no such value, so M1-107 writes the plugin's own outcome and a
+  `form: delegated` field.)
 - Coalescing (past 200 per check, per directory) folds only `read`, `read_dir`, `read_link` and `stat` entries with
   outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
   entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
@@ -480,11 +497,19 @@ tests policy.
   A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
   refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
   `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
-- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
-  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
-  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
-  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
-  to query such a nameserver reports Skipped, "nameserver in a refused range".
+- One narrow door in the table (built in M1-155, ADR 0051): `Probe::nameserver_exchange(index, payload,
+  transport)` serves the `SystemResolver` peer class. The facade reads the OS nameserver list itself
+  (`/etc/resolv.conf`, Linux, three entries at most, through its own read policy), and the check passes an
+  index and never an address. The port is 53, the transport is UDP or TCP, and the payload must be one
+  plain DNS query of type A, AAAA, CNAME or SOA and class IN, with nothing after the question but a bare
+  OPT record, whose name (letters, digits, `-` and `_` only) is one of the check's spec hosts or the
+  configured proxy's name. The read guard of the list names the exact files `resolv.conf` may link to
+  (`systemd-resolved`, Debian `resolvconf`, NetworkManager). An address that `is_unusable_peer` refuses is refused with the rule "nameserver in a
+  refused range", which the check reports as Skipped. The one exception is the exact IPv4 address
+  168.63.129.16, the nameserver on every Azure VM, and only because the OS list gave it. A spec host at
+  that address, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay
+  refused. Replies are capped (4 KiB UDP, 16 KiB TCP), the call times out at 3 s, and the `dns` log entry
+  has `server`, `name` and `rtype`, never the payload. `Probe::nameserver_count()` gives the count.
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
@@ -494,13 +519,13 @@ tests policy.
   in `rdy-checks-net`). `ProbeHub::set_proxy` stores it once per run and first adds the password, as
   written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
   refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
-  M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
+  M1-097: `ProbeHub::set_proxy_from_env` reads `HTTPS_PROXY` and `HTTP_PROXY`, either case; a bad URL is exit 64). A proxy with a user and no
   password registers the user name and the base64 of `user:` instead when the user name is 6 bytes or
   more (a shorter one registers nothing and refuses nothing). `set_proxy` fails with
   `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
   redacts when an entry is written. Call it after `ProbeHub::new` and before `Privilege::snapshot` (the
   first probe read). The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
-  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; M1-095 feeds it from `PlanEntry::hosts()`), a forbidden literal
+  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; `Engine::execute` feeds it from the plan since M1-095), a forbidden literal
   (before the proxy is even called), then the resolved answers (any forbidden answer refuses the whole
   call). Attempts run IPv6 first with families alternating, at most 4, 250 ms apart or at once after a
   failure, 3 s each. The log entry is a `connect` with `host`, `port`, `via_proxy` (no userinfo) and
@@ -562,8 +587,9 @@ tests policy.
   `AttemptOutcome::Refused` for a refused port and `AttemptOutcome::TimedOut` for a silent one, which is
   how a check tells `refused` from `blackhole`; `reason` is the matching fixed phrase), `Dns`, `TlsReset`, `TlsAlert`,
   `ProxyForbidden`, `ProxyAuthRequired`, and `Denied` for `blocked_address`, a `host:port` target
-  (`RULE_HTTP_NOT_URL`) and a plain `http://` target through the proxy (`RULE_HTTP_PLAIN_VIA_PROXY`: the
-  absolute form is M1-097). A connection that ends after the reply head (a cut or reset body, a close
+  (`RULE_HTTP_NOT_URL`). A plain `http://` target through the proxy is sent in the absolute form with
+  `Proxy-Authorization` and no `CONNECT` (M1-097); a 407 to it is `NetFailure::ProxyAuthRequired` and a 403 is a status,
+  because the server may have said it. `HttpOutcome::proxy_challenge` holds what `Proxy-Authenticate` offered. A connection that ends after the reply head (a cut or reset body, a close
   with no TLS `close_notify`) keeps the status: the body is `body_cut` and the call is `Ok`. A body of exactly
   64 KiB is complete. The request, the strict configuration and the trust roots are built before the
   connection opens, so a missing store costs no connection. One `http` entry per call: `method`, `url`
@@ -592,7 +618,7 @@ tests policy.
   clock.
 - System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
   facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
-  store. No revocation check, and the report says so.
+  store. No revocation check, and from M1-184 the report says so.
 - PAC is reported, never fetched, in M1.
 - UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
   in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
@@ -785,13 +811,18 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
     it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,
     printed through the one askama safe marker, which is on a private wrapper of the page (`EmbeddedJson`), not on the public `HtmlSafeJson` (`scripts/check-html-escapes.sh`).
   - The CSP is ADR 0003's.
+  - `rdy run` writes the page as `rdy-report-<product>-<ts>.html` next to the `.json` (M1-181):
+    `render_page(&RedactedReport)` makes an `HtmlPage` before any file is written, `OutputDir::write_html`
+    writes it by the rules of the JSON, and the order is the spec copy, the page, then the `.json`
+    last. The watchdog's sink writes the same three through the same calls. An `HtmlError` maps to the
+    `report_write` code and exit 70.
 - `rdy report` (M2) redacts input it did not produce before rendering.
 
 ## Catalog hooks (03, "Decisions needing an ADR")
 
 | Hook | Answer |
 | --- | --- |
-| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers (`dns` entries) stay M2. Gates `host.time_sync`; direct `net.dns` waits for the nameserver class. |
+| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers are `nameserver_exchange` (M1-155, `dns` entries, see "Network"). Gates `host.time_sync`; direct `net.dns` uses the nameserver call. |
 | 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` built in M1-144 (declared as `PeerClass::UnixSocket`); named pipes M2. |
 | 3 Nonblocking record read | Accepted for M2: `read_records(path, max_records, max_bytes)` with `O_NONBLOCK` until `EAGAIN`, `/dev/kmsg` as the only allowed device. No M1-tier check needs it. |
 | 4 Exec | Accepted for M1: `Hung { pid }` without waiting, per-command stdout cap, declared extra search directories. |
@@ -1032,7 +1063,13 @@ pub struct CheckContext { /* private: key, os, caps, probe, deadline */ }
 impl CheckContext {
     pub fn key(&self) -> &str; pub fn os(&self) -> Os; pub fn has(&self, need: &Need) -> bool;
     pub fn probe(&self) -> &Probe; pub fn remaining(&self) -> Duration;
+    /// Runs `work` for at most `limit`; `None` when the limit passed first (M1-095: one budget per endpoint).
+    pub async fn within<F: Future>(&self, limit: Duration, work: F) -> Option<F::Output>;
 }
+// Replay test helpers added by M1-095 (feature `testing`):
+//   Replay::host_rebinding(name, first, later)  // answers change after the first lookup
+//   Replay::lookup_delay(name, delay)           // a lookup waits on the tokio clock
+//   Replay::system_roots_overridden()           // SSL_CERT_FILE or SSL_CERT_DIR replaced the OS store
 
 // family.rs
 pub trait Family: Send + Sync + 'static {
@@ -1080,7 +1117,7 @@ impl Engine {
 // ids of a family that are stubs: the planner skips each as `not_in_build`, so `HostFamily` is registered
 // while it still has stubs. `ProbeHub::add_declared_env_secrets(names)` registers the values of the secret-named
 // variables the checks declare, before the first log event, and returns the names the set refused. It records the declared names (never a value) as one run-level `env` entry, a set-up entry that `set_proxy` does not count.
-// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095).
+// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095, done: `Engine::execute` passes `Built::hosts` to `Planned::with_hosts`).
 
 // probe
 impl Probe {
@@ -1154,6 +1191,7 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
                  pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
                  pub fn write_json(&self, r: &RedactedReport) -> Result<PathBuf, ReportError>;  // M1-055 (was write_report)
+                 pub fn write_html(&self, p: &HtmlPage) -> Result<PathBuf, ReportError>;  // M1-181, feature `html`; `render_page` makes the HtmlPage
                  pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
 pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), JsonError>;  // M1-055: report::json, no `runtime` feature needed
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
@@ -1303,7 +1341,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
-| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
+| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only; `k8s.dns`: container states of the DNS pods, with a label selector (only the pods of `kube-system` and `openshift-dns` are kept) |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
 | core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |
@@ -1311,17 +1349,25 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |
 | `storage.k8s.io` `csidrivers` | LIST | `k8s.storageclass`: driver objects |
-| `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name |
+| `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name; `k8s.dns`: replicas, ready count and container names of the DNS Deployment, by label |
+| `apps` `daemonsets` | LIST in `kube-system` and `openshift-dns` only | `k8s.dns`: desired and ready counts and container names of the DNS and NodeLocal DNSCache daemon sets, by label, or by the name `dns-default` in `openshift-dns` |
+| core `configmaps` | GET `kube-system/coredns`, by name | `k8s.dns`: the `Corefile` key only (ADR 0043) |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
 | `networking.k8s.io` `ingressclasses` | LIST | `k8s.ingress`: class name, `spec.controller`, the default-class annotation |
 | `gateway.networking.k8s.io` `gatewayclasses` | LIST | `k8s.ingress`: class name, `spec.controllerName`, the `Accepted` condition |
-| core `services` | LIST in the target namespace, granted by an optional Role of that namespace | `k8s.ingress`: name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace; nothing else of a Service is held |
+| `admissionregistration.k8s.io` `validatingwebhookconfigurations`, `mutatingwebhookconfigurations` | LIST | `k8s.admission` (M1-160): each webhook's name, `failurePolicy`, rules, selectors, `matchConditions` and backend kind; the CA bundle is dropped |
+| `admissionregistration.k8s.io` `validatingadmissionpolicies`, `validatingadmissionpolicybindings` | LIST | `k8s.admission` (M1-160): name, match constraints, actions; the CEL is dropped |
+| core `services` | LIST in a namespace (no selector required: `k8s.admission` sends `metadata.name`, `k8s.ingress` lists the whole namespace); GET `kube-system/kube-dns`, `kube-system/rke2-coredns-rke2-coredns` (RKE2 names its Service after its Deployment) and `openshift-dns/dns-default`, by name | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names; `k8s.dns`: ClusterIP and ports; `k8s.ingress` (M1-163): name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace, nothing else of a Service is held |
+| `discovery.k8s.io` `endpointslices` | LIST in a namespace, `labelSelector` must include `kubernetes.io/service-name=<name>` | `k8s.admission` (M1-160): ready endpoints behind a webhook Service |
+| `kyverno.io` `clusterpolicies` (`v1`); `policies.kyverno.io` `validatingpolicies`, `imagevalidatingpolicies` (`v1`, `v1beta1`, `v1alpha1`) | LIST | `k8s.admission` (M1-160): policy names, actions and match filters |
+| `constraints.gatekeeper.sh` every resource (`v1beta1`; resource `*` in the table, ADR 0042) | LIST | `k8s.admission` (M1-160): constraint names, `enforcementAction` and match; parameters dropped |
 
-5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
-   configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`
-   `endpointslices`; Kyverno and Gatekeeper policy objects; ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
+5. **`M1_LATE`**, enabled only with the checks that need it. Built with M1-160 and moved into the table
+   above: `admissionregistration.k8s.io` webhook configurations, `validatingadmissionpolicies` and bindings;
+   core `services`; `discovery.k8s.io` `endpointslices`; Kyverno and Gatekeeper policy objects. Still to
+   come: ConfigMap GET of `kube-system/kubeadm-config`
+   by name; the resources of `k8s.crds`, `k8s.cni` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap

@@ -19,6 +19,9 @@ use super::*;
 use crate::client::mock::Harness;
 use crate::client::{ImpersonateAs, ImpersonationError, ServerVersion};
 
+/// The review `k8s.version` asks before it lists nodes.
+const NODES_REVIEW: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
+
 /// A cluster over the mock: the `/version` answer the fixture records, and the harness for the rest.
 struct Fixtured {
     harness: Harness,
@@ -163,6 +166,7 @@ async fn eks_v1_29_4_parses_to_1_29_and_passes_when_the_apis_are_served() {
         rig.paths(),
         [
             "/apis",
+            NODES_REVIEW,
             "/api/v1/nodes",
             "/apis/autoscaling/v2",
             "/apis/networking.k8s.io/v1",
@@ -170,11 +174,11 @@ async fn eks_v1_29_4_parses_to_1_29_and_passes_when_the_apis_are_served() {
             "/api/v1",
         ]
     );
-    assert!(
-        rig.requests()
-            .iter()
-            .all(|(method, _, outcome)| method == "GET" && *outcome == ActionOutcome::Ok)
-    );
+    // Every request is a GET, except the one review, which is a POST (the guard allows only that one).
+    assert!(rig.requests().iter().all(|(method, path, outcome)| {
+        *outcome == ActionOutcome::Ok
+            && (method == "GET" || (method == "POST" && path == NODES_REVIEW))
+    }));
     rig.audit();
 }
 
@@ -322,7 +326,7 @@ async fn a_missing_autoscaling_v2_blocks() {
     );
     assert_eq!(result.status, Status::Block);
     // `/apis` already says the group version is not served, so no document is asked for.
-    assert_eq!(rig.paths(), ["/apis", "/api/v1/nodes"]);
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
     rig.audit();
 }
 
@@ -356,7 +360,13 @@ async fn missing_apis_say_why() {
     // The core document lists Pod; version v2 of the core group is not a thing and needs no request.
     assert_eq!(
         rig.paths(),
-        ["/apis", "/api/v1/nodes", "/apis/batch/v1", "/api/v1"]
+        [
+            "/apis",
+            NODES_REVIEW,
+            "/api/v1/nodes",
+            "/apis/batch/v1",
+            "/api/v1"
+        ]
     );
     rig.audit();
 }
@@ -450,6 +460,7 @@ async fn an_unreadable_group_list_and_cluster_version_leave_min_unapplied_and_pa
         [
             "/apis",
             "/apis/config.openshift.io/v1/clusterversions/version",
+            NODES_REVIEW,
             "/api/v1/nodes"
         ]
     );
@@ -473,7 +484,7 @@ async fn an_unreadable_group_list_and_no_cluster_version_is_not_openshift_and_mi
     let plain = self::rig("apis-unreadable-vanilla");
     let finding = plain.finding(json!({"min": "1.28"})).await;
     assert_eq!(finding.level, Level::Fail);
-    assert_eq!(plain.paths(), ["/apis", "/api/v1/nodes"]);
+    assert_eq!(plain.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
     plain.audit();
     rig.audit();
 }
@@ -500,8 +511,13 @@ async fn a_forbidden_node_list_is_partial_with_the_grant_and_never_blocks() {
     // The suffix still says EKS.
     assert_eq!(finding.observed["distribution"], "eks");
     assert!(finding.observed.get("nodes_read").is_none());
-    let requests = rig.requests();
-    assert_eq!(requests[1].2, ActionOutcome::Failed);
+    // The review said no, so no list request was sent: the group list and the review are all there is.
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW]);
+    assert!(
+        rig.requests()
+            .iter()
+            .all(|(_, _, outcome)| *outcome == ActionOutcome::Ok)
+    );
     // A required check with a partial pass is a warning, never a block.
     let result = map_outcome(
         &INFO,
@@ -538,20 +554,18 @@ async fn a_kubelet_far_behind_or_ahead_warns_and_a_virtual_kubelet_is_left_out()
 }
 
 #[tokio::test]
-async fn a_node_list_with_a_second_page_is_partial_and_says_the_rest_is_not_evaluated() {
+async fn a_node_list_with_a_second_page_is_read_to_the_end_with_the_paging_helper() {
     let rig = rig("paged");
     let finding = rig.finding(json!({"min": "1.28"})).await;
     assert_eq!(finding.level, Level::Pass);
-    let partial = finding.partial.as_ref().expect("partial");
-    assert!(
-        partial.note.contains("first 500 nodes only")
-            && partial.note.contains("the rest are not evaluated"),
-        "{}",
-        partial.note
+    // Two pages are under the cap, so nothing is left unread (the cap itself is tested with the helper).
+    assert!(finding.partial.is_none());
+    assert_eq!(finding.observed["nodes_read"], 2);
+    // The review, then both pages: the second one carries the `continue` token of the first.
+    assert_eq!(
+        rig.paths(),
+        ["/apis", NODES_REVIEW, "/api/v1/nodes", "/api/v1/nodes"]
     );
-    assert!(partial.missing_grants.is_empty());
-    // One page only: no continue request.
-    assert_eq!(rig.paths(), ["/apis", "/api/v1/nodes"]);
     rig.audit();
 }
 
@@ -746,5 +760,74 @@ async fn the_check_declares_what_the_registry_and_the_planner_read() {
         crate::registry::infos()
             .iter()
             .any(|registered| registered.id == "k8s.version")
+    );
+}
+
+// ---- a slow API server (M1-119) ---------------------------------------------------------------------------
+
+/// `k8s.version` takes the server's `/version` from the cluster it is given, so a slow `/version` is a slow
+/// cluster build, which M1-107 owns. What the check itself asks is the group list, and a server that sits
+/// on that request must end the check as `Timeout` at the 10 s default, in virtual time and with no real
+/// wait. The case is the `slow-groups` cluster: a one hour delay on `GET /apis`.
+#[test]
+fn a_server_that_never_answers_the_group_list_ends_in_timeout_at_the_default_limit() {
+    use rdy_engine::sched::{End, Planned};
+
+    let rig = rig("slow-groups");
+    let check: Arc<dyn Check> = Arc::new(VersionCheck::new(
+        params(json!({"min": "1.27", "apis": ["v1 Pod"]})),
+        rig.cluster.clone(),
+    ));
+    let fixture = Fixture::load(&fixtures_dir(), "checks/k8s.version/slow-groups").expect("loads");
+    // The scheduler logs into the harness's own run, so the INV-14 audit sees the request. The runtime
+    // has a paused clock, so the hour of delay costs no real time.
+    let scheduler = rig
+        .cluster
+        .harness
+        .run()
+        .scheduler(1, Os::Linux, fixture.available_needs());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("a runtime");
+    let mut ran = runtime.block_on(scheduler.run(vec![Planned::new(check, INFO.id)]));
+    match ran.remove(0).end {
+        End::TimedOut { after } => assert_eq!(after, Duration::from_secs(10)),
+        other => panic!("expected a timeout at the 10 s default, got {other:?}"),
+    }
+    assert_eq!(
+        rig.requests(),
+        [("GET".to_owned(), "/apis".to_owned(), ActionOutcome::Timeout)]
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_review_the_authorizer_could_not_decide_leaves_the_list_to_say() {
+    // `allowed: false` with an evaluation error and no `denied` is not a no: the list is tried.
+    let rig = rig("nodes-review-undecided");
+    let finding = rig.finding(json!({"min": "1.28"})).await;
+    assert_eq!(finding.observed["nodes_read"], 2);
+    assert_eq!(rig.paths(), ["/apis", NODES_REVIEW, "/api/v1/nodes"]);
+    rig.audit();
+}
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    openshift_reads_the_cluster_version();
+    a_node_list_with_a_second_page_is_read_to_the_end_with_the_paging_helper();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.version"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.version is read by no fixture of the tests listed here"
     );
 }

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-service-missing"
+summary = "CoreDNS is ready and there is no Service kube-dns"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

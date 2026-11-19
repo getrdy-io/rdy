@@ -14,6 +14,10 @@
 //! `169.254.169.123`, `fd00:ec2::123`) is reported as "offset not measured, server in a refused range",
 //! and the offset from `chronyc` is used instead when chrony runs.
 //!
+//! With `--no-network` the facade refuses the datagram and `chronyc` (its loopback UDP is an `AF_INET`
+//! socket). The check does not fail on that refusal: it keeps the `timedatectl` verdict and says "offset
+//! not measured, --no-network is set" (correction-39).
+//!
 //! The kernel's own flags (`adjtimex`) are not read: the closed `NativeCall` list has no such variant
 //! and the Linux sync flag comes from `timedatectl`. That source is M2-004.
 //!
@@ -237,6 +241,8 @@ impl TimeSync {
             Err(ProbeError::Denied { rule, .. }) if rule == RULE_UDP_ADDRESS => {
                 Ok(Attempt::Refused)
             }
+            // `--no-network`: the facade refuses every datagram. Not a bug in the check.
+            Err(error) if error.is_no_network() => Ok(Attempt::Offline),
             Err(ProbeError::Timeout) => Ok(Attempt::Silent),
             Err(error) => Ok(match soft(error)? {
                 ProbeError::NotFound => Attempt::Failed("the name did not resolve".to_owned()),
@@ -298,6 +304,8 @@ enum Ran {
     NoTime,
     /// It ran and the result is not usable. The text says why.
     Odd(String),
+    /// The facade refused it: the run has `--no-network`.
+    Offline,
 }
 
 async fn run_tool(
@@ -325,6 +333,10 @@ async fn run_tool(
             // `NotFound`, not as a probe `NotFound`. Both mean the program is not installed.
             if matches!(error, ProbeError::Policy(PolicyError::NotFound { .. })) {
                 return Ok(Ran::Absent);
+            }
+            // `chronyc` reaches chronyd over loopback UDP, so `--no-network` refuses it (INV-11).
+            if error.is_no_network() {
+                return Ok(Ran::Offline);
             }
             return match soft(error)? {
                 ProbeError::NotFound => Ok(Ran::Absent),
@@ -354,6 +366,7 @@ async fn timedatectl(ctx: &CheckContext) -> Result<Tool<parse::Timedate>, CheckE
         // `status` waits on the same bus, so it is not tried after a `show` that timed out.
         Ran::Hung => return Ok(Tool::Unusable("it timed out".to_owned())),
         Ran::NoTime => return Ok(Tool::Unusable(NO_TIME.to_owned())),
+        Ran::Offline => return Ok(Tool::Offline),
         Ran::Odd(_) => {}
     }
     Ok(match run_tool(ctx, "timedatectl", "status").await? {
@@ -364,6 +377,7 @@ async fn timedatectl(ctx: &CheckContext) -> Result<Tool<parse::Timedate>, CheckE
         Ran::Absent => Tool::Absent,
         Ran::Hung => Tool::Unusable("it timed out".to_owned()),
         Ran::NoTime => Tool::Unusable(NO_TIME.to_owned()),
+        Ran::Offline => Tool::Offline,
         Ran::Odd(why) => Tool::Unusable(why),
     })
 }
@@ -378,6 +392,7 @@ async fn chronyc(ctx: &CheckContext) -> Result<Tool<parse::Tracking>, CheckError
         Ran::Absent => Tool::Absent,
         Ran::Hung => Tool::Unusable("it timed out".to_owned()),
         Ran::NoTime => Tool::Unusable(NO_TIME.to_owned()),
+        Ran::Offline => Tool::Offline,
         Ran::Odd(why) => Tool::Unusable(format!("chronyd may not be running ({why})")),
     })
 }

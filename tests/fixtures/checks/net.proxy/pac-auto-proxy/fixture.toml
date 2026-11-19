@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-pac-auto-proxy"
+summary = "A PAC script address in auto_proxy and no proxy variable, with a planted query token"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -96,6 +96,8 @@ jobs:
       # Same for the k8s.storageclass fixtures.
       - name: k8s.storageclass fixtures are current
         run: python3 -I scripts/gen-k8s-storageclass-fixtures.py --check
+      - name: k8s.nodes fixtures are current
+        run: python3 -I scripts/gen-k8s-nodes-fixtures.py --check
       # The HTML report prints untrusted text. askama escapes it unless a template or the code switches
       # that off. The only raw value is the embedded result, in the private `EmbeddedJson` of the page
       # (M1-078, SEC-64): the script fails on `|safe`, `escape = "none"`, a second safe marker, `{{ json }}`
@@ -110,22 +112,37 @@ jobs:
         run: python3 -I scripts/gen-k8s-namespace-fixtures.py --check
       - name: k8s.ingress fixtures are current
         run: python3 -I scripts/gen-k8s-ingress-fixtures.py --check
+      - name: k8s.dns fixtures are current
+        run: python3 -I scripts/gen-k8s-dns-fixtures.py --check
+      - name: The k8s api trees of the fixture envs are current
+        run: python3 -I scripts/gen-k8s-env-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
         run: |
           tree="$(cargo tree --locked -p rdy -e normal,build,features --target x86_64-unknown-linux-gnu)"
-          if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"|rdy-engine feature "(testing|loopback)"'; then
-            echo "::error::the rdy binary would build the schema generator, serde_json/preserve_order or an rdy-engine test feature"
+          if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"'; then
+            echo "::error::the rdy binary would build the schema generator or serde_json/preserve_order"
             exit 1
           fi
       # rdy-cli's tests turn on the rdy-engine `testing` feature (the panicking-redactor seam) through a
       # dev-dependency. It must never reach the shipped binary, so check the normal build graph.
       - name: The binary does not build the rdy-engine testing or loopback feature
         run: |
+          # Positive control (M1-185 review S1): the same pattern must MATCH the graph that includes the
+          # dev-dependencies, where rdy-cli's tests turn the features on. If `cargo tree` output drifts so
+          # the pattern matches nothing, this fails instead of the guard below passing for nothing.
+          pattern='rdy-engine feature "(testing|loopback)"|rdy-checks-k8s feature "testing"'
+          control="$(cargo tree --locked -p rdy -e normal,dev,features --target x86_64-unknown-linux-gnu)"
+          if ! printf '%s\n' "$control" | grep -qE "$pattern"; then
+            echo "::error::the feature-graph pattern matches nothing in the dev graph, so the guard below proves nothing"
+            exit 1
+          fi
           tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
-          if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "(testing|loopback)"'; then
-            echo "::error::the rdy binary would build the rdy-engine testing or loopback feature"
+          # The scripted cluster of the env harness (M1-185) is the `testing` feature of rdy-checks-k8s. It
+          # exposes the kube mock and a family constructor over it, so the binary must never build it.
+          if printf '%s\n' "$tree" | grep -E "$pattern"; then
+            echo "::error::the rdy binary would build a test feature of rdy-engine or rdy-checks-k8s"
             exit 1
           fi
           # The `testing` feature turns on tokio's `test-util` (the paused clock of the fixture runs).
@@ -286,17 +303,18 @@ jobs:
           docker run --rm -e CI=true -v "$PWD:/src:ro" "$ALPINE_IMAGE" \
             sh -c 'apk add --no-cache openssl perl-utils > /dev/null && sh /src/scripts/test-install-sh.sh busybox'
 
-  # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
-  # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
-  # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
-  # tests on the Intel runner without running them. The full macos-arm64 test job is in
-  # macos-arm64.yml, outside ci-ok, until the org has those runners. fail-fast is off so one red leg
-  # does not hide the others. There are no retries: a test that fails once in three runs is a bug.
+  # Four native test legs and one compile leg (docs/plan/06, ADR 0050). The Linux legs build and test
+  # the musl targets, so CI tests what ships. ADR 0050 puts both macOS legs on the arm64 image. Since
+  # 2026-11-18 that image gets no runners, so for now both run on Intel (ADR 0050, "Suspended"):
+  # `macos-x64` runs the full tests and `macos-arm64-compile` cross-builds aarch64-apple-darwin and
+  # compiles its tests without running them, so every PR still compiles all five targets.
+  # macos-intel.yml still runs the x86_64 tests on push to main and nightly. fail-fast is off so one
+  # red leg does not hide the others. There are no retries: a test that fails once in three runs is a bug.
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    # macos-x64 is the slow leg (the nextest step alone ran about 18 minutes on 2026-11-17).
-    timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}
+    # Both macOS legs run on the slow Intel runner for now (ADR 0050, "Suspended"), so both get 45.
+    timeout-minutes: ${{ startsWith(matrix.name, 'macos-') && 45 || 25 }}
     permissions:
       contents: read
     defaults:
@@ -309,6 +327,8 @@ jobs:
         include:
           - { name: linux-x64, os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
           - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          # Temporary (2026-11-18): macos-15 (arm64) gets no runners, so the PR legs run on Intel again
+          # (ADR 0050, "Suspended"). To restore arm64, swap these two lines back.
           - { name: macos-x64, os: macos-15-intel, target: x86_64-apple-darwin }
           - { name: macos-arm64-compile, os: macos-15-intel, target: aarch64-apple-darwin, compile_only: true }
           - { name: windows-x64, os: windows-2022, target: x86_64-pc-windows-msvc }
@@ -355,8 +375,8 @@ jobs:
       - name: Build the rdy binary
         if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
-      # The compile leg cannot run aarch64 code on an Intel host. It proves every crate, binary and
-      # test still compiles for aarch64-apple-darwin.
+      # The compile leg builds the other macOS target and runs none of it. It proves every crate, binary
+      # and test still compiles for that target.
       - name: Build the workspace and compile its tests (no run)
         if: ${{ matrix.compile_only }}
         run: |
@@ -405,6 +425,11 @@ jobs:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
           RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
+      # The docs-test runner (M1-136, ADR 0048) already ran in nextest above. This step runs it again by
+      # name, on the same build, so each leg's log shows how many tested blocks ran, or why Windows skipped them.
+      - name: docs-test (tested blocks of the README and the pages)
+        if: ${{ !matrix.compile_only }}
+        run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci -E 'binary(docs_test)' --no-capture
       # A golden file that no test compared is an orphan: its test was renamed or deleted (M1-052).
       - name: No orphaned golden files
         if: matrix.name == 'linux-x64'
@@ -441,6 +466,8 @@ jobs:
       TARGET: x86_64-unknown-linux-musl
       # Makes a `root_*` test fail, not skip, when it does not run as uid 0.
       RDY_REQUIRE_ROOT: "1"
+      # Makes the no-phone-home test (M1-128, SEC-22) fail, not skip, without strace or `unshare -n`.
+      RDY_REQUIRE_STRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -453,6 +480,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends strace musl-tools
           echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
           strace -V
+      # The no-phone-home test runs rdy under `unshare -n`. Ubuntu 24.04 blocks unprivileged user
+      # namespaces, so it needs sudo. A runner image without it fails here, not as a skipped test.
+      - name: Check that sudo unshare -n works
+        run: sudo unshare -n -- true
       - name: Install the pinned toolchain and the target
         run: |
           rustup toolchain install --no-self-update
@@ -475,7 +506,7 @@ jobs:
           nextest="$(command -v cargo-nextest)"
           echo "uid under sudo: $(sudo id -u)"
           test "$(sudo id -u)" = 0
-          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT \
+          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT,RDY_REQUIRE_STRACE \
             "$nextest" nextest run \
             --archive-file "$RUNNER_TEMP/rdy-tests.tar.zst" \
             --workspace-remap "$PWD" \

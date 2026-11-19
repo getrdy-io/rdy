@@ -79,7 +79,7 @@ On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 | `--json` | M1 | Write the Report to stdout |
 | `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction or on a network share). Windows keeps the ACL the folder inherits, and `--out-dir C:\` lets other local users read the report, so keep the default |
 | `--no-report` | M1 | Write no files |
-| `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs |
+| `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs. There is no `--namespace` on `rdy run`: in M1 a k8s check reads only the namespace its own spec entry names, never the kubeconfig's (03 section 4, "Not in M1"). M2-142 adds the spec's `k8s:` block, and `--namespace` stays a `rdy bundle` flag (ADR 0049) |
 | `--no-network` | M1 | Open no network sockets: rdy and its children open only `AF_UNIX` sockets. That local IPC still runs: the commands 05 INV-11 names (`timedatectl` and `firewall-cmd` to the system bus) and the sockets a check declares (INV-28, such as the Docker or containerd socket). `chronyc` is not run. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
 | `--jobs <n>` | M1 | Checks at once. Default 8. Above 32 is capped with a note. 0 is a usage error |
 | `--timeout <time>` | M2 | See below |
@@ -152,8 +152,15 @@ a bucket. Read the bucket from the result; never recompute it. One entry per che
 
 ```text
 <2 spaces><STATUS padded to 7><2 spaces><key padded to the longest key><2 spaces><message>
+<spaces up to the message column>missing grants: <grant>, <grant>  (only when partial.missing_grants is not empty)
 <spaces up to the message column>fix from <source>: <fix>          (only when the check has a fix)
 ```
+
+The `missing grants:` line (M1-186) lists `partial.missing_grants` in the check's order, joined by `, `,
+each grant through the untrusted-text escaper and never styled. It sits under the message and before the
+fix. It wraps like the fix line. A list of more than five shows the first five and ends `and N more`
+(`missing grants: get a, get b, get c, get d, get e, and 3 more`). A `not_applicable` check gets
+none. No sample in C.12 to C.18 or 2.7 has the field, so they do not change.
 
 - `STATUS` is `PASS`, `WARN`, `BLOCK`, `SKIP`, `TIMEOUT` or `ERROR`. `key` is the `id`, or `id/name`.
 - `message` is the JSON `message`, word for word. A check in the `required_not_run` bucket gets ` (required)`
@@ -313,7 +320,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file, and a `.html` written before it is removed again (best effort). A `.html` without a `.json` beside it is not a result: exit 70 is the authority. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `note: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
@@ -446,7 +453,11 @@ Stdout can be empty, as here, or cut short. It is never promised to be a documen
 before the folder exists, there is no partial report at all. A script that sees exit 70 and an empty file
 reads the newest `rdy-report-*` folder, or just runs again.
 
-A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
+`--verbose` writes a line to stderr as each check ends. If the reader of stderr stops reading and the pipe
+fills, the write blocks the run. The watchdog then ends the run with exit 70 and a partial report, the same
+end as a stalled `--json` pipe.
+
+A kill between the `.html` and the `.json` can leave a `.html` with no `.json` beside it. That page is not a result, and the exit code (70) is the authority. A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
 host was not read before the run stopped, not that the machine is called that (the report has the arch of the
 build and nothing else of the host). The report also has no `capabilities` and no action log.
 
@@ -1955,7 +1966,7 @@ error: no signature found at acme-quickstart.yaml.minisig
 fix: ask the vendor for acme-quickstart.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned
 
 $ rdy run acme-platform.yaml
-error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform
+error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05, which you have not trusted for acme-platform
 fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>
 
 $ rdy run acme-platform.yaml --allow-unsigned
@@ -2707,13 +2718,14 @@ checks that did not finish are `TIMEOUT` or `SKIP`, as in the terminal.
 
 "What to do next" by verdict: `ready` "Everything the spec asks for passed."; `ready_with_warnings` "Nothing
 blocks the install. Read the warnings."; `ready_with_warnings` with `nothing_verified` "rdy checked nothing on
-this machine. Every check in the spec is for another OS. Ask the vendor if that is expected."; `not_ready`
-with blocks "Fix the N blocks below, then run rdy again."; `not_ready` with only unrun checks "rdy could not
-check N required items. Follow the fix for each, then run rdy again." Then for all: "To share this result,
-send the .json file from the same folder." and, if `metadata.contact` exists, "Questions: <contact>" as plain
-text, never a link. Legend: "BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it."
-Rule: "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional
-things are wrong. READY if every check ran and passed." The same three sentences are in `rdy run --help`.
+this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that
+is expected, or follow the fix for each skipped check."; `not_ready` with blocks "Fix the N blocks below, then
+run rdy again."; `not_ready` with only unrun checks "rdy could not check N required items. Follow the fix for
+each, then run rdy again." Then for all: "To share this result, send the .json file from the same folder."
+and, if `metadata.contact` exists, "Questions: <contact>" as plain text, never a link. Legend: "BLOCK: fix
+before install. WARN: fix if you can. SKIP: rdy could not check it." Rule: "NOT READY if anything blocks or a
+required check could not run. READY with warnings if only optional things are wrong. READY if every check ran
+and passed." The same three sentences are in `rdy run --help`.
 
 #### Look
 
@@ -2880,7 +2892,7 @@ M1 total 44.5 hours in 26 tickets, on top of the other slices. Core total 33.5 h
 - [M1] Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | owner: cli-ux | est: 4h | depends on: Add `bucket` to CheckResult and sort by it in terminal and HTML; Terminal styling layer: colour choice, width, escaping and ASCII text | exit test: golden stderr for B.1, B.2 and B.3 equals C.17, C.18 and 2.7 byte for byte at width 100 with `--color never`, the goldens C.12, C.13 and C.14 match, and the last line is the verdict. | core: yes
 - [M1] Extends "SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading": fix source labels, wrapping, banner placement and the root Tip | owner: cli-ux | est: 1.5h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict; SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading | exit test: an unsigned run and a `--key` run label spec fixes "the spec file (not verified)", a pinned run labels the product, a 130-character message wraps at 100 with a hanging indent, both banners print before the first check and again above the verdict, and both Tip forms of 2.1 match (the user-pinned form adds the `sudo rdy trust add` sentence). | core: yes
 - [M1] Static "Running N checks..." line on a TTY | owner: rust-engineer | est: 0.5h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | exit test: a pty capture shows the line before the first check and no trace of it in the final screen, and a pipe, `--quiet` and `TERM=dumb` print nothing. | core: yes
-- [M1] Progress line with indicatif, TTY only | owner: rust-engineer | est: 3h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict; Unicode choice for the spinner: locale, `WT_SESSION` and `TERM_PROGRAM` | exit test: a pty capture shows one spinner line that is cleared before the check list, a 250 ms run draws nothing (paused-time test), a pipe, `--quiet`, `--progress never`, `RDY_PROGRESS=never`, `TERM=dumb` and `RUST_LOG` each produce zero progress bytes; rules for the code: the banner and header print once before progress starts, one writer owns stderr so result text and `tracing` output go through it while a line is live, prompts never appear while it is live, Ctrl-C and any error clear the line first so `error:` starts at column 0, the bar is built with `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()` because indicatif's own TTY check ignores `TERM`, `--quiet` and `RUST_LOG`, and nothing is drawn on stdout. | core: no
+- [M1] Progress line with indicatif, TTY only | owner: rust-engineer | est: 3h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict; Unicode choice for the spinner: locale, `WT_SESSION` and `TERM_PROGRAM` | exit test: a pty capture shows one spinner line that is cleared before the check list, a 250 ms run draws nothing (paused-time test), a pipe, `--quiet`, `--progress never`, `RDY_PROGRESS=never`, `TERM=dumb` and `RUST_LOG` each produce zero progress bytes; rules for the code: the banner prints once before progress starts; in M1 the header prints at the end of the run, because it holds facts known only then (the `needs` row), so with `--verbose` the event lines print live after the banner and before the header, one blank line follows the event block, and then come the header and the list (C.2); the header moves before progress with M2-128, and until then the rule that the header prints once before progress starts is not met; one writer owns stderr so result text and `tracing` output go through it while a line is live, prompts never appear while it is live, Ctrl-C and any error clear the line first so `error:` starts at column 0, the bar is built with `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()` because indicatif's own TTY check ignores `TERM`, `--quiet` and `RUST_LOG`, and nothing is drawn on stdout. | core: no
 - [M1] Quiet and verbose output modes | owner: cli-ux | est: 2.5h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | exit test: golden stderr for C.1 (`--quiet`) and C.2 (`--verbose`), and `--verbose` prints one event line per finished check on a pipe. | core: no
 - [M1] Ctrl-C in M1: abort, remove the empty report folder, exit 70 | owner: rust-engineer | est: 2h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation; SEC-19 Confine writes to a new output dir with safe names | exit test: a pty test sends SIGINT once and gets the two-line error of 5.1, exit 70, no report folder (removed with `remove_dir`, so a folder that holds a file stays) and no child process left, SIGTERM does the same, and `--json` prints an ErrorOutput with code `interrupted`. | core: yes
 - [M1] Exit-code golden suite for 0, 1, 2, 64 and 70 | owner: rust-engineer | est: 2h | depends on: Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict; Extends "Error types with fix hints and exit code mapping at the CLI edge": usage errors, the flag suggester and no echo | exit test: assert_cmd runs one fixture per row of 5 (ready, warnings, not ready by a block, not ready by a required check not run, unsigned, bad flag, missing file, unwritable `--out-dir`) and compares exit code and stderr golden, and with `--json` validates stdout against the schema. | core: yes

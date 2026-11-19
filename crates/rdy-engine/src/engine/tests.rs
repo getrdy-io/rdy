@@ -8,7 +8,9 @@ use rdy_spec::sig::{Policy, TrustStore};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use super::*;
-use crate::check::{CheckMeta, OsSupport, Support};
+use crate::check::{
+    Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Finding, OsSupport, Support,
+};
 use crate::family::{BuildError, Built, Family};
 use crate::privilege::{Elevation, ProcessIds};
 use crate::redact::{Redactor, TagKey};
@@ -123,7 +125,7 @@ checks:
     endpoints: [\"registry.acme.example:443\"]
 ";
 
-fn loaded(text: &str) -> LoadedSpec {
+pub(super) fn loaded(text: &str) -> LoadedSpec {
     rdy_spec::load(
         text.as_bytes(),
         None,
@@ -133,7 +135,7 @@ fn loaded(text: &str) -> LoadedSpec {
     .expect("the spec loads")
 }
 
-fn privilege(elevated: bool) -> Privilege {
+pub(super) fn privilege(elevated: bool) -> Privilege {
     let (euid, elevation) = if elevated {
         (0, Elevation::Root)
     } else {
@@ -165,7 +167,7 @@ async fn run_with(replay: Replay, elevated: bool, options: &RunOptions) -> Execu
         .await
 }
 
-fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
+pub(super) fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
     done.results
         .iter()
         .find(|r| r.key == key)
@@ -305,6 +307,214 @@ async fn the_run_deadline_ends_a_check_that_has_not_started() {
     let boom = find(&done, "host.cpu/boom");
     assert_eq!(boom.skip_kind, Some(SkipKind::RunDeadline));
     assert_eq!(boom.status, Status::Skipped);
+}
+
+static NET_CHECK: CheckInfo = CheckInfo {
+    family: "net",
+    ..info("net.egress", &[Need::Network])
+};
+pub(super) static KUBE_CHECK: CheckInfo = CheckInfo {
+    family: "k8s",
+    ..info("k8s.version", &[Need::KubeContext])
+};
+pub(super) static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
+pub(super) static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
+
+/// Counts the checks that ran in both test families, net and k8s.
+static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub(super) struct Counting(pub(super) &'static CheckInfo);
+
+impl Check for Counting {
+    fn info(&self) -> &'static CheckInfo {
+        self.0
+    }
+
+    fn run<'a>(&'a self, _: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            NET_RAN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Finding::pass("ran"))
+        })
+    }
+}
+
+pub(super) struct CountingFamily(
+    pub(super) &'static str,
+    pub(super) &'static [&'static CheckInfo],
+);
+
+impl Family for CountingFamily {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        self.1
+    }
+
+    fn build(&self, entry: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        let info = self
+            .1
+            .iter()
+            .copied()
+            .find(|info| info.id == entry.id.as_str())
+            .ok_or_else(|| BuildError::Unsupported("not a fake".to_owned()))?;
+        Ok(Built::new(Box::new(Counting(info))))
+    }
+}
+
+const NET_SPEC: &str = "\
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme
+checks:
+  - id: net.egress
+    endpoints: [\"registry.acme.example:443\"]
+  - id: k8s.version
+    min: \"1.28\"
+";
+
+async fn run_net(network: bool) -> Executed {
+    let mut registry = Registry::new();
+    registry
+        .register(CountingFamily("net", &NET_CHECKS))
+        .expect("registers");
+    registry
+        .register(CountingFamily("k8s", &KUBE_CHECKS))
+        .expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(NET_SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = network;
+    engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await
+}
+
+#[tokio::test]
+async fn no_network_skips_network_and_kubernetes_checks_as_missing_need_with_no_connect() {
+    let done = run_net(false).await;
+    assert_eq!(done.results.len(), 2);
+    for result in &done.results {
+        assert_eq!(result.status, Status::Skipped, "{}", result.key);
+        assert_eq!(
+            result.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "{}",
+            result.key
+        );
+    }
+    // A skipped check never ran its body (the counter is shared with a test that runs in parallel, so
+    // the status is the proof here), so nothing was asked of the probe.
+    let net = done
+        .capabilities
+        .iter()
+        .find(|c| c.need == WireNeed::Network)
+        .expect("the network need was probed");
+    assert!(!net.available);
+    assert!(
+        done.log
+            .actions
+            .iter()
+            .all(|a| a.kind != rdy_spec::result::ActionKind::Connect
+                || a.outcome == rdy_spec::result::ActionOutcome::Denied),
+        "{:?}",
+        done.log.actions
+    );
+}
+
+/// Declares a network peer and no network need, then dials. Only the facade stops it.
+static DIALS: CheckInfo = CheckInfo {
+    family: "net",
+    peers: &[crate::check::PeerClass::SpecHosts],
+    ..info("net.egress", &[])
+};
+static DIAL_CHECKS: [&CheckInfo; 1] = [&DIALS];
+
+struct Dials;
+
+impl Check for Dials {
+    fn info(&self) -> &'static CheckInfo {
+        &DIALS
+    }
+
+    fn run<'a>(&'a self, ctx: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            ctx.probe().lookup("registry.acme.example").await?;
+            Ok(Finding::pass("dialed"))
+        })
+    }
+}
+
+struct DialFamily;
+
+impl Family for DialFamily {
+    fn name(&self) -> &'static str {
+        "net"
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        &DIAL_CHECKS
+    }
+
+    fn build(&self, _: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        Ok(Built::new(Box::new(Dials)))
+    }
+}
+
+#[tokio::test]
+async fn a_check_that_dials_under_no_network_ends_as_missing_need_not_an_error() {
+    let mut registry = Registry::new();
+    registry.register(DialFamily).expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"registry.acme.example:443\"]\n",
+    );
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = false;
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    let result = find(&done, "net.egress");
+    assert_eq!(result.status, Status::Skipped, "{}", result.message);
+    assert_eq!(result.skip_kind, Some(SkipKind::MissingNeed));
+    assert_eq!(
+        result.fix.as_deref(),
+        Some("Run again without --no-network.")
+    );
+    // The refusal is in the log as a denied call, and nothing connected.
+    let lookups: Vec<_> = done
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.kind == rdy_spec::result::ActionKind::Lookup)
+        .collect();
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].outcome, rdy_spec::result::ActionOutcome::Denied);
+}
+
+#[tokio::test]
+async fn with_network_allowed_the_network_check_runs() {
+    let before = NET_RAN.load(std::sync::atomic::Ordering::SeqCst);
+    let done = run_net(true).await;
+    let net = done
+        .results
+        .iter()
+        .find(|r| r.key == "net.egress")
+        .expect("a result");
+    assert_eq!(net.status, Status::Pass);
+    assert!(NET_RAN.load(std::sync::atomic::Ordering::SeqCst) > before);
 }
 
 #[tokio::test]

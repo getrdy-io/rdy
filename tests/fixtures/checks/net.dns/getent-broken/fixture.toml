@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-getent-broken"
+summary = "getent exits 1, a tool error, so the facade resolver answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -530,7 +530,7 @@ pub(super) fn facts_notes(facts: &ConnectionFacts) -> Vec<String> {
     if facts.line().tls_verification_off() {
         notes.push("TLS verification is OFF.".to_owned());
     } else if !facts.ca_set() {
-        notes.push("The kubeconfig names no certificate authority, so rdy trusts only its bundled public roots, not this machine's store.".to_owned());
+        notes.push("The kubeconfig names no certificate authority, so rdy trusts the roots it read from this machine's store, or its bundled public roots when it read none.".to_owned());
     }
     notes
 }

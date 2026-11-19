@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-crashloop-no-finish-time"
+summary = "A crash-looping CoreDNS pod with no termination time, with forward /etc/resolv.conf"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

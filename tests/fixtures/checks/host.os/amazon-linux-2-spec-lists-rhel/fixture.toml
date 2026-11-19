@@ -1,0 +1,12 @@
+schema = 1
+name = "amazon-linux-2-spec-lists-rhel"
+summary = "Amazon Linux 2 against a list with rhel and no amzn entry: ID_LIKE does not stand in"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

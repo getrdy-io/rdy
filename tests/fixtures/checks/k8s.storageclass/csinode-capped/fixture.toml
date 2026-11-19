@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-storageclass-csinode-capped"
-summary = "The first CSINode page has no hit and there are more pages, and no CSIDriver object"
+summary = "The first CSINode page has no hit, the server fails on page two, and no CSIDriver object"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

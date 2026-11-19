@@ -1,0 +1,19 @@
+{
+  "observed": {
+    "api_password": "canary-found-key-1",
+    "env": [
+      {"name": "DB_PASSWORD", "value": "canary-found-env-2"},
+      {"name": "HOME", "value": "/home/synthetic"}
+    ],
+    "cmdline": ["psql", "--password", "canary-found-argv-3"],
+    "log": "Authorization: Bearer canary-found-hdr-4\nok",
+    "note": "token=canary-found-text-5",
+    "kubeconfig": {"token": "canary-found-kube-6"},
+    "arch": "x86_64"
+  },
+  "expected": {
+    "client_secret": "canary-found-exp-7",
+    "args": ["--token", "canary-found-exp-8"],
+    "min": 8
+  }
+}

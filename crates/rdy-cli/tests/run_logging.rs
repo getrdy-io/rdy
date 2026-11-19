@@ -14,6 +14,7 @@ use std::process::{Command, Output};
 use serde_json::Value;
 
 mod common;
+use common::NoProxyEnv;
 
 const CANARY: &str = "canary-run-logging-5521";
 const ACME: &str = "../../examples/specs/acme-platform.yaml";
@@ -22,9 +23,11 @@ fn rdy(spec: &Path, out: &Path, rust_log: Option<&str>) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rdy"));
     cmd.arg("run")
         .arg(spec)
-        .args(["--allow-unsigned", "--json", "--out-dir"])
+        // Offline: the example spec lists net.egress, which must look nothing up (M1-095).
+        .args(["--no-network", "--allow-unsigned", "--json", "--out-dir"])
         .arg(out)
         .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
         .env_remove("RUST_LOG");
     if let Some(level) = rust_log {
         cmd.env("RUST_LOG", level);
