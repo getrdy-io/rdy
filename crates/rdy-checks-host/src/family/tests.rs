@@ -102,6 +102,9 @@ fn m1_support_is_full_on_linux_and_not_yet_elsewhere() {
     }
 }
 
+// `stub_ids` is empty since M1-148. The stub halves of this test and of the three tests on stubs below
+// (`a_stub_that_reaches_the_scheduler...`, `these_ids_are_still_stubs...`, `a_registered_host_family_never_plans_a_stub...`)
+// run over an empty list: they guard the mechanism for the next stub, not a check.
 #[test]
 fn on_linux_every_real_host_check_is_planned_to_run_and_every_stub_is_not_in_build() {
     let plan = plan(Os::Linux);

@@ -640,41 +640,11 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// Every implemented check has its cases, each with a reviewed `expect.json`, except the Timeout class of the checks that cut a hang themselves (M1-179). A
-/// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
-/// forces the row out when they land.
-const PENDING: &[Pending] = &[
-    Pending {
-        check: "net.egress",
-        classes: &[Class::Timeout],
-        owner: "M1-179",
-        why: "M1-096 added the reviewed expect.json for Pass and NonPass (11 cases). By design no hang ends net.egress in a Timeout: every endpoint is cut to its own budget (10 s, then 15 s for HTTP) and leaves 2 s of the check's time for the result, so a blackhole or a stalled server gives a bounded finding with class `blackhole` or `timeout`, never `timed_out_ms`. M1-179 (PR #70) counts a hang the check survived, when a note names it (`no reply within`), as the Timeout class. The blackhole case has that note. The row is closed by the second of PRs #70 and #74 to merge",
-    },
-    Pending {
-        check: "net.proxy",
-        classes: &[Class::Timeout],
-        owner: "M1-179",
-        why: "M1-098 added the reviewed expect.json for the passing, warning and blocking cases (16). By design no hang ends net.proxy in a Timeout: the one connection to the proxy gets what is left of the check's time minus 0.5 s, and a black hole gives a bounded finding with class `blackhole` and the note `no reply within 3 s`, never `timed_out_ms`. M1-179 counts that hang the check survived as the Timeout class. The proxy-blackhole case has the note. The row is closed by the second of PR #70 and this PR to merge",
-    },
-    Pending {
-        check: "net.tls_intercept",
-        classes: &[Class::Timeout],
-        owner: "M1-179",
-        why: "M1-100 added the generated-chain cases and the handshake-never-completes case (an in-memory peer that never answers the ClientHello). By design no hang ends net.tls_intercept in a Timeout: each host is cut to its own budget (5 s for the handshake) and 2 s of the check's 60 s are kept for the result, so the check gives a bounded warning with a `timed out` note, the same as host.time_sync. M1-179 counts that as the Timeout class (correction-52 adds net.tls_intercept to its row; the case needs a hang marker M1-179 accepts), and the stale-row finding then forces this row out",
-    },
-    Pending {
-        check: "net.dns",
-        classes: &[Class::Timeout],
-        owner: "M1-179",
-        why: "Same as host.time_sync: net.dns cuts each name to its own budget, so a hung getent gives a bounded `timeout` finding for that name and never ends the check in `timed_out_ms`. The timeout case (a 60 s delay in its getent recording, an expect.json that holds the finding and the resolver evidence) proves that. M1-179 makes the harness accept a survived hang as the Timeout class",
-    },
-    Pending {
-        check: "host.time_sync",
-        classes: &[Class::Timeout],
-        owner: "M1-179",
-        why: "M1-179 makes the harness accept a hang the check survived (a delay or blackhole at least the check timeout in the case files, and an expect.json that holds a finding) as the Timeout class. By design (correction-37) no hang ends host.time_sync in a Timeout: each step is cut to the budget left, so a hung timedatectl or chronyc gives a bounded finding. The hung-chronyc, hung-timedatectl and silent-server-and-hung-tools cases prove that",
-    },
-];
+/// Empty since M1-174, and again since M1-179: every implemented check has its cases, each with a reviewed
+/// `expect.json`, the Timeout class of the checks that cut a hang themselves included. A check merged
+/// without its cases goes here with the ticket that owes them, and the stale-row finding forces the row
+/// out when they land.
+const PENDING: &[Pending] = &[];
 
 /// The level each case of `net.tls_intercept` must end at. This is the review of the `expect.json` files
 /// in one place: a golden can be regenerated with `UPDATE_GOLDENS=1`, this table cannot.
@@ -849,6 +819,10 @@ struct Case {
     partial: bool,
     root: bool,
     hang: Option<&'static str>,
+    /// Whether the scheduler ended the check (`timed_out_ms`). Off for a hang the check survived.
+    ends: bool,
+    /// A note in `result.notes`.
+    note: Option<&'static str>,
 }
 
 impl Case {
@@ -860,6 +834,8 @@ impl Case {
             partial: false,
             root: false,
             hang: None,
+            ends: true,
+            note: None,
         }
     }
 
@@ -879,15 +855,18 @@ impl Case {
         } else {
             "null"
         };
-        let timed_out = if self.hang.is_some() {
+        let timed_out = if self.hang.is_some() && self.ends {
             r#", "timed_out_ms": 5000"#
         } else {
             ""
         };
+        let notes = self
+            .note
+            .map_or_else(String::new, |n| format!(", \"notes\": [\"{n}\"]"));
         std::fs::write(
             dir.join("expect.json"),
             format!(
-                "{{\"entry\": {{\"id\": \"{}\"}}, \"result\": {{\"level\": \"{}\", \"partial\": {partial}{timed_out}}}}}\n",
+                "{{\"entry\": {{\"id\": \"{}\"}}, \"result\": {{\"level\": \"{}\", \"partial\": {partial}{timed_out}{notes}}}}}\n",
                 self.check, self.level
             ),
         )?;
@@ -1078,6 +1057,79 @@ fn a_delay_at_the_check_timeout_and_a_blackhole_in_net_json_are_hangs() -> TestR
         )?)
     })?;
     assert!(found.is_empty(), "{found:#?}");
+
+    // A `silent` chain in chain.json is the net.tls_intercept form of a black hole.
+    let found = hung_case_findings(|dir| {
+        std::fs::remove_dir_all(dir.join("native"))?;
+        Ok(std::fs::write(
+            dir.join("chain.json"),
+            r#"{"host": "web.acme.test", "chain": "silent"}"#,
+        )?)
+    })?;
+    assert!(found.is_empty(), "{found:#?}");
+    let found = hung_case_findings(|dir| {
+        std::fs::remove_dir_all(dir.join("native"))?;
+        Ok(std::fs::write(
+            dir.join("chain.json"),
+            r#"{"host": "web.acme.test", "chain": "public"}"#,
+        )?)
+    })?;
+    assert_eq!(found.len(), 1, "{found:#?}");
+    Ok(())
+}
+
+/// A tree whose `plant.full` hung case is the survived form: a hang in its files, no `timed_out_ms`, and
+/// `note` as its only note.
+fn survived_findings(note: Option<&'static str>) -> TestResult<Vec<String>> {
+    let mut cases = plain_cases();
+    for mut case in full_cases() {
+        if case.name == "hung" {
+            case.ends = false;
+            case.note = note;
+        }
+        cases.push(case);
+    }
+    let tree = plant_tree(&cases)?;
+    Ok(findings(&plant_rows(STUBBED), tree.path(), &[])?)
+}
+
+#[test]
+fn a_hang_the_check_survived_counts_when_a_note_names_it() -> TestResult {
+    for note in [
+        "chronyc gave no answer: it timed out.",
+        "`192.0.2.10`: no reply within 3 s.",
+    ] {
+        let found = survived_findings(Some(note))?;
+        assert!(found.is_empty(), "{note}: {found:#?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_hang_with_neither_timed_out_ms_nor_a_note_that_names_it_is_a_finding() -> TestResult {
+    // No note at all, and a note about something else.
+    for note in [None, Some("Offset not measured.")] {
+        let found = survived_findings(note)?;
+        assert_eq!(found.len(), 1, "{note:?}: {found:#?}");
+        assert!(found.iter().all(|f| f.contains("a Timeout case")));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_note_that_names_a_hang_does_not_count_without_a_hang_in_the_files() -> TestResult {
+    let mut cases = plain_cases();
+    for mut case in full_cases() {
+        if case.name == "hung" {
+            case.hang = None;
+            case.note = Some("chronyc gave no answer: it timed out.");
+        }
+        cases.push(case);
+    }
+    let tree = plant_tree(&cases)?;
+    let found = findings(&plant_rows(STUBBED), tree.path(), &[])?;
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found.iter().all(|f| f.contains("a Timeout case")));
     Ok(())
 }
 
