@@ -1,0 +1,75 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/weave-net"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DaemonSet",
+    "metadata": {
+      "name": "weave-net",
+      "namespace": "kube-system",
+      "labels": {
+        "name": "weave-net"
+      },
+      "annotations": {
+        "deprecated.daemonset.template.generation": "1",
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\": [{\"name\": \"SYNTHETIC_TOKEN\", \"value\": \"ENV-VALUE-MARKER-4f9c2a7e1b3d\"}]}"
+      }
+    },
+    "spec": {
+      "selector": {
+        "matchLabels": {
+          "name": "weave-net"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "name": "weave-net"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "weave",
+              "image": "registry.example/weave-kube:2.8.1",
+              "env": [
+                {
+                  "name": "NODE_NAME",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "spec.nodeName"
+                    }
+                  }
+                },
+                {
+                  "name": "SYNTHETIC_TOKEN",
+                  "value": "ENV-VALUE-MARKER-4f9c2a7e1b3d"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "info"
+                }
+              ],
+              "args": [
+                "--token=ENV-VALUE-MARKER-4f9c2a7e1b3d"
+              ]
+            }
+          ],
+          "hostNetwork": true
+        }
+      }
+    },
+    "status": {
+      "currentNumberScheduled": 3,
+      "desiredNumberScheduled": 3,
+      "numberMisscheduled": 0,
+      "numberReady": 3,
+      "numberAvailable": 3,
+      "observedGeneration": 1,
+      "updatedNumberScheduled": 3
+    }
+  }
+}

@@ -56,6 +56,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0050](0050-macos-ci-gate-arm64-tests-intel-nightly.md) | The PR gate runs macOS arm64 tests and an x86_64 macOS compile; the Intel tests run on main and nightly | Accepted, decided by the founder 2026-11-18 |
 | [0051](0051-nameserver-exchange-and-the-azure-door.md) | Direct nameserver queries go through a facade call that reads the OS list itself, and the Azure DNS address passes only from that list | Accepted |
 | [0052](0052-hand-written-dns-reader-hickory-proto-test-only.md) | The `net.dns` query and reply reader are written by hand, and `hickory-proto` is only a test oracle | Accepted |
+| [0046](0046-k8s-cni-signals-by-cost-and-optional-reads.md) | `k8s.cni` names the plugin from signals that need no grant first, reads DaemonSets only by name, and keeps every new grant in an optional file | Accepted, pending review (M1-165) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

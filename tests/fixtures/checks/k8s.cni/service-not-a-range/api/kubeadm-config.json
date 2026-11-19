@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/configmaps/kubeadm-config"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "kubeadm-config",
+      "namespace": "kube-system"
+    },
+    "data": {
+      "ClusterConfiguration": "apiServer:\n  extraArgs:\n    authorization-mode: Node,RBAC\n    oidc-client-secret: ENV-VALUE-MARKER-4f9c2a7e1b3d\n  timeoutForControlPlane: 4m0s\napiVersion: kubeadm.k8s.io/v1beta3\ncertificatesDir: /etc/kubernetes/pki\nclusterName: acme\ncontrollerManager: {}\ndns: {}\netcd:\n  local:\n    dataDir: /var/lib/etcd\nimageRepository: registry.example\nkind: ClusterConfiguration\nkubernetesVersion: v1.30.2\nnetworking:\n  dnsDomain: cluster.local\n  podSubnet: 10.244.0.0/16\n  serviceSubnet: q\u001b[2J`rm -rf /`\u202exxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nscheduler: {}\n",
+      "ClusterStatus": "apiEndpoints:\n  acme-node-1:\n    advertiseAddress: 192.0.2.10\n"
+    }
+  }
+}

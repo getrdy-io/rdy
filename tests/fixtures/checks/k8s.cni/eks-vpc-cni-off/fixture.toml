@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-eks-vpc-cni-off"
+summary = "EKS with the VPC CNI and its network policy agent turned off"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

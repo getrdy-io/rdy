@@ -42,6 +42,7 @@ use crate::client::{
     ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
+use crate::cni::CniCheck;
 use crate::crds::CrdsCheck;
 use crate::dns::DnsCheck;
 use crate::ingress::IngressCheck;
@@ -56,8 +57,8 @@ use crate::version::VersionCheck;
 mod tests;
 
 /// The ids of this crate that the family does not build. The planner skips each as `not_in_build`. Empty
-/// since M1-175: every check registered in the registry is built. A check that lands later (`k8s.crds`,
-/// `k8s.cni`) registers its info and adds its arm to `build_check` in one change.
+/// since M1-175: every check registered in the registry is built. A check that lands later registers its
+/// info and adds its arm to `build_check` in one change.
 static NOT_BUILT: [&str; 0] = [];
 
 /// The most time the probe spends on the OpenShift group list.
@@ -543,6 +544,9 @@ pub(crate) fn build_check(
             params, namespace, cluster,
         )))),
         CheckParams::K8sNamespace(params) => Ok(Built::new(Box::new(NamespaceCheck::new(
+            params, namespace, cluster,
+        )))),
+        CheckParams::K8sCni(params) => Ok(Built::new(Box::new(CniCheck::new(
             params, namespace, cluster,
         )))),
         CheckParams::K8sCrds(params) => Ok(Built::new(Box::new(CrdsCheck::new(params, cluster)))),

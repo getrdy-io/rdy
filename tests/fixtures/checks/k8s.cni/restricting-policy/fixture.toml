@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-restricting-policy"
+summary = "A policy that selects every pod and lists destinations is not a default-deny"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

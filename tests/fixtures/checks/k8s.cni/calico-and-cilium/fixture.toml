@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-calico-and-cilium"
+summary = "Signals of two plugins: a cluster in the middle of a move"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

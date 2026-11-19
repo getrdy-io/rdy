@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-hostile-reason"
+summary = "A node condition reason with a terminal escape and a command"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -89,6 +89,31 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 
 [[allow]]
 rule = "host"
+value = "cilium.io"
+reason = "An API group name of the Cilium network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.projectcalico.org"
+reason = "An API group name of the Calico network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.antrea.io"
+reason = "An API group name of the Antrea network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.ovn.org"
+reason = "An API group name of the OVN-Kubernetes network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.cni.cncf.io"
+reason = "An API group name of the Multus network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
 path = "tests/fixtures/checks/k8s.dns/crashloop-explicit-upstream/api/configmap.json"
 value = "in-addr.arpa"
 reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-dual-stack"
+summary = "A dual-stack cluster: two service ranges and two pod ranges per node"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

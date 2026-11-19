@@ -1,0 +1,102 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/aws-node"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DaemonSet",
+    "metadata": {
+      "name": "aws-node",
+      "namespace": "kube-system",
+      "labels": {
+        "app.kubernetes.io/instance": "aws-vpc-cni",
+        "app.kubernetes.io/name": "aws-node",
+        "k8s-app": "aws-node"
+      },
+      "annotations": {
+        "deprecated.daemonset.template.generation": "1",
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\": [{\"name\": \"SYNTHETIC_TOKEN\", \"value\": \"ENV-VALUE-MARKER-4f9c2a7e1b3d\"}]}"
+      }
+    },
+    "spec": {
+      "selector": {
+        "matchLabels": {
+          "k8s-app": "aws-node"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/instance": "aws-vpc-cni",
+            "app.kubernetes.io/name": "aws-node",
+            "k8s-app": "aws-node"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "aws-node",
+              "image": "registry.example/amazon-k8s-cni:v1.18.2-eksbuild.1",
+              "env": [
+                {
+                  "name": "ADDITIONAL_ENI_TAGS",
+                  "value": "{}"
+                },
+                {
+                  "name": "AWS_VPC_K8S_CNI_LOGLEVEL",
+                  "value": "DEBUG"
+                },
+                {
+                  "name": "AWS_VPC_K8S_CNI_RANDOMIZESNAT",
+                  "value": "prng"
+                },
+                {
+                  "name": "ENABLE_PREFIX_DELEGATION",
+                  "value": "false"
+                },
+                {
+                  "name": "SYNTHETIC_TOKEN",
+                  "value": "ENV-VALUE-MARKER-4f9c2a7e1b3d"
+                },
+                {
+                  "name": "MY_NODE_NAME",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "spec.nodeName"
+                    }
+                  }
+                },
+                {
+                  "name": "ENABLE_NETWORK_POLICY",
+                  "value": "false"
+                }
+              ]
+            },
+            {
+              "name": "aws-eks-nodeagent",
+              "image": "registry.example/amazon/aws-network-policy-agent:v1.1.2-eksbuild.1",
+              "args": [
+                "--enable-ipv6=false",
+                "--enable-network-policy=false",
+                "--token=ENV-VALUE-MARKER-4f9c2a7e1b3d"
+              ]
+            }
+          ],
+          "hostNetwork": true
+        }
+      }
+    },
+    "status": {
+      "currentNumberScheduled": 3,
+      "desiredNumberScheduled": 3,
+      "numberMisscheduled": 0,
+      "numberReady": 3,
+      "numberAvailable": 3,
+      "observedGeneration": 1,
+      "updatedNumberScheduled": 3
+    }
+  }
+}

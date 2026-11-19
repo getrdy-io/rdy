@@ -12,8 +12,10 @@
 //! Security, policy engine and SCC half) and `k8s.namespace` ([`NamespaceCheck`], M1-161, existence,
 //! terminating, quota and limit range), `k8s.dns` ([`DnsCheck`], M1-162, the cluster DNS workload,
 //! Service, Corefile and restart evidence) and `k8s.ingress` ([`IngressCheck`], M1-163, ingress classes by
-//! controller, the Gateway API, the OpenShift Route API and pending load balancers) and `k8s.crds`
-//! ([`CrdsCheck`], M1-164, definitions, served versions and operator versions) are built, and the
+//! controller, the Gateway API, the OpenShift Route API and pending load balancers), `k8s.crds`
+//! ([`CrdsCheck`], M1-164, definitions, served versions and operator versions) and `k8s.cni`
+//! ([`CniCheck`], M1-165, the network plugin, NetworkPolicy enforcement, default-deny egress and the
+//! pod and service ranges) are built, and the
 //! others follow. [`K8sFamily`] (M1-107) lists them,
 //! builds `k8s.version` and `k8s.access` from a spec entry, and probes the `kube_context` need once per run.
 //!
@@ -52,6 +54,12 @@ pub mod client;
     clippy::disallowed_macros
 )]
 mod cluster;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod cni;
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -132,6 +140,7 @@ pub mod testing;
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
 pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
+pub use cni::CniCheck;
 pub use crds::CrdsCheck;
 pub use dns::DnsCheck;
 pub use family::K8sFamily;
