@@ -83,6 +83,7 @@ Ask the platform team for a namespace the product can install into. Create it wi
 - **Reads:** none
 - **API reads:**
   - `v1 nodes` (list): allocatable, conditions, taints, labels; providerID and kubeletVersion
+  - `v1 pods` (list): requests, nodeName and phase only, with a status.phase field selector
   - `apps/v1 deployments` (list in a namespace): the cluster-autoscaler deployment by name
 
 **Remediation**
