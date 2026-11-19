@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-classes-mixed-case"
+summary = "A controller string with capitals: the match is exact"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

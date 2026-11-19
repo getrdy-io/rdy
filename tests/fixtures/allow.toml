@@ -369,6 +369,39 @@ value = "metadata.name"
 reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"
 
 [[allow]]
+rule = "host"
+value = "nginx.org"
+reason = "The controller name of the F5 NGINX ingress controller (nginx.org/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "traefik.io"
+reason = "The controller name of Traefik (traefik.io/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/gateway-istio/api/gatewayclasses.json"
+value = "istio.io"
+reason = "The controller name of the Istio Gateway API class (istio.io/gateway-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "gateway.envoyproxy.io"
+reason = "The controller name of the Envoy Gateway class (gateway.envoyproxy.io/gatewayclass-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/gateway-gke/api/gatewayclasses.json"
+value = "networking.gke.io"
+reason = "The controller name of the GKE Gateway class (networking.gke.io/gateway) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/lb-metallb/api/discovery-apis.json"
+value = "metallb.io"
+reason = "The API group of MetalLB's custom resources, listed in the group discovery document, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
 rule = "ip"
 path = "tests/fixtures/checks/host.time_sync/refused-range/expect.json"
 value = "169.254.169.123"
@@ -494,3 +527,9 @@ rule = "host"
 path = "tests/fixtures/readme/refusal-unsigned.txt"
 value = "docs.getrdy.io"
 reason = "The 07 C.5 refusal fix line names the product's own docs page (docs.getrdy.io/unsigned) on purpose, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/aks-app-routing/api/ingressclasses.json"
+value = "webapprouting.kubernetes.azure.com"
+reason = "The name of the IngressClass that AKS application routing creates, not a host a test contacts (k8s.ingress)"

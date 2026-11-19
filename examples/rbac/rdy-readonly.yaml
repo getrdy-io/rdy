@@ -59,6 +59,7 @@ rules:
   # k8s.nodes: pod requests, node name and phase (free capacity). k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
   # k8s.admission: the Service behind an admission webhook that fails closed (its type only).
+  # k8s.ingress: the name, age, type and load balancer state of the Services of the target namespace.
   # k8s.dns: the container states of the cluster DNS pods (one list with a label selector; the rest of each
   # pod is dropped).
   - apiGroups: [""]
@@ -70,6 +71,15 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["csinodes", "csidrivers"]
+    verbs: ["list"]
+  # k8s.ingress: the ingress classes and their controllers.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["list"]
+  # k8s.ingress: the Gateway API classes and whether a controller accepted them. Without the Gateway API
+  # installed the server answers 404, which rdy reads as "not installed".
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gatewayclasses"]
     verbs: ["list"]
   # k8s.admission: OpenShift security context constraints. k8s.version: the OpenShift version.
   - apiGroups: ["security.openshift.io"]

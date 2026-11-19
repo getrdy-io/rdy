@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-cut"
+summary = "A service list with a second page, and a pending load balancer on the first"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

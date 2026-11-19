@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-gke-absent"
+summary = "GKE without the Gateway API enabled"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

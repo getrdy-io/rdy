@@ -105,6 +105,8 @@ ADR 0010 stays as a second line.
 
 - Root is root. Read-only behaviour, a small dependency set and the action log shrink the trust needed.
   They do not remove it.
+- The guard does not narrow Service lists by name or namespace (M1-163 folded the services entry for
+  `k8s.admission`, `k8s.dns` and `k8s.ingress`). M2-126 pins them per check.
 - The address rule (INV-12) is a list, not a classifier (M1-094). It names the metadata and host-service
   addresses of the clouds Rdy checks: AWS, GCP (`fd20:ce::254`), Azure, and Alibaba Cloud. A provider
   that is not listed is not protected, and a private-range service on the customer's network is allowed

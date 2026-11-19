@@ -1358,9 +1358,11 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | core `configmaps` | GET `kube-system/coredns`, by name | `k8s.dns`: the `Corefile` key only (ADR 0043) |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
+| `networking.k8s.io` `ingressclasses` | LIST | `k8s.ingress`: class name, `spec.controller`, the default-class annotation |
+| `gateway.networking.k8s.io` `gatewayclasses` | LIST | `k8s.ingress`: class name, `spec.controllerName`, the `Accepted` condition |
 | `admissionregistration.k8s.io` `validatingwebhookconfigurations`, `mutatingwebhookconfigurations` | LIST | `k8s.admission` (M1-160): each webhook's name, `failurePolicy`, rules, selectors, `matchConditions` and backend kind; the CA bundle is dropped |
 | `admissionregistration.k8s.io` `validatingadmissionpolicies`, `validatingadmissionpolicybindings` | LIST | `k8s.admission` (M1-160): name, match constraints, actions; the CEL is dropped |
-| core `services` | LIST in a namespace, `fieldSelector` must include `metadata.name`; GET `kube-system/kube-dns`, `kube-system/rke2-coredns-rke2-coredns` (RKE2 names its Service after its Deployment) and `openshift-dns/dns-default`, by name | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names; `k8s.dns`: ClusterIP and ports |
+| core `services` | LIST in a namespace (no selector required: `k8s.admission` sends `metadata.name`, `k8s.ingress` lists the whole namespace); GET `kube-system/kube-dns`, `kube-system/rke2-coredns-rke2-coredns` (RKE2 names its Service after its Deployment) and `openshift-dns/dns-default`, by name | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names; `k8s.dns`: ClusterIP and ports; `k8s.ingress` (M1-163): name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace, nothing else of a Service is held |
 | `discovery.k8s.io` `endpointslices` | LIST in a namespace, `labelSelector` must include `kubernetes.io/service-name=<name>` | `k8s.admission` (M1-160): ready endpoints behind a webhook Service |
 | `kyverno.io` `clusterpolicies` (`v1`); `policies.kyverno.io` `validatingpolicies`, `imagevalidatingpolicies` (`v1`, `v1beta1`, `v1alpha1`) | LIST | `k8s.admission` (M1-160): policy names, actions and match filters |
 | `constraints.gatekeeper.sh` every resource (`v1beta1`; resource `*` in the table, ADR 0042) | LIST | `k8s.admission` (M1-160): constraint names, `enforcementAction` and match; parameters dropped |
@@ -1369,7 +1371,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    above: `admissionregistration.k8s.io` webhook configurations, `validatingadmissionpolicies` and bindings;
    core `services`; `discovery.k8s.io` `endpointslices`; Kyverno and Gatekeeper policy objects. Still to
    come: ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni` and
+   by name; the resources of `k8s.crds`, `k8s.cni` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap
