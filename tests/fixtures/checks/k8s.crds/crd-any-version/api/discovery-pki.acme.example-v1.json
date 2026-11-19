@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/pki.acme.example/v1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "pki.acme.example/v1",
+    "resources": [
+      {
+        "name": "issuers",
+        "singularName": "issuer",
+        "namespaced": true,
+        "kind": "Issuer",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "issuers/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "Issuer",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      }
+    ]
+  }
+}

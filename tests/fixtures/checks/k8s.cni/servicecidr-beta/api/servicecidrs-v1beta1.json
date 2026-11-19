@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/networking.k8s.io/v1beta1/servicecidrs",
+    "query": "limit=20"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "networking.k8s.io/v1beta1",
+    "kind": "ServiceCIDRList",
+    "metadata": {
+      "resourceVersion": "7"
+    },
+    "items": [
+      {
+        "apiVersion": "networking.k8s.io/v1beta1",
+        "kind": "ServiceCIDR",
+        "metadata": {
+          "name": "kubernetes",
+          "creationTimestamp": "2026-11-01T08:00:00Z",
+          "finalizers": [
+            "networking.k8s.io/service-cidr-finalizer"
+          ]
+        },
+        "spec": {
+          "cidrs": [
+            "10.96.0.0/12"
+          ]
+        },
+        "status": {
+          "conditions": [
+            {
+              "type": "Ready",
+              "status": "True",
+              "reason": "",
+              "message": ""
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

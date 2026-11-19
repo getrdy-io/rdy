@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/kube-ovn-cni"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"kube-ovn-cni\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "kube-ovn-cni",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

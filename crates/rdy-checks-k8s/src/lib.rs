@@ -10,8 +10,13 @@
 //! that failed), `k8s.storageclass` ([`StorageClassCheck`], M1-110), `k8s.rbac` ([`RbacCheck`], M1-111,
 //! which can test as the spec's `as:` user) and `k8s.admission` ([`AdmissionCheck`], M1-114, the Pod
 //! Security, policy engine and SCC half) and `k8s.namespace` ([`NamespaceCheck`], M1-161, existence,
-//! terminating, quota and limit range) and `k8s.dns` ([`DnsCheck`], M1-162, the cluster DNS workload,
-//! Service, Corefile and restart evidence) are built, and the others follow. [`K8sFamily`] (M1-107) lists them,
+//! terminating, quota and limit range), `k8s.dns` ([`DnsCheck`], M1-162, the cluster DNS workload,
+//! Service, Corefile and restart evidence) and `k8s.ingress` ([`IngressCheck`], M1-163, ingress classes by
+//! controller, the Gateway API, the OpenShift Route API and pending load balancers), `k8s.crds`
+//! ([`CrdsCheck`], M1-164, definitions, served versions and operator versions) and `k8s.cni`
+//! ([`CniCheck`], M1-165, the network plugin, NetworkPolicy enforcement, default-deny egress and the
+//! pod and service ranges) are built, and the
+//! others follow. [`K8sFamily`] (M1-107) lists them,
 //! builds `k8s.version` and `k8s.access` from a spec entry, and probes the `kube_context` need once per run.
 //!
 //! The `testing` feature (M1-185) adds the `testing` module: a scripted cluster that serves a fixture's `api/`
@@ -54,6 +59,18 @@ mod cluster;
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
+mod cni;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod crds;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 mod dns;
 #[forbid(
     clippy::disallowed_methods,
@@ -61,6 +78,12 @@ mod dns;
     clippy::disallowed_macros
 )]
 mod family;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod ingress;
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -117,8 +140,11 @@ pub mod testing;
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
 pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
+pub use cni::CniCheck;
+pub use crds::CrdsCheck;
 pub use dns::DnsCheck;
 pub use family::K8sFamily;
+pub use ingress::IngressCheck;
 pub use namespace::NamespaceCheck;
 pub use nodes::NodesCheck;
 pub use rbac::RbacCheck;

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/calico-system/daemonsets/calico-node"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets is forbidden: User \"acme-installer\" cannot get resource \"daemonsets\" in API group \"apps\" in the namespace \"calico-system\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

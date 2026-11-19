@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-registry-port"
+summary = "An image from a registry with a port and no tag"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

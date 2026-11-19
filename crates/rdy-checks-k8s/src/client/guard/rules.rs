@@ -114,6 +114,9 @@ pub enum Access {
     /// One object of a cluster-scoped resource by name, or a `Namespace` by name:
     /// `/<prefix>/<resource>/<name>`.
     Get(Only),
+    /// One object of a namespaced resource, by name, in the namespaces `Only` admits:
+    /// `/<prefix>/namespaces/<namespace>/<resource>/<name>`. The name is any valid name.
+    GetInNamespace(Only),
     /// One named object of one namespace: `/<prefix>/namespaces/<namespace>/<resource>/<name>`. Both are
     /// fixed in the table, so a role can grant it with `resourceNames` in a `Role` of that namespace and
     /// nothing more.
@@ -226,8 +229,9 @@ pub const ALLOWED: &[Allowed] = &[
             "k8s.storageclass",
             "k8s.rbac",
             "k8s.namespace",
+            "k8s.cni",
         ],
-        reads: "Pod Security labels; whether the target namespace exists; its phase and deletion conditions",
+        reads: "Pod Security labels; whether the target namespace exists; its phase and deletion conditions; k8s.cni: whether calico-system and kube-flannel exist, before it asks for a DaemonSet there",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -235,8 +239,8 @@ pub const ALLOWED: &[Allowed] = &[
         version: "v1",
         resource: "nodes",
         access: &[Access::List],
-        checks: &["k8s.nodes", "k8s.version"],
-        reads: "allocatable, conditions, taints, labels; providerID and kubeletVersion",
+        checks: &["k8s.nodes", "k8s.version", "k8s.cni"],
+        reads: "k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the reason of the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -315,9 +319,12 @@ pub const ALLOWED: &[Allowed] = &[
         group: "apps",
         version: "v1",
         resource: "deployments",
-        access: &[Access::ListInNamespace(Only::Name("kube-system"))],
-        checks: &["k8s.nodes", "k8s.dns"],
-        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label",
+        access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::GetInNamespace(Only::Any),
+        ],
+        checks: &["k8s.nodes", "k8s.dns", "k8s.crds"],
+        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -327,9 +334,74 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[
             Access::ListInNamespace(Only::Name("kube-system")),
             Access::ListInNamespace(Only::Name("openshift-dns")),
+            // k8s.cni: the node agents of data/cni.toml, by name, one pair each.
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "calico-node",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "cilium",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "anetd",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "canal",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "rke2-canal",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "azure-cns",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "rke2-cilium",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "aws-node",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "azure-npm",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kube-flannel-ds",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "weave-net",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "antrea-agent",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kube-router",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kube-ovn-cni",
+            },
+            Access::GetIn {
+                namespace: "calico-system",
+                name: "calico-node",
+            },
+            Access::GetIn {
+                namespace: "kube-flannel",
+                name: "kube-flannel-ds",
+            },
         ],
-        checks: &["k8s.dns"],
-        reads: "desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns",
+        checks: &["k8s.dns", "k8s.cni"],
+        reads: "k8s.dns: desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns. k8s.cni: the network plugin node agent DaemonSets of data/cni.toml, by name in one namespace each (desired and ready counts, and ENABLE_NETWORK_POLICY of aws-node; every other env value, args and annotations are dropped while parsing)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -352,20 +424,26 @@ pub const ALLOWED: &[Allowed] = &[
             },
             Access::ListInNamespace(Only::Any),
         ],
-        checks: &["k8s.admission", "k8s.dns"],
-        reads: "k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector)",
-        field_selector: FieldSelector::Key("metadata.name"),
+        checks: &["k8s.admission", "k8s.dns", "k8s.ingress"],
+        reads: "k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector). k8s.ingress: the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace (a list without a selector); the address itself, annotations and the rest of the spec are dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "",
         version: "v1",
         resource: "configmaps",
-        access: &[Access::GetIn {
-            namespace: "kube-system",
-            name: "coredns",
-        }],
-        checks: &["k8s.dns"],
-        reads: "the Corefile key of the coredns ConfigMap in kube-system; every other key is dropped while parsing",
+        access: &[
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "coredns",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kubeadm-config",
+            },
+        ],
+        checks: &["k8s.dns", "k8s.cni"],
+        reads: "k8s.dns: the Corefile key of the coredns ConfigMap in kube-system. k8s.cni: the ClusterConfiguration key of the kubeadm-config ConfigMap in kube-system (the service range). Every other key is dropped while parsing",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -501,6 +579,60 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::Get(Only::Name("version"))],
         checks: &["k8s.version"],
         reads: "the OpenShift version",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "ingressclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controller and the default-class annotation only; every other annotation and the parameters are dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        resource: "gatewayclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controllerName and the Accepted condition status only",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "config.openshift.io",
+        version: "v1",
+        resource: "networks",
+        access: &[Access::Get(Only::Name("cluster"))],
+        checks: &["k8s.cni"],
+        reads: "the OpenShift network type and the pod and service ranges",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "networkpolicies",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.cni"],
+        reads: "the pod selector, policy types and the shape of the egress rules of the policies of the install namespace; names only, no labels or annotations",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "servicecidrs",
+        access: &[Access::List],
+        checks: &["k8s.cni"],
+        reads: "the service ranges (GA in 1.33)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1beta1",
+        resource: "servicecidrs",
+        access: &[Access::List],
+        checks: &["k8s.cni"],
+        reads: "the service ranges (beta before 1.33)",
         field_selector: FieldSelector::NotRequired,
     },
 ];
@@ -1066,6 +1198,7 @@ fn check_get(
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
+            (Access::GetInNamespace(only), Some(namespace), Some(_)) => only.admits(namespace),
             (
                 Access::GetIn {
                     namespace: ns,

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-annotated"
+summary = "A pending LoadBalancer service with a last-applied-configuration annotation and a marker"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

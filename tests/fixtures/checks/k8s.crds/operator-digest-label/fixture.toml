@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-digest-label"
+summary = "An image pinned by digest, and the version in the version label"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

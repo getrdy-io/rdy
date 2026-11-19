@@ -26,7 +26,7 @@ fn the_family_reads_its_check_list_from_the_registry_and_names_what_it_does_not_
     // M1-175: the family builds every check of the crate, so the planner skips none as not in the build.
     assert!(family.not_built().is_empty());
     assert_eq!(built.len(), listed.len());
-    assert_eq!(listed.len(), 8);
+    assert_eq!(listed.len(), 11);
 }
 
 fn api_error(code: u16) -> kube::Error {
@@ -98,7 +98,7 @@ impl Cluster for Fixtured {
 }
 
 /// A spec that holds every k8s id of this build, and the fixture whose cluster answers that entry.
-const ENTRIES: [(&str, &str, &str); 7] = [
+const ENTRIES: [(&str, &str, &str); 10] = [
     (
         "k8s.version",
         "checks/k8s.version/kind",
@@ -130,6 +130,13 @@ const ENTRIES: [(&str, &str, &str); 7] = [
         "    namespace: acme-system\n",
     ),
     ("k8s.dns", "checks/k8s.dns/kubeadm-ok", ""),
+    (
+        "k8s.crds",
+        "checks/k8s.crds/operator-ready",
+        "    operators:\n      - namespace: acme-system\n        deployment: acme-operator\n",
+    ),
+    ("k8s.ingress", "checks/k8s.ingress/nginx-f5", ""),
+    ("k8s.cni", "checks/k8s.cni/k3s-flannel", ""),
 ];
 
 fn family_spec() -> Spec {
@@ -150,7 +157,7 @@ fn the_family_builds_every_k8s_id_of_a_spec_and_none_is_unsupported() {
     let with_namespace = K8sFamily::new().with_namespace(
         serde_json::from_value(serde_json::json!("acme-system")).expect("a namespace"),
     );
-    assert_eq!(spec.checks.len(), 8);
+    assert_eq!(spec.checks.len(), 11);
     for entry in &spec.checks {
         for family in [&family, &with_namespace] {
             let built = family

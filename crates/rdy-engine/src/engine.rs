@@ -40,7 +40,7 @@ use crate::outcome::{
 use crate::plan::{PlanAction, RunPlan};
 use crate::privilege::{Privilege, capabilities};
 use crate::probe::{ActionLogOutput, ProbeHub};
-use crate::redact::RuleCounts;
+use crate::redact::{Redactor, RuleCounts};
 use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Observer, Planned, Ran, Scheduler};
 use crate::watchdog::Board;
 
@@ -71,6 +71,8 @@ pub struct RunOptions {
     /// run started (M1-176). [`Engine::execute`] tells it about every start and end. `None` runs
     /// without one.
     pub board: Option<Arc<Board>>,
+    /// Told about the run as it goes (`rdy run --verbose`, M1-143). `None` is the default.
+    pub on_progress: Option<ProgressHook>,
     /// `--kubeconfig`, for the Kubernetes family's probe.
     pub kubeconfig: Option<PathBuf>,
     /// `--kube-context`, for the Kubernetes family's probe.
@@ -98,23 +100,85 @@ impl std::fmt::Debug for Announce {
     }
 }
 
-/// Sends the scheduler's positions to the board's slots. The scheduler counts only the checks it runs;
-/// the board has a slot for every spec entry.
+/// What a [`ProgressHook`] is told. Match with a `_ => {}` arm: events are added over time.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Progress<'a> {
+    /// A scheduled check ended.
+    Finished(Finished<'a>),
+}
+
+/// A check that ended. It holds the id, the status and the duration only (02, "Redaction").
+///
+/// The key is redacted with the run's redactor before the hook sees it, because the key is the spec's own
+/// text and a spec can carry anything.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Finished<'a> {
+    /// The result key, `id` or `id/name`, redacted.
+    pub key: &'a str,
+    /// How the check ended, after severity.
+    pub status: &'a Status,
+    /// How long the check ran, in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// A callback for the progress of a run. It runs on the scheduler's tasks after the check's permit is
+/// given back, and it must not block for long or panic. A check the plan skipped never reaches it,
+/// because it never ran.
+#[derive(Clone)]
+pub struct ProgressHook(Arc<dyn Fn(&Progress<'_>) + Send + Sync>);
+
+impl ProgressHook {
+    /// Wraps `hook`.
+    pub fn new(hook: impl Fn(&Progress<'_>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(hook))
+    }
+}
+
+impl std::fmt::Debug for ProgressHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ProgressHook")
+    }
+}
+
+/// How one end becomes a result. It gets the position of the check in the plan.
+type MapSlot = Arc<dyn Fn(usize, &Ran) -> CheckResult + Send + Sync>;
+
+/// Sends the scheduler's positions to the board's slots and to the progress hook. The scheduler counts
+/// only the checks it runs; the board has a slot for every spec entry.
 struct SlotObserver {
-    board: Arc<Board>,
+    board: Option<Arc<Board>>,
+    hook: Option<ProgressHook>,
+    redactor: Redactor,
+    map: MapSlot,
     slot_of: Vec<usize>,
 }
 
 impl Observer for SlotObserver {
     fn started(&self, index: usize, at: Duration, timeout: Duration) {
-        if let Some(slot) = self.slot_of.get(index) {
-            self.board.started(*slot, at, timeout);
+        if let (Some(board), Some(slot)) = (&self.board, self.slot_of.get(index)) {
+            board.started(*slot, at, timeout);
         }
     }
 
     fn finished(&self, index: usize, ran: &Ran) {
-        if let Some(slot) = self.slot_of.get(index) {
-            self.board.finished(*slot, ran);
+        let Some(slot) = self.slot_of.get(index) else {
+            return;
+        };
+        if let Some(board) = &self.board {
+            board.finished(*slot, ran);
+        }
+        if let Some(hook) = &self.hook {
+            // The result is made again here on purpose: the board's map runs once for the watchdog and this
+            // one once for the hook, so neither depends on the other being set.
+            let result = (self.map)(*slot, ran);
+            let key = self.redactor.redact_str(&result.key);
+            (hook.0)(&Progress::Finished(Finished {
+                key: key.as_str(),
+                status: &result.status,
+                duration_ms: result.duration_ms,
+            }));
         }
     }
 }
@@ -138,6 +202,7 @@ impl RunOptions {
             spec_arg: "<spec>".to_owned(),
             origin: None,
             board: None,
+            on_progress: None,
             kubeconfig: None,
             kube_context: None,
             announce: None,
@@ -344,7 +409,7 @@ impl Engine {
 
         // The board for the watchdog, when the caller made one: give it the way to map an end, and the
         // scheduler's positions to its slots.
-        let observer = options.board.as_ref().map(|board| {
+        let observer = (options.board.is_some() || options.on_progress.is_some()).then(|| {
             let mut owned: Vec<Option<Owned>> = Vec::with_capacity(slots.len());
             let mut slot_of: Vec<usize> = Vec::new();
             let mut kept = items.iter();
@@ -364,7 +429,7 @@ impl Engine {
             }
             let deadline = options.deadline;
             let spec_arg = options.spec_arg.clone();
-            board.set_map(Box::new(move |slot, ran| {
+            let map: MapSlot = Arc::new(move |slot, ran| {
                 let Some(Some(owned)) = owned.get(slot) else {
                     // The scheduler only reports the slots it was given, so this cannot happen. If it
                     // did, the entry would count as not run, never as passed.
@@ -380,9 +445,16 @@ impl Engine {
                 );
                 fill_spec_arg(&mut result, &spec_arg);
                 result
-            }));
+            });
+            if let Some(board) = &options.board {
+                let map = Arc::clone(&map);
+                board.set_map(Box::new(move |slot, ran| map(slot, ran)));
+            }
             SlotObserver {
-                board: Arc::clone(board),
+                board: options.board.clone(),
+                hook: options.on_progress.clone(),
+                redactor: self.hub.redactor().clone(),
+                map,
                 slot_of,
             }
         });

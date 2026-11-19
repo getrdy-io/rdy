@@ -248,6 +248,13 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
         Access::GetIn { namespace, name } => {
             format!("{prefix}/namespaces/{namespace}/{resource}/{name}")
         }
+        Access::GetInNamespace(only) => {
+            format!(
+                "{prefix}/namespaces/{}/{resource}/{}",
+                name(only),
+                name(&Only::Any)
+            )
+        }
     }
 }
 
@@ -256,8 +263,10 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            if matches!(access, Access::Get(_) | Access::GetIn { .. })
-                || entry.field_selector == FieldSelector::NotRequired
+            if matches!(
+                access,
+                Access::Get(_) | Access::GetIn { .. } | Access::GetInNamespace(_)
+            ) || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
                 assert_eq!(judge_get(&format!("{path}?limit=500")), Ok(()), "{path}");
@@ -287,6 +296,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             Access::List,
             Access::ListInNamespace(Only::Any),
             Access::Get(Only::Any),
+            Access::GetInNamespace(Only::Any),
             Access::GetIn {
                 namespace: "x",
                 name: "x",
@@ -297,12 +307,83 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 .access
                 .iter()
                 .any(|a| std::mem::discriminant(a) == std::mem::discriminant(&access));
-            if !listed {
+            // A get of one object in one namespace is inside a get in any namespace, when the entry has that.
+            let inside_a_wider_get = matches!(access, Access::GetIn { .. })
+                && entry
+                    .access
+                    .iter()
+                    .any(|a| matches!(a, Access::GetInNamespace(Only::Any)));
+            if !listed && !inside_a_wider_get {
                 let path = path_for(entry, &access);
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
         }
     }
+}
+
+#[test]
+fn every_get_in_entry_admits_its_own_pair_and_nothing_near_it() {
+    // PR #78 security review: for each named read, the pair passes, and a neighbour does not.
+    let mut pairs = Vec::new();
+    let mut lists = Vec::new();
+    for entry in ALLOWED {
+        let prefix = if entry.group.is_empty() {
+            format!("/api/{}", entry.version)
+        } else {
+            format!("/apis/{}/{}", entry.group, entry.version)
+        };
+        for access in entry.access {
+            if let Access::GetIn { namespace, name } = access {
+                pairs.push((prefix.clone(), entry.resource, *namespace, *name));
+                // A list of the namespace is a different, allowed read for some resources.
+                if entry.access.iter().any(|a| {
+                    matches!(a, Access::ListInNamespace(Only::Any))
+                        || matches!(a, Access::ListInNamespace(Only::Name(n)) if n == namespace)
+                }) {
+                    lists.push((prefix.clone(), entry.resource, *namespace));
+                }
+            }
+        }
+    }
+    assert!(pairs.len() > 10, "the table has named reads");
+    for (prefix, resource, namespace, name) in &pairs {
+        let ok = format!("{prefix}/namespaces/{namespace}/{resource}/{name}");
+        assert_eq!(judge_get(&ok), Ok(()), "{ok}");
+        for bad in [
+            // Another name, another namespace, the name where the namespace goes, the list of the namespace.
+            format!("{prefix}/namespaces/{namespace}/{resource}/x"),
+            format!("{prefix}/namespaces/x/{resource}/{name}"),
+            format!("{prefix}/namespaces/{name}/{resource}/{namespace}"),
+        ] {
+            assert_eq!(judge_get(&bad), Err(RULE_NOT_ALLOWED), "{bad}");
+        }
+        // Every other pair of the same resource, with this namespace: the cross pairs.
+        for (other_prefix, other_resource, _, other_name) in &pairs {
+            if other_resource == resource && other_prefix == prefix && other_name != name {
+                let cross = format!("{prefix}/namespaces/{namespace}/{resource}/{other_name}");
+                let listed = pairs.iter().any(|(p, r, ns, n)| {
+                    p == prefix && r == resource && ns == namespace && n == other_name
+                });
+                if !listed {
+                    assert_eq!(judge_get(&cross), Err(RULE_NOT_ALLOWED), "{cross}");
+                }
+            }
+        }
+        let list = format!("{prefix}/namespaces/{namespace}/{resource}");
+        if !lists
+            .iter()
+            .any(|(p, r, ns)| p == prefix && r == resource && ns == namespace)
+        {
+            assert_eq!(judge_get(&list), Err(RULE_NOT_ALLOWED), "{list}");
+        }
+        let status = format!("{ok}/status");
+        assert_eq!(judge_get(&status), Err(RULE_SUBRESOURCE), "{status}");
+    }
+    // The pair of one namespace with the name of another, the example of the review.
+    assert_eq!(
+        judge_get("/apis/apps/v1/namespaces/calico-system/daemonsets/cilium"),
+        Err(RULE_NOT_ALLOWED)
+    );
 }
 
 #[test]
@@ -325,9 +406,26 @@ fn a_get_in_one_namespace_names_both_the_namespace_and_the_object() {
         "/api/v1/namespaces/kube-system/configmaps",
         "/api/v1/configmaps",
         "/api/v1/services",
-        "/api/v1/namespaces/kube-system/services",
         "/api/v1/namespaces/kube-system/configmaps/coredns/status",
         "/api/v1/namespaces/kube-system/services/kube-dns/proxy",
+    ] {
+        assert!(judge_get(path).is_err(), "{path}");
+    }
+}
+
+#[test]
+fn the_service_list_of_one_namespace_is_read_with_and_without_a_selector_and_never_cluster_wide() {
+    // k8s.admission lists with a `metadata.name` selector. k8s.ingress lists the whole namespace (M1-163).
+    for path in [
+        "/api/v1/namespaces/default/services?limit=500",
+        "/api/v1/namespaces/default/services?fieldSelector=metadata.name%3Dhooks&limit=500",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for path in [
+        "/api/v1/services",
+        "/api/v1/services?limit=500",
+        "/api/v1/namespaces/default/services?watch=true",
     ] {
         assert!(judge_get(path).is_err(), "{path}");
     }
@@ -565,6 +663,43 @@ fn lists_without_a_required_selector_and_gets_are_not_affected() {
         "/api/v1/namespaces/app",
     ] {
         assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+}
+
+#[test]
+fn an_operator_deployment_is_read_by_name_in_any_namespace_and_nothing_else_of_it() {
+    // k8s.crds: one Deployment by name, in the namespace the spec names.
+    for path in [
+        "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager",
+        "/apis/apps/v1/namespaces/kube-system/deployments/x",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for (path, rule) in [
+        // A list outside kube-system, a cluster-wide list or get, a subresource, and another kind.
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments",
+            RULE_NOT_ALLOWED,
+        ),
+        ("/apis/apps/v1/deployments/cert-manager", RULE_NOT_ALLOWED),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager/scale",
+            RULE_SUBRESOURCE,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager/status",
+            RULE_SUBRESOURCE,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/statefulsets/x",
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/apps/v1/namespaces/cert-manager/replicasets/x",
+            RULE_NOT_ALLOWED,
+        ),
+    ] {
+        assert_eq!(judge_get(path), Err(rule), "{path}");
     }
 }
 
@@ -1226,7 +1361,7 @@ async fn unlisted_resources_subresources_and_hostile_requests_are_refused() {
             RULE_NOT_ALLOWED,
         ),
         (
-            "/apis/apps/v1/namespaces/kube-system/deployments/x",
+            "/apis/apps/v1/namespaces/kube-system/statefulsets/x",
             RULE_NOT_ALLOWED,
         ),
         (

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-classes-cut"
+summary = "The class list has a second page that is not read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

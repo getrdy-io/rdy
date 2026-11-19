@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-aks-app-routing"
+summary = "AKS application routing: the managed class uses the community controller, so it warns"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

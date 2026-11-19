@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-traefik-k3s"
+summary = "k3s with its bundled Traefik class, the default"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

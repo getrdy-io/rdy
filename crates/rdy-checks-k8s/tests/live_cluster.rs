@@ -5,7 +5,8 @@
 //!
 //! - the namespace `rdy-live`, labelled `restricted` for enforce, audit and warn (and shown to refuse a
 //!   privileged pod before the tests start);
-//! - `examples/rbac/rdy-readonly.yaml`, and a kubeconfig of its service account in
+//! - `examples/rbac/rdy-readonly.yaml` and the optional `examples/rbac/rdy-readonly-cni.yaml` (the reads of
+//!   `k8s.cni`, M1-165, rendered for the namespace `rdy-live`), and a kubeconfig of the service account in
 //!   `RDY_READONLY_KUBECONFIG`;
 //! - `RDY_LIVE_NAMESPACE` (`rdy-live`) and `RDY_LIVE_EXPECT_MINOR` (`1.35`), so a green run proves it
 //!   tested the cluster it says it did.
@@ -22,6 +23,9 @@
 //! - `the_server_names_the_caller_and_answers_access_reviews` sends the raw `SelfSubjectReview` and two
 //!   access reviews as the admin of the kind cluster.
 //! - `the_test_namespace_enforces_restricted` reads the namespace labels through the read-only client.
+//! - `k8s_cni_runs_on_the_cluster` runs the `k8s.cni` check (M1-165) as the `rdy-readonly` service account on the
+//!   kind cluster (which runs kindnet, a plugin the table does not know) and expects a pass with nothing
+//!   partial: every read of the check is in the role files, so none is refused.
 //! - `k8s_dns_passes_on_the_cluster` runs the `k8s.dns` check (M1-162) as the `rdy-readonly` service account, and
 //!   expects a pass with nothing partial: kind runs CoreDNS under the label `k8s-app=kube-dns`, with a Service
 //!   `kube-dns` and a ConfigMap `coredns`, which the optional `kube-system` Role lets the check read.
@@ -56,6 +60,10 @@
 //! - The optional `kube-system` Role: the deployments and daemon sets lists, the Service `kube-dns` get and the
 //!   ConfigMap `coredns` get run, and a 403 there means the optional
 //!   Role was not applied.
+//! - The optional `k8s.cni` file: the ServiceCIDR list, the DaemonSet gets by name (a 404 is the answer on
+//!   kind, which has none of those plugins, and a 403 means the Role was not applied), the `kubeadm-config`
+//!   get and the NetworkPolicy list of `rdy-live` run. The OpenShift `Network` get cannot be exercised on
+//!   kind, so the server's access review stands in.
 
 #![allow(clippy::expect_used)]
 // These are tests of the client module. They start mock servers, write kubeconfigs and run plugin
@@ -74,6 +82,7 @@ use k8s_openapi::api::admissionregistration::v1::{
     MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
     ValidatingWebhookConfiguration,
 };
+use k8s_openapi::api::apps::v1::DaemonSet;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
@@ -83,13 +92,14 @@ use k8s_openapi::api::core::v1::{
     Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::api::networking::v1::{IngressClass, NetworkPolicy, ServiceCIDR};
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
-use rdy_checks_k8s::{Cluster, DnsCheck, VersionCheck};
+use rdy_checks_k8s::{Cluster, CniCheck, DnsCheck, VersionCheck};
 use rdy_engine::check::{Check, Finding, Level, Need, Os};
 use rdy_engine::testing::{Replay, TestRun};
-use rdy_spec::check::{K8sDns, K8sVersion};
+use rdy_spec::check::{K8sCni, K8sDns, K8sVersion};
 use serde_json::json;
 
 async fn connect_with(run: &TestRun, options: KubeOptions) -> Connected {
@@ -372,6 +382,78 @@ async fn k8s_dns_passes_on_the_cluster() {
     assert!(finding.observed["corefile"].is_object(), "{finding:#?}");
 }
 
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn k8s_cni_runs_on_the_cluster() {
+    let namespace = std::env::var("RDY_LIVE_NAMESPACE")
+        .expect("RDY_LIVE_NAMESPACE is not set; scripts/kind-live-test.sh sets it");
+    let run = TestRun::new(Replay::new());
+    let connected = readonly_connection(&run).await;
+    assert_expected_minor(&connected);
+    let cluster: Arc<dyn Cluster> = Arc::new(connected);
+    let ctx = run.context_for(CniCheck::info(), "k8s.cni", Os::Linux, [Need::KubeContext]);
+    let params: K8sCni = serde_json::from_value(json!({})).expect("the parameters parse");
+    let name = serde_json::from_value(json!(namespace)).expect("a name");
+    let finding = CniCheck::new(params, Some(name), cluster)
+        .run(&ctx)
+        .await
+        .expect("the check ran");
+    eprintln!("k8s.cni: {}", finding.message);
+    assert_eq!(finding.level, Level::Pass, "{finding:#?}");
+    // Every read the check makes is in the role files, so nothing is refused and nothing is partial. kind
+    // runs kindnet, which the table does not know: the DaemonSets of the table all answer 404.
+    assert!(finding.partial.is_none(), "{finding:#?}");
+    assert!(
+        finding.observed["nodes_read"]
+            .as_u64()
+            .is_some_and(|n| n > 0),
+        "{finding:#?}"
+    );
+    assert!(
+        finding.observed["service_ranges"]["ranges"].is_array(),
+        "{finding:#?}"
+    );
+    assert_eq!(
+        finding.observed["policies"]["namespace"],
+        namespace.as_str()
+    );
+}
+
+/// A `GatewayClass`, named only so the live test can list it: the Gateway API has no type in k8s-openapi.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct GatewayClass {
+    metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+}
+
+impl kube::Resource for GatewayClass {
+    type DynamicType = ();
+    type Scope = kube::core::ClusterResourceScope;
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        "GatewayClass".into()
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        "gateway.networking.k8s.io".into()
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        "v1".into()
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        "gatewayclasses".into()
+    }
+
+    fn meta(&self) -> &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
+        &mut self.metadata
+    }
+}
+
 /// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,
 /// for the get of a storage class that does not exist. Anything else, including a guard refusal, a 403
 /// or a 500, fails the test.
@@ -461,6 +543,8 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
+    ("list", "networking.k8s.io", "ingressclasses", ""),
+    ("list", "gateway.networking.k8s.io", "gatewayclasses", ""),
     ("list", "", "services", ""),
     (
         "list",
@@ -525,6 +609,33 @@ const KUBE_SYSTEM_ROLE: &[(&str, &str, &str, &str)] = &[
     ("get", "", "services", "kube-dns"),
     ("get", "", "services", "rke2-coredns-rke2-coredns"),
     ("get", "", "configmaps", "coredns"),
+];
+
+/// What the optional `k8s.cni` file grants (`examples/rbac/rdy-readonly-cni.yaml`), cluster wide: the
+/// `ServiceCIDR` list and the OpenShift `Network` get. Every namespace's rules review shows them.
+const CNI_CLUSTER: &[(&str, &str, &str, &str)] = &[
+    ("list", "networking.k8s.io", "servicecidrs", ""),
+    ("get", "config.openshift.io", "networks", "cluster"),
+];
+
+/// The node agent DaemonSets of `data/cni.toml` in `kube-system`, and the `kubeadm-config` ConfigMap, which the
+/// optional `k8s.cni` file grants by name in that namespace.
+const CNI_KUBE_SYSTEM: &[(&str, &str, &str, &str)] = &[
+    ("get", "apps", "daemonsets", "calico-node"),
+    ("get", "apps", "daemonsets", "cilium"),
+    ("get", "apps", "daemonsets", "anetd"),
+    ("get", "apps", "daemonsets", "canal"),
+    ("get", "apps", "daemonsets", "rke2-canal"),
+    ("get", "apps", "daemonsets", "azure-cns"),
+    ("get", "apps", "daemonsets", "rke2-cilium"),
+    ("get", "apps", "daemonsets", "aws-node"),
+    ("get", "apps", "daemonsets", "azure-npm"),
+    ("get", "apps", "daemonsets", "kube-flannel-ds"),
+    ("get", "apps", "daemonsets", "weave-net"),
+    ("get", "apps", "daemonsets", "antrea-agent"),
+    ("get", "apps", "daemonsets", "kube-router"),
+    ("get", "apps", "daemonsets", "kube-ovn-cni"),
+    ("get", "", "configmaps", "kubeadm-config"),
 ];
 
 /// Reads the Kubernetes project gives every signed-in user on newer minors, outside the role file. Each
@@ -793,6 +904,16 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
+    // k8s.crds reads an operator Deployment by name. CoreDNS is a Deployment of every kind cluster, and the
+    // kind job grants it through the operator template (a Role of kube-system, by name).
+    assert_served(
+        "deployment by name (k8s.crds)",
+        false,
+        &client
+            .namespaced::<k8s_openapi::api::apps::v1::Deployment>("kube-system")
+            .get("coredns")
+            .await,
+    );
     assert_served(
         "daemonsets (needs the optional kube-system Role)",
         false,
@@ -817,11 +938,74 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .get("coredns")
             .await,
     );
+    assert_served(
+        "ingressclasses",
+        false,
+        &client.all::<IngressClass>().list(&all).await,
+    );
+    // The whole-namespace list of k8s.ingress, with no field selector (the admission list carries one).
+    assert_served(
+        "services (the whole namespace, no selector)",
+        false,
+        &client.namespaced::<Service>("default").list(&all).await,
+    );
+    // kind has no Gateway API CRDs, so the server answers 404 ("not installed"), which is the answer the
+    // check reads. A 403 would fail here: that is what proves the role grants the list.
+    assert_served(
+        "gatewayclasses (404 when the Gateway API is not installed)",
+        true,
+        &client.all::<GatewayClass>().list(&all).await,
+    );
+    // The reads of k8s.cni, through the optional file. A 404 is the answer for a DaemonSet that kind does not
+    // run, and for the ServiceCIDR version a server does not serve. A 403 would mean the Role was not applied.
+    let live = std::env::var("RDY_LIVE_NAMESPACE")
+        .expect("RDY_LIVE_NAMESPACE is not set; scripts/kind-live-test.sh sets it");
+    let mut cni_reads = 0_usize;
+    cni_reads += 1;
+    assert_served(
+        "servicecidrs (needs the optional k8s.cni file)",
+        true,
+        &client.all::<ServiceCIDR>().list(&all).await,
+    );
+    for (ns, name) in [
+        ("kube-system", "aws-node"),
+        ("calico-system", "calico-node"),
+        ("kube-flannel", "kube-flannel-ds"),
+    ] {
+        cni_reads += 1;
+        assert_served(
+            "daemonset by name (needs the optional k8s.cni file)",
+            true,
+            &client.namespaced::<DaemonSet>(ns).get(name).await,
+        );
+    }
+    cni_reads += 1;
+    assert_served(
+        "configmap kubeadm-config (needs the optional k8s.cni file)",
+        true,
+        &client
+            .namespaced::<ConfigMap>("kube-system")
+            .get("kubeadm-config")
+            .await,
+    );
+    cni_reads += 1;
+    assert_served(
+        "networkpolicies of the live namespace (needs the optional k8s.cni file)",
+        false,
+        &client.namespaced::<NetworkPolicy>(&live).list(&all).await,
+    );
     // The rules review is a POST the guard allows. The server answers 201. It is asked for `default`
-    // (where only the cluster role applies) and for `kube-system` (where the optional Role adds the
-    // deployments list), and the answers are read in step 2.
+    // (where only the cluster role applies), for `kube-system` (where the optional Roles add the deployments
+    // list and the k8s.cni reads) and for the other namespaces the k8s.cni file has a Role in, and the answers
+    // are read in step 2.
     let mut rules_answers = Vec::new();
-    for namespace in ["default", "kube-system"] {
+    for namespace in [
+        "default",
+        "kube-system",
+        "calico-system",
+        "kube-flannel",
+        live.as_str(),
+    ] {
         let rules = SelfSubjectRulesReview {
             spec: SelfSubjectRulesReviewSpec {
                 namespace: Some(namespace.to_owned()),
@@ -839,6 +1023,8 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     // 2. The server itself says what the role can and cannot do. These are the allowed
     //    SelfSubjectAccessReview POSTs, so they pass the guard.
     let reviews = client.all::<SelfSubjectAccessReview>();
+    // The access reviews take `'static` names; the test leaks this one string.
+    let live_static: &'static str = Box::leak(live.clone().into_boxed_str());
     let must_allow = [
         ("list", "", "nodes", None, None),
         // k8s.dns: the Service and the ConfigMap, by name, in kube-system only (the optional Role).
@@ -873,6 +1059,29 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             "clusterversions",
             None,
             Some("version"),
+        ),
+        // k8s.cni: the OpenShift Network object, by name (kind does not serve it).
+        (
+            "get",
+            "config.openshift.io",
+            "networks",
+            None,
+            Some("cluster"),
+        ),
+        // k8s.cni: a DaemonSet by name in kube-system, and a policy list in the live namespace.
+        (
+            "get",
+            "apps",
+            "daemonsets",
+            Some("kube-system"),
+            Some("aws-node"),
+        ),
+        (
+            "list",
+            "networking.k8s.io",
+            "networkpolicies",
+            Some(live_static),
+            None,
         ),
         // The engines' groups are not on a kind cluster either. The Gatekeeper kind is one the rule's
         // wildcard has to admit.
@@ -909,13 +1118,6 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let must_not_allow = [
         ("get", "", "secrets", Some("kube-system"), None),
         // The ConfigMap and Service reads are by name: no other name, no list, no other namespace.
-        (
-            "get",
-            "",
-            "configmaps",
-            Some("kube-system"),
-            Some("kubeadm-config"),
-        ),
         ("list", "", "configmaps", Some("kube-system"), None),
         ("get", "", "configmaps", Some("default"), Some("coredns")),
         (
@@ -927,6 +1129,24 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         ),
         ("watch", "", "services", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
+        // The deployment grant is a get by name, not a list.
+        ("list", "apps", "deployments", Some("default"), None),
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("default"),
+            Some("coredns"),
+        ),
+        // resourceNames holds inside the namespace of the Role: another Deployment is refused.
+        (
+            "get",
+            "apps",
+            "deployments",
+            Some("kube-system"),
+            Some("other"),
+        ),
+        ("delete", "apps", "deployments", Some("default"), None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
         ("patch", "", "nodes", None, None),
@@ -938,6 +1158,36 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             "get",
             "config.openshift.io",
             "clusterversions",
+            None,
+            Some("other"),
+        ),
+        // The k8s.cni reads are by name, and a policy list is for one namespace. No other DaemonSet, no policy
+        // list elsewhere, no other Network object.
+        (
+            "get",
+            "apps",
+            "daemonsets",
+            Some("kube-system"),
+            Some("coredns"),
+        ),
+        (
+            "get",
+            "apps",
+            "daemonsets",
+            Some("default"),
+            Some("aws-node"),
+        ),
+        (
+            "list",
+            "networking.k8s.io",
+            "networkpolicies",
+            Some("default"),
+            None,
+        ),
+        (
+            "get",
+            "config.openshift.io",
+            "networks",
             None,
             Some("other"),
         ),
@@ -1010,10 +1260,22 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
                         )
                 })
             };
-            let optional = *namespace == "kube-system"
-                && KUBE_SYSTEM_ROLE
+            let optional = (*namespace == "kube-system"
+                && (KUBE_SYSTEM_ROLE
                     .iter()
-                    .any(|&(verb, group, resource, name)| listed(&[(verb, group, resource, name)]));
+                    .any(|&(verb, group, resource, name)| listed(&[(verb, group, resource, name)]))
+                    // The operator template, rendered for CoreDNS by the kind job.
+                    || listed(&[("get", "apps", "deployments", "coredns")])
+                    || listed(CNI_KUBE_SYSTEM)))
+                // The optional k8s.cni file: cluster wide reads, kube-system by name (above), and one
+                // Role in each of the other namespaces.
+                || listed(CNI_CLUSTER)
+                || (*namespace == "calico-system"
+                    && listed(&[("get", "apps", "daemonsets", "calico-node")]))
+                || (*namespace == "kube-flannel"
+                    && listed(&[("get", "apps", "daemonsets", "kube-flannel-ds")]))
+                || (*namespace == live
+                    && listed(&[("list", "networking.k8s.io", "networkpolicies", "")]));
             if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
                 unexpected.push(format!("{namespace}: {grant:?}"));
             }
@@ -1055,10 +1317,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 21 `assert_served` reads of step 1 (add one here when a
-    //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
-    //    their tables), and two refusals.
+    // 4. One log entry per call: /version, the 25 `assert_served` reads of step 1 (add one here when a
+    //    read is added) and the k8s.cni reads (counted in `cni_reads`), one rules review per namespace
+    //    asked, the access reviews of step 2 (counted from their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 21 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 25 + cni_reads + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }
