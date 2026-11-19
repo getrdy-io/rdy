@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/aws-node"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets is forbidden: User \"acme-installer\" cannot get resource \"daemonsets\" in API group \"apps\" in the namespace \"kube-system\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

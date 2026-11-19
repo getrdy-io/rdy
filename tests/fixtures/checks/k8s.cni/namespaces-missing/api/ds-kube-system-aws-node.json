@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/aws-node"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"aws-node\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "aws-node",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

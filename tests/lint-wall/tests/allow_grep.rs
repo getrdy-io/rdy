@@ -155,6 +155,11 @@ const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[
         "../data/provisioners.toml",
         "embeds the provisioner table that k8s.storageclass reads access modes from (M1-110)",
     ),
+    (
+        "crates/rdy-checks-k8s/src/cni.rs",
+        "../data/cni.toml",
+        "embeds the network plugin table that k8s.cni names plugins and enforcement from (M1-165)",
+    ),
 ];
 
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file

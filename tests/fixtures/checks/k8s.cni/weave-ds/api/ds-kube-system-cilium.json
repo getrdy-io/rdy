@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/cilium"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"cilium\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "cilium",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

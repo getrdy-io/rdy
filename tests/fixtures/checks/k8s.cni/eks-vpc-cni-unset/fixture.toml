@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-eks-vpc-cni-unset"
+summary = "EKS with a VPC CNI that sets no ENABLE_NETWORK_POLICY"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

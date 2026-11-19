@@ -105,6 +105,16 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
+`checks/k8s.cni/` holds 49 clusters (the exit test cases `k3s-flannel` and `kubeadm-flannel`, the cheap signals `calico-crd`, `cilium-crd`, `canal`,
+`rke2-canal`, `weave-condition`, `antrea-crd`, `calico-and-cilium`, `multus`, `route-created`, `node-network-down`, `nodes-cut`,
+`nodes-forbidden`; the DaemonSet cases `eks-vpc-cni-on`, `eks-vpc-cni-off`, `eks-vpc-cni-unset`, `eks-vpc-cni-forbidden`, `gke-anetd`,
+`aks-azure-npm`, `kube-router-ds`, `flannel-ds`, `weave-ds`, `calico-operator-ds`, `no-plugin`, `daemonsets-forbidden`; OpenShift
+`openshift-ovn` and `openshift-sdn`; the range cases `servicecidr-v1`, `servicecidr-beta`, `service-unreadable`, `service-none`,
+`service-server-error`, `service-not-a-range`, `dual-stack`; the policy cases `default-deny-egress`, `default-deny-all`,
+`egress-allow-all`, `ingress-deny-only`, `policies-forbidden`, `policies-cut`, `policy-hostile-name`, `no-namespace`; and
+`hostile-reason`, `hostile-version`; and `restricting-policy`, `flannel-default-deny`, `calico-over-vpc-cni`, `namespaces-missing`). The objects use each plugin project's documented DaemonSet names, namespaces and labels. Every
+annotation, env value and arg carries a marker that no result may show. `generated` by `scripts/gen-k8s-cni-fixtures.py` (`--check`
+fails on drift and on a file the script did not write).
 `checks/k8s.crds/` holds 29 clusters (the definition cases `crds-present`, `crd-group-missing`, `crd-version-old`, `crd-not-in-group`,
 `crd-any-version`, `crd-aggregated`, `crd-discovery-forbidden`, `crd-document-forbidden`, `crd-document-gone`, the operator cases `operator-ready`,
 `operator-not-ready`, `operator-partly-ready`, `operator-scaled-to-zero`, `operator-missing`, `operator-forbidden`, `operator-old`,

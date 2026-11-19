@@ -322,6 +322,71 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
 }
 
 #[test]
+fn every_get_in_entry_admits_its_own_pair_and_nothing_near_it() {
+    // PR #78 security review: for each named read, the pair passes, and a neighbour does not.
+    let mut pairs = Vec::new();
+    let mut lists = Vec::new();
+    for entry in ALLOWED {
+        let prefix = if entry.group.is_empty() {
+            format!("/api/{}", entry.version)
+        } else {
+            format!("/apis/{}/{}", entry.group, entry.version)
+        };
+        for access in entry.access {
+            if let Access::GetIn { namespace, name } = access {
+                pairs.push((prefix.clone(), entry.resource, *namespace, *name));
+                // A list of the namespace is a different, allowed read for some resources.
+                if entry.access.iter().any(|a| {
+                    matches!(a, Access::ListInNamespace(Only::Any))
+                        || matches!(a, Access::ListInNamespace(Only::Name(n)) if n == namespace)
+                }) {
+                    lists.push((prefix.clone(), entry.resource, *namespace));
+                }
+            }
+        }
+    }
+    assert!(pairs.len() > 10, "the table has named reads");
+    for (prefix, resource, namespace, name) in &pairs {
+        let ok = format!("{prefix}/namespaces/{namespace}/{resource}/{name}");
+        assert_eq!(judge_get(&ok), Ok(()), "{ok}");
+        for bad in [
+            // Another name, another namespace, the name where the namespace goes, the list of the namespace.
+            format!("{prefix}/namespaces/{namespace}/{resource}/x"),
+            format!("{prefix}/namespaces/x/{resource}/{name}"),
+            format!("{prefix}/namespaces/{name}/{resource}/{namespace}"),
+        ] {
+            assert_eq!(judge_get(&bad), Err(RULE_NOT_ALLOWED), "{bad}");
+        }
+        // Every other pair of the same resource, with this namespace: the cross pairs.
+        for (other_prefix, other_resource, _, other_name) in &pairs {
+            if other_resource == resource && other_prefix == prefix && other_name != name {
+                let cross = format!("{prefix}/namespaces/{namespace}/{resource}/{other_name}");
+                let listed = pairs.iter().any(|(p, r, ns, n)| {
+                    p == prefix && r == resource && ns == namespace && n == other_name
+                });
+                if !listed {
+                    assert_eq!(judge_get(&cross), Err(RULE_NOT_ALLOWED), "{cross}");
+                }
+            }
+        }
+        let list = format!("{prefix}/namespaces/{namespace}/{resource}");
+        if !lists
+            .iter()
+            .any(|(p, r, ns)| p == prefix && r == resource && ns == namespace)
+        {
+            assert_eq!(judge_get(&list), Err(RULE_NOT_ALLOWED), "{list}");
+        }
+        let status = format!("{ok}/status");
+        assert_eq!(judge_get(&status), Err(RULE_SUBRESOURCE), "{status}");
+    }
+    // The pair of one namespace with the name of another, the example of the review.
+    assert_eq!(
+        judge_get("/apis/apps/v1/namespaces/calico-system/daemonsets/cilium"),
+        Err(RULE_NOT_ALLOWED)
+    );
+}
+
+#[test]
 fn a_get_in_one_namespace_names_both_the_namespace_and_the_object() {
     // k8s.dns: the DNS service and the Corefile ConfigMap are read by name in one namespace each.
     for path in [
