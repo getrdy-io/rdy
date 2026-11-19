@@ -26,6 +26,9 @@
 /install.sh                             @getrdy-io
 /RELEASING.md                           @getrdy-io
 
+# The security-software catalog behind host.security_agents. Its process names decide what `forbid` blocks.
+/crates/rdy-checks-host/data/           @getrdy-io
+
 # Security policy, threat model and hardening docs.
 /SECURITY.md                            @getrdy-io
 /docs/security/                         @getrdy-io
