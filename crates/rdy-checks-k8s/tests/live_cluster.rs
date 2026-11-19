@@ -79,7 +79,6 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-use k8s_openapi::api::core::v1::{
     ConfigMap, Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota,
     Secret, Service,
 };

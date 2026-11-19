@@ -369,6 +369,7 @@ value = "metadata.name"
 reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"
 
 [[allow]]
+rule = "host"
 value = "nginx.org"
 reason = "The controller name of the F5 NGINX ingress controller (nginx.org/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
 

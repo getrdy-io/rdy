@@ -26,7 +26,7 @@ fn the_family_reads_its_check_list_from_the_registry_and_names_what_it_does_not_
     // M1-175: the family builds every check of the crate, so the planner skips none as not in the build.
     assert!(family.not_built().is_empty());
     assert_eq!(built.len(), listed.len());
-    assert_eq!(listed.len(), 8);
+    assert_eq!(listed.len(), 9);
 }
 
 fn api_error(code: u16) -> kube::Error {

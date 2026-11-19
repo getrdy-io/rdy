@@ -325,9 +325,26 @@ fn a_get_in_one_namespace_names_both_the_namespace_and_the_object() {
         "/api/v1/namespaces/kube-system/configmaps",
         "/api/v1/configmaps",
         "/api/v1/services",
-        "/api/v1/namespaces/kube-system/services",
         "/api/v1/namespaces/kube-system/configmaps/coredns/status",
         "/api/v1/namespaces/kube-system/services/kube-dns/proxy",
+    ] {
+        assert!(judge_get(path).is_err(), "{path}");
+    }
+}
+
+#[test]
+fn the_service_list_of_one_namespace_is_read_with_and_without_a_selector_and_never_cluster_wide() {
+    // k8s.admission lists with a `metadata.name` selector. k8s.ingress lists the whole namespace (M1-163).
+    for path in [
+        "/api/v1/namespaces/default/services?limit=500",
+        "/api/v1/namespaces/default/services?fieldSelector=metadata.name%3Dhooks&limit=500",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for path in [
+        "/api/v1/services",
+        "/api/v1/services?limit=500",
+        "/api/v1/namespaces/default/services?watch=true",
     ] {
         assert!(judge_get(path).is_err(), "{path}");
     }

@@ -1004,3 +1004,26 @@ async fn the_findings_carry_what_was_observed_and_expected() {
     assert_eq!(finding.observed["platform"]["gke"], false);
     rig.audit();
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[tokio::test]
+async fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    crate::client::mock::hits::clear();
+    // The class list, the Gateway API class list and the Service list of the namespace.
+    for (case, spec) in [
+        ("lb-assigned", json!({"loadbalancer": true})),
+        ("gateway-eks", json!({"gateway_api": "required"})),
+    ] {
+        let rig = rig(case);
+        let _ = rig.finding(spec).await;
+    }
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.ingress"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.ingress is read by no fixture of the tests listed here"
+    );
+}
