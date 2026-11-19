@@ -5,6 +5,8 @@
 //! completeness rule starts to cover its checks in the same change.
 
 use rdy_checks_host::HostFamily;
+use rdy_checks_k8s::K8sFamily;
+use rdy_checks_k8s::client::Env;
 use rdy_checks_net::NetFamily;
 use rdy_engine::check::CheckInfo;
 use rdy_engine::family::{BuildError, Built, Family, Registry, RegistryError};
@@ -24,7 +26,7 @@ pub struct Row {
 
 /// The families of this build, in registration order.
 ///
-/// `k8s` is not here: its checks exist but `K8sFamily` does not (M1-107), so nothing registers them yet.
+/// `k8s` is not here: it is added to the registry only (see `registry`).
 pub fn rows() -> Vec<Row> {
     vec![
         Row {
@@ -39,12 +41,18 @@ pub fn rows() -> Vec<Row> {
     ]
 }
 
-/// A registry with every family of [`rows`].
+/// A registry with every family of [`rows`], and the `k8s` family over an empty environment (M1-118).
+///
+/// The empty `Env` has no `KUBECONFIG`, no home directory and no pod, so the lazy probe finds no kubeconfig
+/// and every k8s check is skipped `missing_need`, whatever the machine running the test has. The family is
+/// not a row: the harness has no kube mock to serve a cluster (the mock is test code inside
+/// `rdy-checks-k8s`), so the completeness rule does not ask the k8s checks for env cases.
 pub fn registry() -> Result<Registry, RegistryError> {
     let mut registry = Registry::new();
     for row in rows() {
         registry.register(Shared(row.family))?;
     }
+    registry.register(K8sFamily::with_env(Env::empty()))?;
     Ok(registry)
 }
 

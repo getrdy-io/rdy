@@ -1,0 +1,2413 @@
+{
+  "actions": [
+    {
+      "at_ms": 0,
+      "bytes": 172,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/status",
+      "seq": 1,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 48,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/auxv",
+      "seq": 2,
+      "truncated": false
+    },
+    {
+      "api": "hostname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 3
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 4
+    },
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 5,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 6,
+      "truncated": false
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 7
+    },
+    {
+      "at_ms": 0,
+      "bytes": 22,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/kernel/osrelease",
+      "seq": 8,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 2,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/crypto/fips_enabled",
+      "seq": 9,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/systemd/system",
+      "seq": 10
+    },
+    {
+      "at_ms": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/.dockerenv",
+      "seq": 11
+    },
+    {
+      "at_ms": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv",
+      "seq": 12
+    },
+    {
+      "at_ms": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "env",
+      "name": "KUBERNETES_SERVICE_HOST",
+      "outcome": "ok",
+      "seq": 13
+    },
+    {
+      "at_ms": 0,
+      "bytes": 439,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/meminfo",
+      "seq": 14,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 45,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/cgroup",
+      "seq": 15,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 16,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max",
+      "seq": 17
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max",
+      "seq": 18
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/memory.max",
+      "seq": 19
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/memory.max",
+      "seq": 20
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max",
+      "seq": 21
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max",
+      "seq": 22
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/memory.swap.max",
+      "seq": 23
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/memory.swap.max",
+      "seq": 24
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8160,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/cpuinfo",
+      "seq": 25,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 4,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/devices/system/cpu/online",
+      "seq": 26,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 172,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/status",
+      "seq": 27,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 45,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/cgroup",
+      "seq": 28,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 29,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
+      "seq": 30,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
+      "seq": 31,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "seq": 32,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/cpu.max",
+      "seq": 33
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 34
+    },
+    {
+      "api": "statvfs",
+      "at_ms": 0,
+      "check": "host.disk",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "path": "/var/lib/acme",
+      "seq": 35
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.disk",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 36,
+      "truncated": false
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 37
+    },
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 38,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 208,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/modules",
+      "seq": 39,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 454,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.dep",
+      "seq": 40,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 59,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.builtin",
+      "seq": 41,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 26,
+      "check": "host.kernel",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/sys/kernel/btf/vmlinux",
+      "seq": 42
+    },
+    {
+      "at_ms": 0,
+      "bytes": 45,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/cgroup",
+      "seq": 43,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 44,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 44,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/cgroup.controllers",
+      "seq": 45,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 19,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/cgroup.subtree_control",
+      "seq": 46,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 19,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers",
+      "seq": 47,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 1,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control",
+      "seq": 48,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 226,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/cgroups",
+      "seq": 49,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 143,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/cmdline",
+      "seq": 50,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 51,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/proc/device-tree/model",
+      "seq": 52
+    },
+    {
+      "at_ms": 0,
+      "bytes": 21,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/kernel/shmmax",
+      "seq": 53,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 2,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/net/ipv4/ip_forward",
+      "seq": 54,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 20,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/net/ipv4/tcp_rmem",
+      "seq": 55,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/vm/max_map_count",
+      "seq": 56,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "entries": 1,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/etc/sysctl.d",
+      "seq": 57
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/run/sysctl.d",
+      "seq": 58
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/usr/local/lib/sysctl.d",
+      "seq": 59
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "entries": 1,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/usr/lib/sysctl.d",
+      "seq": 60
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/lib/sysctl.d",
+      "seq": 61
+    },
+    {
+      "at_ms": 0,
+      "bytes": 78,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/usr/lib/sysctl.d/50-acme-net.conf",
+      "seq": 62,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 92,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/sysctl.d/90-acme.conf",
+      "seq": 63,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/sysctl.conf",
+      "seq": 64
+    },
+    {
+      "at_ms": 0,
+      "bytes": 31,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/systemd/system.conf",
+      "seq": 65,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "entries": 1,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/etc/systemd/system.conf.d",
+      "seq": 66
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/run/systemd/system.conf.d",
+      "seq": 67
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/usr/local/lib/systemd/system.conf.d",
+      "seq": 68
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/usr/lib/systemd/system.conf.d",
+      "seq": 69
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/lib/systemd/system.conf.d",
+      "seq": 70
+    },
+    {
+      "at_ms": 0,
+      "bytes": 37,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/systemd/system.conf.d/10-acme.conf",
+      "seq": 71,
+      "truncated": false
+    },
+    {
+      "api": "rlimit",
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "resource": "nofile",
+      "seq": 72
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/fs/nr_open",
+      "seq": 73,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 20,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/fs/file-max",
+      "seq": 74,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 2,
+      "check": "host.lsm",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/selinux/enforce",
+      "seq": 75,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 96,
+      "check": "host.lsm",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/selinux/config",
+      "seq": 76,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 1070,
+      "check": "host.lsm",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/var/log/audit/audit.log",
+      "seq": 77,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.lsm",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/module/apparmor/parameters/enabled",
+      "seq": 78
+    },
+    {
+      "at_ms": 0,
+      "check": "host.time_sync",
+      "duration_ms": 0,
+      "error": "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run",
+      "host": "192.0.2.10",
+      "kind": "connect",
+      "outcome": "failed",
+      "port": 123,
+      "proto": "udp",
+      "seq": 79
+    },
+    {
+      "argv": [
+        "show",
+        "-p",
+        "NTPSynchronized",
+        "-p",
+        "NTP",
+        "-p",
+        "Timezone"
+      ],
+      "at_ms": 0,
+      "check": "host.time_sync",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "show",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "timedatectl",
+      "seq": 80,
+      "stdout_bytes": 45,
+      "truncated": false
+    },
+    {
+      "argv": [
+        "-n",
+        "-c",
+        "tracking"
+      ],
+      "at_ms": 0,
+      "check": "host.time_sync",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "tracking",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "chronyc",
+      "seq": 81,
+      "stdout_bytes": 127,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 613,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/tcp",
+      "seq": 82,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 322,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/tcp6",
+      "seq": 83,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 245,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/udp",
+      "seq": 84,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 163,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/udp6",
+      "seq": 85,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 12,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/net/ipv4/ip_local_port_range",
+      "seq": 86,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 1,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/sys/net/ipv4/ip_local_reserved_ports",
+      "seq": 87,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "entries": 15,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/proc",
+      "seq": 88
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "entries": 4,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/proc/1/fd",
+      "seq": 89
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "denied",
+      "path": "/proc/1/fd/0",
+      "rule": "only socket links are read from a process's fd directory",
+      "seq": 90
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "denied",
+      "path": "/proc/1/fd/1",
+      "rule": "only socket links are read from a process's fd directory",
+      "seq": 91
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "denied",
+      "path": "/proc/1/fd/2",
+      "rule": "only socket links are read from a process's fd directory",
+      "seq": 92
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/1/fd/3",
+      "seq": 93
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/proc/612/fd",
+      "seq": 94
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "entries": 4,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/proc/640/fd",
+      "seq": 95
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "denied",
+      "path": "/proc/640/fd/0",
+      "rule": "only socket links are read from a process's fd directory",
+      "seq": 96
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "denied",
+      "path": "/proc/640/fd/1",
+      "rule": "only socket links are read from a process's fd directory",
+      "seq": 97
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/640/fd/3",
+      "seq": 98
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/640/fd/4",
+      "seq": 99
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/proc/733/fd",
+      "seq": 100
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/proc/901/fd",
+      "seq": 101
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/proc/902/fd",
+      "seq": 102
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "entries": 1,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/proc/950/fd",
+      "seq": 103
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/950/fd/3",
+      "seq": 104
+    },
+    {
+      "at_ms": 0,
+      "bytes": 15,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/950/comm",
+      "seq": 105,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/proc/950/cgroup",
+      "seq": 106
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "read_link",
+      "outcome": "ok",
+      "path": "/proc/self/ns/net",
+      "seq": 107
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/.dockerenv",
+      "seq": 108
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv",
+      "seq": 109
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "env",
+      "name": "KUBERNETES_SERVICE_HOST",
+      "outcome": "ok",
+      "seq": 110
+    },
+    {
+      "at_ms": 0,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "entries": 15,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/proc",
+      "seq": 111
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/1/comm",
+      "seq": 112,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 5,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/612/comm",
+      "seq": 113,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 5,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/640/comm",
+      "seq": 114,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 5,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/733/comm",
+      "seq": 115,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/901/comm",
+      "seq": 116,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/902/comm",
+      "seq": 117,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 15,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/950/comm",
+      "seq": 118,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 120,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/var/lib/kubelet/config.yaml",
+      "seq": 119,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "kind": "env",
+      "name": "XDG_RUNTIME_DIR",
+      "outcome": "ok",
+      "seq": 120
+    },
+    {
+      "at_ms": 0,
+      "bytes": 0,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/containerd/containerd.sock",
+      "seq": 121
+    },
+    {
+      "argv": [
+        "--version"
+      ],
+      "at_ms": 0,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "version",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "containerd",
+      "seq": 122,
+      "stdout_bytes": 93,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 536,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/containerd/config.toml",
+      "seq": 123,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.container_runtime",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/etc/systemd/system/containerd.service.d",
+      "seq": 124
+    },
+    {
+      "at_ms": 0,
+      "bytes": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/firewalld",
+      "seq": 125
+    },
+    {
+      "argv": [
+        "--state"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "state",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 126,
+      "stdout_bytes": 8,
+      "truncated": false
+    },
+    {
+      "argv": [
+        "--get-active-zones"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "active-zones",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 127,
+      "stdout_bytes": 55,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 227,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/route",
+      "seq": 128,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 144,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/ipv6_route",
+      "seq": 129,
+      "truncated": false
+    },
+    {
+      "argv": [
+        "--list-all",
+        "--zone=public"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "list-all",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 130,
+      "stdout_bytes": 248,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/firewalld/services/ssh.xml",
+      "seq": 131
+    },
+    {
+      "at_ms": 0,
+      "bytes": 217,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/usr/lib/firewalld/services/ssh.xml",
+      "seq": 132,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/firewalld/direct.xml",
+      "seq": 133
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/ufw/ufw.conf",
+      "seq": 134
+    },
+    {
+      "answers": 1,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "host": "web.acme.test",
+      "kind": "lookup",
+      "outcome": "ok",
+      "seq": 135
+    },
+    {
+      "addr": null,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "error": "connection refused",
+      "host": "web.acme.test",
+      "kind": "connect",
+      "outcome": "failed",
+      "port": 8080,
+      "seq": 136,
+      "via_proxy": null
+    },
+    {
+      "at_ms": 0,
+      "bytes": 227,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/route",
+      "seq": 137,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 144,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/ipv6_route",
+      "seq": 138,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "entries": 2,
+      "kind": "read_dir",
+      "outcome": "ok",
+      "path": "/sys/class/net",
+      "seq": 139
+    },
+    {
+      "at_ms": 0,
+      "bytes": 5,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/class/net/eth0/mtu",
+      "seq": 140,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 3,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/class/net/eth0/operstate",
+      "seq": 141,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 2,
+      "check": "net.mtu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/class/net/eth0/type",
+      "seq": 142,
+      "truncated": false
+    }
+  ],
+  "actions_dropped": {},
+  "actions_truncated": false,
+  "api_version": "rdy/v1",
+  "capabilities": [
+    {
+      "available": true,
+      "detail": "uid 0",
+      "hint": null,
+      "name": null,
+      "need": "root"
+    },
+    {
+      "available": true,
+      "detail": null,
+      "hint": null,
+      "name": null,
+      "need": "network"
+    }
+  ],
+  "checks": [
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "fips": "any",
+        "supported": [
+          {
+            "id": "rhel",
+            "versions": "[truncated]"
+          },
+          {
+            "id": "ubuntu",
+            "versions": "[truncated]"
+          }
+        ]
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.os",
+      "key": "host.os",
+      "message": "Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "arch": "x86_64",
+        "container": [],
+        "fips": false,
+        "init": "systemd",
+        "kernel": "5.14.0-362.el9.x86_64",
+        "os": {
+          "id": "rhel",
+          "id_like": [
+            "fedora"
+          ],
+          "name": "Red Hat Enterprise Linux",
+          "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
+          "source": "/etc/os-release",
+          "version_id": "9.3"
+        },
+        "wsl": false
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": true
+    },
+    {
+      "bucket": "blocker",
+      "builtin_fix": "7.8 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. Only 6.6 GiB of RAM is available. Stop other workloads on this machine or pick a larger node class, then run rdy again.",
+      "duration_ms": 0,
+      "expected": {
+        "band_bytes": 1717986918,
+        "min_available_bytes": 17179869184,
+        "min_bytes": 34359738368,
+        "swap": "any"
+      },
+      "family": "host",
+      "fix": "Add RAM or choose a larger VM size.",
+      "fix_source": "spec",
+      "id": "host.memory",
+      "key": "host.memory",
+      "message": "7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB wanted, the box is busy",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "available_bytes": 7065600000,
+        "available_effective_bytes": 7065600000,
+        "available_estimated": false,
+        "cgroup_hierarchy": null,
+        "cgroup_limit_at": null,
+        "cgroup_limit_bytes": null,
+        "cgroup_swap_limit_bytes": null,
+        "effective_bytes": 8401408000,
+        "swap_total_bytes": 0,
+        "swap_used_bytes": 0,
+        "total_bytes": 8401408000
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "block",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "min": 8
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.cpu",
+      "key": "host.cpu",
+      "message": "8 vCPUs found, 8 needed",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "allowed_cores": 8,
+        "arch": "x86_64",
+        "effective_cores": 8.0,
+        "flags": {},
+        "hypervisor": true,
+        "logical_cores": 8,
+        "physical_cores": 4,
+        "quota_cores": null,
+        "virtualization": "vm",
+        "x86_64_level": 4
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "blocker",
+      "duration_ms": 0,
+      "expected": {
+        "forbid_fstypes": [],
+        "forbid_options": [],
+        "min": 21474836480,
+        "min_inodes": 100000,
+        "recommended": 25769803776
+      },
+      "family": "host",
+      "fix": "Run `df -h /var/lib/acme` to see the volume. If `/dev/mapper/rhel-var` is an LVM volume, grow it with `lvextend -r -L +24G /dev/mapper/rhel-var`. Otherwise grow the volume, or point the install at a larger disk.",
+      "fix_source": "rdy",
+      "id": "host.disk",
+      "key": "host.disk",
+      "message": "`/var/lib/acme` has 0 bytes free on `/var` (xfs), 20 GiB needed.",
+      "name": null,
+      "needs": [],
+      "notes": [
+        "rdy runs as root. Free space is what other users can use. Blocks reserved for root are not counted."
+      ],
+      "observed": {
+        "device": "253:1",
+        "free_bytes": 0,
+        "free_inodes": 900000,
+        "fstype": "xfs",
+        "measured_path": "/var/lib/acme",
+        "mount": "/var",
+        "network": false,
+        "nodev": false,
+        "noexec": false,
+        "nosuid": false,
+        "path": "/var/lib/acme",
+        "read_only": false,
+        "total_bytes": 214748364800,
+        "total_inodes": 1000000
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "block",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "applied": {
+          "source": "min",
+          "version": "5.4"
+        },
+        "btf": true,
+        "min": "5.4",
+        "modules": [
+          "overlay",
+          "br_netfilter",
+          "nf_conntrack"
+        ]
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.kernel",
+      "key": "host.kernel",
+      "message": "Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3 required modules are loaded or built in. BTF type information is present.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "base": "5.14.0",
+        "btf": true,
+        "build": "362",
+        "distro": "rhel",
+        "modules": {
+          "br_netfilter": "built_in",
+          "nf_conntrack": "loaded",
+          "overlay": "loaded"
+        },
+        "release": "5.14.0-362.el9.x86_64"
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "controllers": [
+          "cpu",
+          "memory",
+          "io",
+          "pids"
+        ],
+        "version": "v2"
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.cgroups",
+      "key": "host.cgroups",
+      "message": "cgroup v2 in use, controllers `cpu`, `memory`, `io` and `pids` available",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "cmdline": [],
+        "controllers": {
+          "cpu": "ok",
+          "io": "ok",
+          "memory": "ok",
+          "pids": "ok"
+        },
+        "controllers_available": [
+          "cpu",
+          "cpuset",
+          "hugetlb",
+          "io",
+          "memory",
+          "misc",
+          "pids",
+          "rdma"
+        ],
+        "controllers_enabled": [
+          "cpu",
+          "io",
+          "memory",
+          "pids"
+        ],
+        "layout": "v2",
+        "proc_cgroups": {
+          "cpu": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "io": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "memory": {
+            "enabled": true,
+            "hierarchy": 0
+          },
+          "pids": {
+            "enabled": true,
+            "hierarchy": 0
+          }
+        }
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "limits": {
+          "nofile": ">=65536"
+        },
+        "parameters": {
+          "kernel.shmmax": ">=4294967296",
+          "net.ipv4.ip_forward": "1",
+          "net.ipv4.tcp_rmem": "4096 131072 6291456",
+          "vm.max_map_count": ">=262144"
+        }
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.sysctl",
+      "key": "host.sysctl",
+      "message": "4 kernel parameters have the wanted value and are set at boot. Services get an open files limit of 1048576 (`DefaultLimitNOFILE=1048576` in `/etc/systemd/system.conf.d/10-acme.conf`).",
+      "name": null,
+      "needs": [],
+      "notes": [
+        "Read 2 sysctl configuration file(s), in boot order.",
+        "rdy's own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services."
+      ],
+      "observed": {
+        "limits": {
+          "nofile": {
+            "default_limit_nofile": "1048576",
+            "file": "/etc/systemd/system.conf.d/10-acme.conf",
+            "file_max": 9223372036854775807,
+            "hard": 1048576,
+            "nr_open": 1048576,
+            "shell_limit": "[truncated]",
+            "soft": 1048576
+          }
+        },
+        "parameters": {
+          "kernel.shmmax": {
+            "live": "18446744073709551615",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "net.ipv4.ip_forward": {
+            "live": "1",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "net.ipv4.tcp_rmem": {
+            "live": "4096 131072 6291456",
+            "persisted": "[truncated]",
+            "state": "ok"
+          },
+          "vm.max_map_count": {
+            "live": "1048576",
+            "persisted": "[truncated]",
+            "state": "ok"
+          }
+        }
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": true
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "selinux": {
+          "allow": [
+            "enforcing"
+          ],
+          "denials_max": 0,
+          "denials_window": "24h",
+          "watch": [
+            "acme_t"
+          ]
+        }
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.lsm",
+      "key": "host.lsm",
+      "message": "SELinux is enforcing. AppArmor is off.",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "apparmor": {
+          "state": "disabled"
+        },
+        "selinux": {
+          "configured": "enforcing",
+          "denials": {
+            "count": 0,
+            "groups": "[truncated]",
+            "inspected": true,
+            "permissive": 0,
+            "watched": "[truncated]",
+            "window": "24h",
+            "window_truncated": false
+          },
+          "state": "enforcing"
+        }
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": true
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "max_skew_seconds": 300.0,
+        "recommended_skew_seconds": 5.0,
+        "require_sync": false
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.time_sync",
+      "key": "host.time_sync",
+      "message": "Clock is synchronized, under 1 ms away from chrony's reference `192.0.2.30`.",
+      "name": null,
+      "needs": [],
+      "notes": [
+        "`192.0.2.10`: connection refused."
+      ],
+      "observed": {
+        "chrony": {
+          "leap": "Normal",
+          "offset_seconds": 0.000012,
+          "reference": "192.0.2.30",
+          "stratum": 3,
+          "synchronized": true
+        },
+        "chronyc": "ok",
+        "ntp_enabled": true,
+        "offset_seconds": 0.000012,
+        "offset_source": "chronyc",
+        "reference": "192.0.2.30",
+        "servers": [
+          {
+            "detail": "connection refused",
+            "result": "failed",
+            "server": "192.0.2.10"
+          }
+        ],
+        "state": "synchronized",
+        "timedatectl": "ok",
+        "timezone": "Etc/UTC"
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "blocker",
+      "duration_ms": 0,
+      "expected": {
+        "allow_owner": [],
+        "free": [
+          {
+            "bind": "public",
+            "port": 80
+          },
+          {
+            "bind": "public",
+            "port": 443
+          },
+          {
+            "bind": "public",
+            "port": 6443
+          },
+          {
+            "bind": "public",
+            "port": 10250
+          }
+        ],
+        "udp_free": [
+          8472
+        ]
+      },
+      "family": "host",
+      "fix": "Port 6443/tcp is held by `kube-apiserver` (pid 950). Stop it, or change the product's port setting.",
+      "fix_source": "rdy",
+      "id": "host.ports",
+      "key": "host.ports",
+      "message": "Port 6443/tcp is held by `kube-apiserver` (pid 950).",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "container": null,
+        "ephemeral_range": [
+          32768,
+          60999
+        ],
+        "netns": "net:[4026531992]",
+        "processes_walked": 3,
+        "reserved_ports": "",
+        "tcp": [
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 80,
+            "state": "free",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 443,
+            "state": "free",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 6443,
+            "state": "in_use",
+            "unverified": null
+          },
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 10250,
+            "state": "free",
+            "unverified": null
+          }
+        ],
+        "udp": [
+          {
+            "bind": "public",
+            "ephemeral": false,
+            "holders": "[truncated]",
+            "holders_not_shown": 0,
+            "port": 8472,
+            "state": "free",
+            "unverified": null
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "block",
+      "truncated": true
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "allow": [],
+        "forbid": []
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.security_agents",
+      "key": "host.security_agents",
+      "message": "No known security software process was found among 7 processes.",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [
+        "rdy sees the processes of the machine it runs on. In a container, host processes are not visible."
+      ],
+      "observed": {
+        "detected": [],
+        "limited_view": false,
+        "list_cut": false,
+        "processes_read": 7,
+        "processes_unreadable": 0
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "cgroup_driver": "systemd",
+        "min_version": "1.6",
+        "runtime": [
+          "containerd"
+        ],
+        "storage_driver": "overlay2"
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.container_runtime",
+      "key": "host.container_runtime",
+      "message": "containerd 1.7.13 is running (cgroup driver systemd, storage driver overlayfs).",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "kubelet": {
+          "cgroup_driver": "systemd",
+          "config_present": true
+        },
+        "runtimes": [
+          {
+            "api": "not asked",
+            "cgroup_driver": "systemd",
+            "cgroup_driver_source": "/etc/containerd/config.toml",
+            "config_version": 2,
+            "d_type": null,
+            "installed": true,
+            "proxy": null,
+            "rootless": null,
+            "rootless_socket": false,
+            "runtime": "containerd",
+            "socket": "/run/containerd/containerd.sock",
+            "socket_present": true,
+            "storage_driver": "overlayfs",
+            "storage_driver_source": "/etc/containerd/config.toml",
+            "version": "1.7.13"
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "open_inbound": [
+          6443,
+          10250
+        ]
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.firewall",
+      "key": "host.firewall",
+      "message": "firewalld zone public allows 6443/tcp and 10250/tcp inbound.",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [
+        "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+      ],
+      "observed": {
+        "active": [
+          {
+            "interface": "eth0",
+            "manager": "firewalld",
+            "ports": "[truncated]",
+            "zone": "public"
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": true
+    },
+    {
+      "bucket": "blocker",
+      "duration_ms": 0,
+      "expected": {
+        "max_latency_ms": 2000,
+        "trust": "system"
+      },
+      "family": "net",
+      "fix": "web.acme.test:8080 refused the connection: nothing listens there, or a firewall rejects it. Check the port in the spec, and ask the network team to allow tcp/8080 to web.acme.test from this machine.",
+      "fix_source": "rdy",
+      "id": "net.egress",
+      "key": "net.egress",
+      "message": "1 of 1 endpoints unreachable: web.acme.test:8080 (refused)",
+      "name": null,
+      "needs": [
+        {
+          "hard": true,
+          "met": true,
+          "name": null,
+          "need": "network"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "endpoints": [
+          {
+            "attempts": "[truncated]",
+            "class": "refused",
+            "endpoint": "web.acme.test:8080",
+            "lookup": "[truncated]",
+            "optional": false,
+            "result": "failed",
+            "tls": false
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "block",
+      "truncated": true
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "clamp_above": 1500,
+        "min_mtu": null,
+        "overhead": null,
+        "overlay": null,
+        "underlay": "ipv4",
+        "warn_below": 1400
+      },
+      "family": "net",
+      "fix": null,
+      "fix_source": null,
+      "id": "net.mtu",
+      "key": "net.mtu",
+      "message": "`eth0` has MTU 1500.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "container_interfaces": 0,
+        "default_family": "ipv4",
+        "default_interface": "eth0",
+        "default_mtu": 1500,
+        "interfaces": [
+          {
+            "kind": "ethernet",
+            "mtu": 1500,
+            "name": "eth0",
+            "state": "up"
+          }
+        ],
+        "interfaces_down": 0,
+        "interfaces_not_read": 0,
+        "interfaces_not_shown": 0,
+        "overhead": null,
+        "overlay": null,
+        "pod_mtu": null
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    }
+  ],
+  "complete": true,
+  "exit_code": 2,
+  "host": {
+    "arch": "x86_64",
+    "container": false,
+    "host_id": null,
+    "hostname": "all-block.example",
+    "kernel": "5.14.0-362.el9.x86_64",
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
+      "version": "9.3"
+    }
+  },
+  "identity": {
+    "elevated": true,
+    "euid": 0,
+    "kube": null,
+    "user": null
+  },
+  "interrupted": false,
+  "kind": "Report",
+  "producer": {
+    "commit": "<commit>",
+    "name": "rdy",
+    "rdy_spec": "<rdy_spec>",
+    "target": "<target>",
+    "version": "<version>"
+  },
+  "proxy": null,
+  "redaction": {
+    "by_rule": {},
+    "ruleset": "report",
+    "total": 0
+  },
+  "run": {
+    "duration_ms": 0,
+    "finished_at": "2026-11-02T09:00:00.000Z",
+    "id": "00000000-0000-4000-8000-000000000004",
+    "options": {
+      "allow_unsigned": true,
+      "deadline_ms": 20000,
+      "jobs": 1,
+      "kube_context": null,
+      "network": true
+    },
+    "started_at": "2026-11-02T09:00:00.000Z"
+  },
+  "signature": {
+    "key_fingerprint": null,
+    "key_id": null,
+    "product": null,
+    "reason": null,
+    "signed_at": null,
+    "state": "unsigned",
+    "trust_note": null,
+    "trust_source": null
+  },
+  "spec": {
+    "annotations": {},
+    "contact": null,
+    "expires": null,
+    "file_name": "spec.yaml",
+    "product": "acme-platform",
+    "serial": null,
+    "sha256": "1879418ce331ed446c386c8a1cf64404c1834278af467af29b31a959ec721199",
+    "size_bytes": 1647,
+    "version": ">=1.0"
+  },
+  "summary": {
+    "block": 4,
+    "error": 0,
+    "not_applicable": 0,
+    "optional_not_run": 0,
+    "pass": 11,
+    "required_not_run": 0,
+    "skipped": 0,
+    "timeout": 0,
+    "total": 15,
+    "warn": 0
+  },
+  "verdict": "not_ready",
+  "verdict_reason": null
+}

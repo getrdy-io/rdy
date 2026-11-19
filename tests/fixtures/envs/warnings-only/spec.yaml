@@ -1,0 +1,69 @@
+# Synthetic. The all-pass spec, run on a machine with two warnings: a low vm.max_map_count and SELinux permissive.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+  version: ">=1.0"
+checks:
+  - id: host.os
+    supported:
+      - { id: rhel, versions: ["8", "9"] }
+      - { id: ubuntu, versions: ["22.04"] }
+    severity: block
+  - id: host.memory
+    min: 32Gi
+    severity: block
+    fix: "Add RAM or choose a larger VM size."
+  - id: host.cpu
+    min: 8
+    severity: block
+  - id: host.disk
+    path: /var/lib/acme
+    min: 20Gi
+    severity: block
+  - id: host.kernel
+    min: "5.4"
+    modules: [overlay, br_netfilter, nf_conntrack]
+    btf: true
+    severity: block
+  - id: host.cgroups
+    version: v2
+    controllers: [cpu, memory, io, pids]
+    severity: block
+  - id: host.sysctl
+    expect:
+      vm.max_map_count: ">=262144"
+      net.ipv4.ip_forward: 1
+      net.ipv4.tcp_rmem: "4096 131072 6291456"
+      kernel.shmmax: ">=4294967296"
+    limits:
+      nofile: ">=65536"
+    severity: warn
+  - id: host.lsm
+    selinux:
+      allow: [enforcing]
+      watch: [acme_t]
+    severity: warn
+  - id: host.time_sync
+    ntp_servers: ["192.0.2.10"]
+    severity: warn
+  - id: host.ports
+    free: [80, 443, 6443, 10250]
+    udp_free: [8472]
+    severity: block
+  - id: host.security_agents
+    severity: warn
+  - id: host.container_runtime
+    runtime: [containerd]
+    min_version: "1.6"
+    cgroup_driver: systemd
+    storage_driver: overlay2
+    severity: block
+  - id: host.firewall
+    open_inbound: [6443, 10250]
+    severity: block
+  - id: net.egress
+    endpoints: ["web.acme.test:8080"]
+    severity: block
+  - id: net.mtu
+    severity: warn

@@ -10,8 +10,10 @@
 //!
 //! The run plans for the OS it runs on, so the caller skips an environment of another OS (`main`).
 //!
-//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`. A fixture that sets
-//! `kube = true` gets no cluster until M1-107, because `rdy run` builds no Kubernetes client yet.
+//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`. The `k8s` family is registered
+//! over an empty `Env` (`families::registry`), so a spec with a k8s check finds no kubeconfig and the check
+//! is skipped `missing_need`. A fixture that sets `kube = true` still gets no cluster: the kube mock is test
+//! code inside `rdy-checks-k8s`, and nothing here can reach it.
 
 use std::path::Path;
 use std::sync::Arc;
