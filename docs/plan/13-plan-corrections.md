@@ -461,6 +461,27 @@ the corrections log of `11-backlog.md`.
   same rules. M1-138 depends on it. PR #71 (M1-099) left `expected_issuer` and `pin_sha256`, the
   generated-chain fixture rig and the Timeout case to M1-100, whose exit test did not hold them. M1-100 now
   does all three (3.5 h), and M1-101 moves to week 21. No test-pinned document changed.
+- **Correction-46, the 03 sections of net.egress and net.dns, two `PENDING` rows and the non-dumpable order.**
+  PR #74 (M1-096) and PR #72 (M1-153) change their own 03 sections after review. The 03 text lands with each
+  PR; this entry records and approves it. net.egress with no `expect_status`: 2xx, 3xx and 4xx count as
+  reachable, except 407. A 3xx gets a note that the redirect was not followed. 401, 404 and every other 4xx
+  get a note naming the status. A 403 warns, because a proxy or firewall deny page looks the same; list 403 in
+  `expect_status` when the server really answers it. A 407 on the direct route is an intercepting proxy that
+  answered, so it fails as class `http_status`. A 5xx fails. The `expect_status` doc comment and its schema
+  description say so; the schema shape does not change. net.dns declares `Network`, so `--no-network` skips
+  it as `missing_need` and never as a failed lookup; it falls back when `getent` is missing, so it does not
+  need `getent`. A `getent` answer in a refused range is shown and blocks as `refused_by_policy`, like the
+  facade fallback, so the verdict does not depend on whether `getent` is installed. For that,
+  `rdy_engine::probe::is_unusable_peer` is now public; rdy-engine is not on crates.io before M2-017, so no
+  version changes. Each name gets 9 s (`getent` 5 s, the 3 s fallback lookup, 1 s of slack) inside the
+  check's time, so a hung `getent` is a bounded `timeout` finding for that name and not a check `Timeout`.
+  M1-096 and M1-153 must leave 03 saying so. Each PR adds a `PENDING` row for its Timeout class, which
+  M1-179 (PR #70) makes countable; whichever of #70 and #74, and of #70 and #72, merges second deletes the
+  row. From the PR #47 security review: M2-060 sets the process non-dumpable in every command right after
+  the privilege gate passes, before any password prompt and never earlier, because the gate reads
+  `/proc/self/auxv` and start-up lists `/proc/self/fd` first. M2-104 lists descriptors before the flag or
+  uses `close_range`. 04 section 3.4 says so; 04 Appendix B untouched. No test-pinned text changed, and no
+  estimate.
 - **Correction-47, the 03 section of k8s.cni, and one M2 ticket.** PR #78 (M1-165) changes its own 03
   section after the code-reviewer, security-reviewer and k8s-expert reviews. The 03 text lands with the PR;
   this entry approves it. k8s.cni never lists DaemonSets, because a DaemonSet holds env values. It reads 16
