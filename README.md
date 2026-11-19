@@ -50,35 +50,46 @@ Until then, build from source ([below](#build-from-source)).
 
 ### Try it on an example spec
 
-This run uses
-[`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
-so it needs `--allow-unsigned`. A spec from your vendor does not:
+This run uses the example spec
+[`examples/specs/acme-platform.yaml`](examples/specs/acme-platform.yaml), from the repo root. The
+example is unsigned, so it needs `--allow-unsigned`. A spec from your vendor does not:
 
-```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-quickstart.txt
-$ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
+```console tested exit=2 shape=^NOT\sREADY transcript=tests/fixtures/readme/run-platform.txt
+$ rdy run examples/specs/acme-platform.yaml --allow-unsigned --no-report
 WARNING: UNSIGNED SPEC
-examples/specs/acme-quickstart.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
-(three more lines of warning left out here)
+examples/specs/acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
 
-rdy 0.1.0-alpha.0
-spec    acme-quickstart >=1.0   (examples/specs/acme-quickstart.yaml)
+rdy <version>
+spec    acme-platform >=4.2   (examples/specs/acme-platform.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    vm   linux   x86_64
+host    acme-platform.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster no kubeconfig found
 
-  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443 (dns),
-                             license.acme.example:443 (dns)
+  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443
+                             (reset_after_hello), license.acme.example:443 (reset_after_hello)
                              fix from the spec file (not verified): Ask your network team to allow
                              these endpoints through the proxy.
-  WARN     host.disk/root    `/` has 22.9 GiB free on `/` (ext4). 24 GiB is recommended and 20 GiB
-                             is the least.
-                             fix from the spec file (not verified): Free space on / or mount a
-                             larger volume.
-  PASS     host.cpu          4 vCPUs found, 4 needed
-  PASS     host.memory       13.4 GiB found, 8 GiB needed
-  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+  SKIP     k8s.version       Not run. No Kubernetes cluster was reachable. (required)
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  SKIP     gpu.cuda          Not run. This version of rdy has no gpu checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     aws.iam           Not run. This version of rdy has no aws checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     k8s.storageclass  Not run. No Kubernetes cluster was reachable.
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  PASS     host.cpu          8 vCPUs found, 8 needed
+  PASS     host.memory       31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.disk         `/var/lib` has 140 GiB free on `/var` (xfs). 100 GiB is needed.
 
-1 block, 1 warning, 2 passed, 1 not applicable
+1 block, 0 warnings, 3 passed, 3 required checks not run, 1 optional check not run
 
 WARNING: UNSIGNED SPEC
 NOT READY
@@ -86,14 +97,14 @@ $ echo $?
 2
 ```
 
-This is a real run from a build of `main`, on a Linux VM. Two things were cut for width: the long
-warning text, and a note on the memory line about the cgroup the shell runs in. Your numbers will differ.
+This text is not typed by hand. A test makes it from a recorded Linux machine, so it is the same on
+every build. `<version>` stands for the version of rdy. Your numbers and your checks will differ.
 
-Read it like this. Problems come first, each with its fix under it. The `registry.acme.example` name is
-made up and does not resolve, so `net.egress` blocks, and the verdict is `NOT READY`. The example is
-unsigned, so you get the warning. Real specs are signed, and then you drop `--allow-unsigned`. To see
-what a run looks like with no network, add `--no-network`. Then `net.egress` is reported as not run, and
-a required check that did not run is never a pass: the verdict stays `NOT READY`.
+Read it like this. Problems come first, each with its fix under it. One required check blocks, and three
+required checks were not run, so the verdict is `NOT READY`. The example is unsigned, so you get the
+warning. Real specs are signed, and then you drop `--allow-unsigned`. To see what a run looks like with
+no network, add `--no-network`. Then `net.egress` is reported as not run, and a required check that did
+not run is never a pass: the verdict stays `NOT READY`.
 
 `READY` exits 0, `READY with warnings` exits 1, `NOT READY` exits 2. Exit 64 means the input must
 change (a bad flag, a spec with no valid signature). Exit 70 means rdy itself failed. Without
