@@ -54,7 +54,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     (
         "crates/rdy-checks-k8s/tests/rbac_example.rs",
-        "reads examples/rbac/rdy-readonly.yaml and rdy-readonly-openshift-dns.yaml to compare them with the guard's allowlist (SEC-24)",
+        "reads examples/rbac/rdy-readonly.yaml, rdy-readonly-openshift-dns.yaml and rdy-readonly-operator.yaml to compare them with the guard's allowlist (SEC-24)",
     ),
     (
         "crates/rdy-checks-k8s/tests/tls.rs",

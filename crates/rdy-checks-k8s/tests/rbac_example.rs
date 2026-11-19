@@ -2,8 +2,9 @@
 //!
 //! The role is the second line behind the guard. If the two drift, either rdy asks for something the
 //! role does not grant (a check fails with 403 on a cluster that uses the role) or the role grants
-//! something rdy never reads. Both directions are tested. The role is two files: the main one, and the
-//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162), which is read together with it.
+//! something rdy never reads. Both directions are tested. The role is three files: the main one, the
+//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162) and the optional operator template
+//! (`rdy-readonly-operator.yaml`, M1-164), which are read together with it.
 
 #![allow(clippy::expect_used)]
 // This test reads the example role file from the repository, which the lint wall bans in the rest of

@@ -1370,7 +1370,8 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    by name; the resources of `k8s.cni` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
-   `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap
+   `nodeName`, phase, reason, name; for a Deployment also the container image and the
+   `app.kubernetes.io/version` label, for `k8s.crds`), so env values and args are never even held as strings. ConfigMap
    lists must use an `Accept` header for `PartialObjectMetadataList`, and a response of any other
    `kind` is dropped.
 7. **POST** with no query string, only to:

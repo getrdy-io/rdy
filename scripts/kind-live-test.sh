@@ -14,7 +14,8 @@
 #      comments of that file say, then checks with `kubectl auth can-i` that it is read-only.
 #   3. Runs the ignored tests of crates/rdy-checks-k8s/tests/live_cluster.rs with cargo-nextest.
 #
-# It deletes the namespaces rdy-live and rdy-system, the rdy-readonly roles and the operator Role it renders for CoreDNS in kube-system, before and after. So it
+# It deletes the namespaces rdy-live and rdy-system, the rdy-readonly roles and the operator Role it
+# renders for CoreDNS in kube-system, before and after. So it
 # refuses to run unless the current context is named kind-* and its API server is on this machine
 # (127.0.0.1, localhost or [::1], where kind puts it), or RDY_LIVE_ALLOW_ANY_CLUSTER=1 is set.
 # Optional: RDY_LIVE_TARGET=<triple> passes --target to cargo.

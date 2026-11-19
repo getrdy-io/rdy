@@ -65,7 +65,7 @@ Set the Pod Security level of the install namespace to what the product needs: `
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
 - **API reads:**
-  - `apps/v1 deployments` (list in a namespace, get): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
+  - `apps/v1 deployments` (list in a namespace, get by name in the spec's namespace, granted by the optional examples/rbac/rdy-readonly-operator.yaml): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
 
 **Remediation**
 
@@ -81,7 +81,7 @@ Install the product's prerequisites from your registry or mirror with `helm inst
 - **Reads:** none
 - **API reads:**
   - `v1 pods` (list): k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector
-  - `apps/v1 deployments` (list in a namespace, get): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
+  - `apps/v1 deployments` (list in a namespace, get by name in the spec's namespace, granted by the optional examples/rbac/rdy-readonly-operator.yaml): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
   - `apps/v1 daemonsets` (list in a namespace): desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns
   - `v1 services` (get, list in a namespace): k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector). k8s.ingress: the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace (a list without a selector); the address itself, annotations and the rest of the spec are dropped while parsing
   - `v1 configmaps` (get): the Corefile key of the coredns ConfigMap in kube-system; every other key is dropped while parsing
@@ -135,7 +135,7 @@ Ask the platform team for a namespace the product can install into. Create it wi
 - **API reads:**
   - `v1 nodes` (list): allocatable, conditions, taints, labels; providerID and kubeletVersion
   - `v1 pods` (list): k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector
-  - `apps/v1 deployments` (list in a namespace, get): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
+  - `apps/v1 deployments` (list in a namespace, get by name in the spec's namespace, granted by the optional examples/rbac/rdy-readonly-operator.yaml): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
 
 **Remediation**
 
