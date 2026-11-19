@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-slow-first-nameserver"
+summary = "The first nameserver answers late, the second at once"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

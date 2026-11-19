@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIGroupList",
+    "apiVersion": "v1",
+    "groups": [
+      {
+        "name": "storage.k8s.io",
+        "versions": [
+          {
+            "groupVersion": "storage.k8s.io/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "storage.k8s.io/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "karpenter.sh",
+        "versions": [
+          {
+            "groupVersion": "karpenter.sh/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "karpenter.sh/v1",
+          "version": "v1"
+        }
+      }
+    ]
+  }
+}

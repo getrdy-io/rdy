@@ -1,0 +1,73 @@
+# Full test job for x86_64-apple-darwin on the Intel runner, outside the ci-ok gate (ADR 0050).
+#
+# The Intel runners (`macos-15-intel`) queue for a long time and often fail with "The job was not
+# acquired by Runner", and a personal account has no merge queue. So a pull request gates on the arm64
+# tests and on an x86_64-apple-darwin compile (the macos-arm64 and macos-x64-build legs of ci.yml).
+# This workflow runs the x86_64-apple-darwin tests on push to main and nightly, so an Intel-only failure
+# shows within a day. It is not a PR check and is not in ci-ok's needs, so a stuck runner blocks nothing.
+# To make it a gate again, see "How to revert" in ADR 0050.
+#
+# Same rules as ci.yml: every `uses:` is pinned to a full commit SHA, the token is read-only, no
+# pull_request_target, and the Rust toolchain comes from rust-toolchain.toml.
+
+name: macos-intel
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: macos-intel-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  test:
+    name: test (macos-x64)
+    runs-on: macos-15-intel
+    # The nextest step alone ran about 18 minutes on this runner on 2026-11-17.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # install.sh under macOS /bin/sh on an Intel host. The dash and busybox runs are in ci.yml.
+      - name: install.sh tests (macOS /bin/sh)
+        run: sh scripts/test-install-sh.sh sh
+      - name: Install the pinned toolchain and the target
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add "$TARGET"
+      # Only main writes the cache, as in ci.yml. A nightly run on main refreshes it.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: test-macos-intel
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-nextest@0.9.149
+          # A missing prebuilt binary fails the step. It never falls back to `cargo install`.
+          fallback: none
+      - name: Build the rdy binary
+        run: cargo build --locked --target "$TARGET" --package rdy
+      - name: Test (nextest, no retries)
+        run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci

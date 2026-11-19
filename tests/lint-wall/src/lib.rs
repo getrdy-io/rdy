@@ -11,3 +11,9 @@
 
 #[cfg(feature = "use-all")]
 mod uses;
+
+// The kube use file is not Rust to cargo (`.rs.txt`), so a plain build never sees it. With `use-kube` it is
+// the module, and `tests/kube_wall.rs` reads the `// EXPECT` markers against what clippy reports.
+#[cfg(feature = "use-kube")]
+#[path = "../../../crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt"]
+mod kube_uses;

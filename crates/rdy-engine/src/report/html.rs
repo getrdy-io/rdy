@@ -32,6 +32,14 @@
 //! switch escaping off (the `safe` filter, `escape = "none"`, a second marker, the askama features that
 //! add `json` and `urlencode` filters), M1-078.
 //!
+//! **Format characters (M1-141).** Every string from the report goes through `shown` in `view.rs` before it
+//! reaches the template: each Unicode format (Cf) and zero-width character, among them the bidi controls
+//! U+202A to U+202E and U+2066 to U+2069, is written as an escape like `\u{202e}`. A `<bdi>` limits
+//! reordering but a U+2069 in the text can close it early, so the escape is what keeps a hostname or a
+//! vendor fix from reordering the words around it. The `<title>` cannot hold `<bdi>`, so it wraps the escaped
+//! product in one U+2068 and one U+2069 of ours. The embedded JSON data block keeps the report's text as
+//! the `.json` file has it, because the page must hold the same bytes. No browser shows that block.
+//!
 //! **Print.** `@media print` is black on white whatever the screen theme: it sets `color-scheme: light`
 //! and replaces every variable of the dark palette, with no backgrounds. No raw JSON key is visible
 //! text in the template (a test scans it).
@@ -41,7 +49,15 @@
 //! the JSON holds, so its "N more entries are in the embedded JSON" line is true. The whole page is at most
 //! 5 MiB: past that, rows of the table are cut and the checks and the JSON never are.
 //!
-//! Left to later tickets: Found and Needed, the footer link and the fixed banner in print (M1-081).
+//! **Found, Needed and the footer (M1-081).** Each check lists what it saw and what it needed, from
+//! `observed` and `expected` of the report the JSON holds, so the page never shows what the JSON writer
+//! cut. Keys become words, `_bytes` becomes a size, `_ms` milliseconds and `_percent` a percent, and a
+//! list is one line per item, sorted by key so the order does not depend on a JSON feature. Past the
+//! page cap, and after the action rows, lines are cut and each check says how many. The footer holds the
+//! one link out, with `ref=report` and the percent-encoded product and `rel="noopener noreferrer"`, and
+//! the link to the source. In print the banners stay in the flow, so they print once and cover nothing, and
+//! their titles print in the top margin of every page (`@page`), so page 2 still says the spec was not
+//! verified.
 
 use crate::redact::RedactedReport;
 use crate::report::JsonError;
@@ -88,8 +104,37 @@ pub fn render_html(report: &RedactedReport) -> Result<String, HtmlError> {
     fit_page(&mut View::new(report)?, MAX_PAGE_BYTES)
 }
 
+/// A page that [`render_page`] made from a [`RedactedReport`]. The output folder writes only this type
+/// (`OutputDir::write_html`), so no text but a rendered page lands in the `.html` file (M1-181).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HtmlPage(String);
+
+impl HtmlPage {
+    /// The page as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The page as bytes, as they are written to the file.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+/// [`render_html`], with the page kept in an [`HtmlPage`] so the caller can render first and write later.
+///
+/// # Errors
+///
+/// The errors of [`render_html`].
+pub fn render_page(report: &RedactedReport) -> Result<HtmlPage, HtmlError> {
+    render_html(report).map(HtmlPage)
+}
+
 /// Renders `view`. Over `max` bytes, the action table is cut to the most rows that fit and the page is
-/// rendered again. The checks and the embedded JSON are never cut (07 D.4).
+/// rendered again. If it is still over, Found and Needed lines are cut to the most that fit. The checks
+/// themselves and the embedded JSON are never cut (07 D.4).
 fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
     let page = view.render().map_err(|_| HtmlError::Render)?;
     if page.len() <= max {
@@ -109,7 +154,33 @@ fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
         }
     }
     view.actions.keep_first(&all, fits);
-    let page = view.render().map_err(|_| HtmlError::Render)?;
+    let mut page = view.render().map_err(|_| HtmlError::Render)?;
+    if page.len() > max {
+        // Still over with no rows left: cut Found and Needed lines, from the last check backwards in
+        // effect, until the page fits. Each check that lost lines says how many (07 D.4).
+        let all = view.fact_lists();
+        let total: usize = all
+            .iter()
+            .flat_map(|(found, needed)| found.iter().chain(needed))
+            .map(|fact| fact.lines.len())
+            .sum();
+        // The search assumes a page grows with the lines it keeps. Cuts move other text a little (the
+        // "N more lines" notes), so it can settle on fewer lines than would fit. That is safe: the page
+        // it settles on is the one rendered and measured below.
+        let (mut fits, mut over) = (0, total);
+        while fits < over {
+            let middle = fits + (over - fits).div_ceil(2);
+            view.keep_fact_lines(&all, middle);
+            let size = view.render().map_err(|_| HtmlError::Render)?.len();
+            if size <= max {
+                fits = middle;
+            } else {
+                over = middle - 1;
+            }
+        }
+        view.keep_fact_lines(&all, fits);
+        page = view.render().map_err(|_| HtmlError::Render)?;
+    }
     // With no rows left the page is the checks plus the embedded JSON. The JSON is at most 2 MiB and the
     // checks are at most 256 results with the same bounded text, so this holds for the real cap. A smaller
     // `max` (the tests) can be below that floor.

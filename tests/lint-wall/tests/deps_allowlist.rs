@@ -205,6 +205,31 @@ fn only_the_k8s_crate_lists_the_kube_crates_and_only_net_lists_x509() {
 }
 
 #[test]
+fn hickory_proto_is_a_dev_dependency_of_the_net_crate_only() {
+    // The net.dns codec is hand-written (ADR 0052). hickory-proto is its test oracle. deny.toml lists
+    // rdy-checks-net as a wrapper because deny cannot tell a dev-dependency from a normal one. This tells them
+    // apart, and holds the workspace entry to no features.
+    for (name, deps) in check_crate_deps() {
+        for d in deps.iter().filter(|d| d.name == "hickory-proto") {
+            assert!(
+                name == "rdy-checks-net" && d.kind == "dev",
+                "{name} has hickory-proto as a {} dependency; only rdy-checks-net may, and only as a dev-dependency",
+                d.kind
+            );
+        }
+    }
+    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.starts_with("hickory-proto"))
+        .expect("a workspace entry for hickory-proto");
+    assert!(
+        line.contains("default-features = false") && !line.contains(", features"),
+        "hickory-proto must be listed with default features off and no others: {line}"
+    );
+}
+
+#[test]
 fn tempfile_and_tokio_rustls_are_dev_dependencies_of_the_k8s_crate_only() {
     // deny.toml lists rdy-checks-k8s as a wrapper of both, because deny cannot tell a dev-dependency from a
     // normal one. This is the check that tells them apart.

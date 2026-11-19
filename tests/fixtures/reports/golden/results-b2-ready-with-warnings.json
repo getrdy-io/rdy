@@ -1,0 +1,389 @@
+{
+  "api_version": "rdy/v1",
+  "kind": "Report",
+  "producer": {
+    "name": "rdy",
+    "version": "0.1.0",
+    "commit": "4c1e9a2",
+    "rdy_spec": "0.1.0",
+    "target": "x86_64-unknown-linux-musl"
+  },
+  "run": {
+    "id": "3b9d1f70-52c6-4a8e-8c13-7e0a5d2b9f41",
+    "started_at": "2027-03-09T09:48:20.000Z",
+    "finished_at": "2027-03-09T09:48:20.243Z",
+    "duration_ms": 243,
+    "options": {
+      "jobs": 8,
+      "deadline_ms": 300000,
+      "allow_unsigned": false,
+      "network": true,
+      "kube_context": null
+    }
+  },
+  "spec": {
+    "product": "acme-quickstart",
+    "version": "\u003e=1.0",
+    "sha256": "d59c4ca63be4c639085ede021a7e66c196792bdfd68c81981469687358667886",
+    "file_name": "acme-quickstart.yaml",
+    "size_bytes": 1418,
+    "serial": null,
+    "expires": null,
+    "contact": null,
+    "annotations": {}
+  },
+  "signature": {
+    "state": "verified",
+    "key_id": "9F3A6C21D4E87B05",
+    "key_fingerprint": "4d2a7c0e9b1f3a5c6e8d0b2f4a6c8e0d1b3f5a7c9e2d4b6f8a0c2e4d6b8f0a1c",
+    "product": "acme-quickstart",
+    "signed_at": "2027-03-02T15:40:09Z",
+    "trust_note": "Acme security page, fingerprint read back by phone",
+    "trust_source": "user",
+    "reason": null
+  },
+  "host": {
+    "hostname": "acme-vm-03.corp.example",
+    "host_id": "5f1c0a9e3b7d2c41",
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "version": "9.4",
+      "pretty_name": "Red Hat Enterprise Linux 9.4 (Plow)"
+    },
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "arch": "x86_64",
+    "virtualization": "vm",
+    "container": false
+  },
+  "identity": {
+    "euid": 1000,
+    "user": "jdoe",
+    "elevated": false,
+    "kube": null
+  },
+  "proxy": {
+    "https": "http://proxy.corp.example:3128",
+    "http": "http://proxy.corp.example:3128",
+    "no_proxy": [
+      ".corp.example",
+      "10.0.0.0/8"
+    ]
+  },
+  "capabilities": [
+    {
+      "need": "network",
+      "name": null,
+      "available": true,
+      "detail": null,
+      "hint": null
+    }
+  ],
+  "verdict": "ready_with_warnings",
+  "verdict_reason": null,
+  "exit_code": 1,
+  "summary": {
+    "total": 5,
+    "pass": 3,
+    "warn": 1,
+    "block": 0,
+    "skipped": 1,
+    "timeout": 0,
+    "error": 0,
+    "not_applicable": 1,
+    "required_not_run": 0,
+    "optional_not_run": 0
+  },
+  "checks": [
+    {
+      "key": "host.cpu",
+      "id": "host.cpu",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "8 vCPUs found, 4 needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "arch": "x86_64",
+        "hypervisor": true,
+        "logical_cores": 8,
+        "physical_cores": 4
+      },
+      "expected": {
+        "min": 4
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 2
+    },
+    {
+      "key": "host.memory",
+      "id": "host.memory",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "15.4 GiB found, 8 GiB needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "available_bytes": 12884901888,
+        "cgroup_limit_bytes": null,
+        "swap_total_bytes": 0,
+        "total_bytes": 16496934912
+      },
+      "expected": {
+        "band_bytes": 429496729,
+        "min_bytes": 8589934592
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 1
+    },
+    {
+      "key": "host.disk/root",
+      "id": "host.disk",
+      "name": "root",
+      "family": "host",
+      "severity": "warn",
+      "status": "warn",
+      "bucket": "warning",
+      "message": "12.0 GiB free on /, 20 GiB needed",
+      "fix": "Free space on / or mount a larger volume.",
+      "fix_source": "spec",
+      "builtin_fix": "/ has 12.0 GiB free, 20 GiB needed. Run df -h /. Grow the volume or point the install at a larger disk.",
+      "observed": {
+        "free_bytes": 12884901888,
+        "free_inodes": 31205120,
+        "fstype": "xfs",
+        "mount": "/",
+        "options": [
+          "rw",
+          "relatime"
+        ],
+        "path": "/"
+      },
+      "expected": {
+        "min_free_bytes": 21474836480,
+        "recommended_free_bytes": 25769803776
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 3
+    },
+    {
+      "key": "host.disk/system",
+      "id": "host.disk",
+      "name": "system",
+      "family": "host",
+      "severity": "warn",
+      "status": "skipped",
+      "bucket": "not_applicable",
+      "skip_kind": "not_applicable",
+      "message": "Does not apply here. This check is for windows only.",
+      "fix": null,
+      "fix_source": null,
+      "observed": null,
+      "expected": null,
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    },
+    {
+      "key": "net.egress",
+      "id": "net.egress",
+      "name": null,
+      "family": "net",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "2 of 2 endpoints reachable through the proxy",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "endpoints": [
+          {
+            "connect_ms": 38,
+            "outcome": "ok",
+            "target": "registry.acme.example:443",
+            "tls_ms": 61
+          },
+          {
+            "connect_ms": 36,
+            "outcome": "ok",
+            "target": "license.acme.example:443",
+            "tls_ms": 60
+          }
+        ],
+        "proxy": "http://proxy.corp.example:3128",
+        "via": "proxy"
+      },
+      "expected": {
+        "reachable": [
+          "registry.acme.example:443",
+          "license.acme.example:443"
+        ],
+        "via_proxy": "auto"
+      },
+      "needs": [
+        {
+          "need": "network",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 190
+    }
+  ],
+  "actions": [
+    {
+      "seq": 1,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8320,
+      "path": "/proc/cpuinfo",
+      "truncated": false
+    },
+    {
+      "seq": 2,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 13,
+      "path": "/sys/fs/cgroup/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 3,
+      "check": "host.memory",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 1482,
+      "path": "/proc/meminfo",
+      "truncated": false
+    },
+    {
+      "seq": 4,
+      "check": "host.memory",
+      "at_ms": 42,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 4,
+      "path": "/sys/fs/cgroup/memory.max",
+      "truncated": false
+    },
+    {
+      "seq": 5,
+      "check": "host.disk/root",
+      "at_ms": 42,
+      "duration_ms": 1,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2870,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 6,
+      "check": "net.egress",
+      "at_ms": 42,
+      "duration_ms": 2,
+      "kind": "lookup",
+      "outcome": "ok",
+      "answers": 1,
+      "host": "proxy.corp.example"
+    },
+    {
+      "seq": 7,
+      "check": "host.disk/root",
+      "at_ms": 43,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "statvfs",
+      "path": "/"
+    },
+    {
+      "seq": 8,
+      "check": "net.egress",
+      "at_ms": 45,
+      "duration_ms": 36,
+      "kind": "connect",
+      "outcome": "ok",
+      "addr": null,
+      "host": "registry.acme.example",
+      "port": 443,
+      "via_proxy": "http://proxy.corp.example:3128"
+    },
+    {
+      "seq": 9,
+      "check": "net.egress",
+      "at_ms": 82,
+      "duration_ms": 61,
+      "kind": "tls",
+      "outcome": "ok",
+      "host": "registry.acme.example",
+      "sni": "registry.acme.example"
+    },
+    {
+      "seq": 10,
+      "check": "net.egress",
+      "at_ms": 144,
+      "duration_ms": 36,
+      "kind": "connect",
+      "outcome": "ok",
+      "addr": null,
+      "host": "license.acme.example",
+      "port": 443,
+      "via_proxy": "http://proxy.corp.example:3128"
+    },
+    {
+      "seq": 11,
+      "check": "net.egress",
+      "at_ms": 181,
+      "duration_ms": 60,
+      "kind": "tls",
+      "outcome": "ok",
+      "host": "license.acme.example",
+      "sni": "license.acme.example"
+    }
+  ],
+  "actions_truncated": false,
+  "actions_dropped": {},
+  "redaction": {
+    "ruleset": "report",
+    "total": 0,
+    "by_rule": {}
+  },
+  "complete": true,
+  "interrupted": false
+}

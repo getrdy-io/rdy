@@ -69,14 +69,14 @@ Where this differs from 05 as written (listed again under Plan corrections):
 | linux-x64 | `ubuntu-24.04` | `x86_64-unknown-linux-musl` |
 | linux-arm64 | `ubuntu-24.04-arm` | `aarch64-unknown-linux-musl` |
 | macos-arm64 | `macos-15` | `aarch64-apple-darwin` |
-| macos-x64 | `macos-15-intel` | `x86_64-apple-darwin` |
+| macos-x64-build | `macos-15` | `x86_64-apple-darwin`, compile only |
 | windows-x64 | `windows-2022` | `x86_64-pc-windows-msvc` |
 
 Rules:
 
 - Pin runner images by name, never `-latest`. Review the names each April and October.
-- Temporary (correction 05): the org has no macOS arm64 runners. `ci-ok` gates an `aarch64-apple-darwin` compile leg on `macos-15-intel` instead of the macos-arm64 test leg, and `macos-arm64.yml` runs the full test job on `macos-15` outside `ci-ok`. A founder hand step ends it (ADR 0006, decision 8).
-- `macos-13` is retired. `macos-15-intel` is the last Intel image. If it is slow or dies, build `x86_64-apple-darwin` on the arm64 runner and test it nightly.
+- ADR 0050: the Intel runners queue for a long time and a personal account has no merge queue. `ci-ok` gates the full tests on `macos-arm64` and an `x86_64-apple-darwin` compile on `macos-x64-build`. `macos-intel.yml` runs the full `x86_64-apple-darwin` tests on `macos-15-intel` on push to main and nightly, outside `ci-ok`. An Intel-only failure is caught after merge, within a day.
+- `macos-13` is retired. `macos-15-intel` is the last Intel image.
 - Linux tests run against the musl targets, so CI tests what we ship.
 - No `pull_request_target`. Fork PRs get a read-only token.
 
@@ -94,6 +94,8 @@ Rules:
 | `html-validator` | yes | M1-077: `scripts/validate-html.sh` runs the pinned Nu HTML Checker over the HTML goldens with `--Werror`. Checkout and Java only, no cargo, no cache, read-only token |
 | `kind` (own workflow, `kind.yml`) | no | M1-108, ADR 0039. The ignored tests of `crates/rdy-checks-k8s/tests/live_cluster.rs` against a kind cluster on the oldest and newest Kubernetes minors upstream still patches, with a `restricted` namespace and the `rdy-readonly` role. Runs on PRs, on main, nightly and by hand. Not in `ci-ok`: it depends on Docker Hub, and an outage must not block merges |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
+
+The `test` job also has a named `docs-test` step (M1-136, ADR 0048) that reruns the docs-test binary with `--no-capture` on the same build. It is for log visibility: nextest hides the output of passing tests, and this step shows each leg's count of tested blocks. Windows prints that it skipped them.
 
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.
 
@@ -252,7 +254,7 @@ Public repo, standard runners (including arm64 Linux and Intel macOS): $0, no mi
 ```yaml
 test:
   runs-on: ${{ matrix.os }}
-  timeout-minutes: ${{ matrix.name == 'macos-x64' && 45 || 25 }}  # macos-x64 is the slow leg
+  timeout-minutes: ${{ matrix.name == 'macos-arm64' && 30 || 25 }}
   permissions: { contents: read }
   strategy:
     fail-fast: false
@@ -261,7 +263,7 @@ test:
         - { name: linux-x64,   os: ubuntu-24.04,     target: x86_64-unknown-linux-musl }
         - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
         - { name: macos-arm64, os: macos-15,         target: aarch64-apple-darwin }
-        - { name: macos-x64,   os: macos-15-intel,   target: x86_64-apple-darwin }
+        - { name: macos-x64-build, os: macos-15,     target: x86_64-apple-darwin, compile_only: true }
         - { name: windows-x64, os: windows-2022,     target: x86_64-pc-windows-msvc }
   steps:
     - uses: actions/checkout@<sha>
@@ -339,7 +341,7 @@ Key names were confirmed in M1-007 by running `dist generate` 0.33.0. The live f
 - `allow-dirty = ["ci"]` turns off dist's own drift check. `release.yml` is dist's output plus `scripts/harden-release-workflow.py` (no default token, `contents: write` only in `announce`, tag shape check and tag passed through `env:`, pinned tool files, no containers, no `GH_TOKEN` in the build jobs). The CI job `release-workflow` regenerates it with `scripts/gen-release-workflow.sh --check` and fails on any difference (ADR 0020, decisions 1 and 5).
 - `github-build-setup = "../build-setup.yml"` installs the pinned toolchain and the target, and points C code at `musl-gcc`.
 - `[dist.github-action-commits]` pins the three actions dist uses to commit SHAs.
-- `aarch64-apple-darwin` builds on `macos-15-intel` while the org has no macOS arm64 runners (ADR 0006, decision 8).
+- Both macOS targets build on `macos-15-intel` for release. The arm64 target is cross-built there and not run. Release is not the PR gate (ADR 0050).
 - `[dist.github-custom-job-permissions]` gives the check `contents: read` only, and `sign-release` `contents: read` plus `id-token: write` (M1-010). `announce` is still the only job that writes contents.
 - Cargo.toml has `[profile.dist]`, which dist needs. `xtask` sets `dist = false`.
 

@@ -1,0 +1,721 @@
+{
+  "actions": [
+    {
+      "at_ms": 0,
+      "bytes": 172,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/status",
+      "seq": 1,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 48,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/auxv",
+      "seq": 2,
+      "truncated": false
+    },
+    {
+      "api": "hostname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 3
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 4
+    },
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 5,
+      "truncated": false
+    },
+    {
+      "api": "system_roots",
+      "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 6
+    },
+    {
+      "at_ms": 0,
+      "bytes": 8160,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/cpuinfo",
+      "seq": 7,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 4,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/devices/system/cpu/online",
+      "seq": 8,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 172,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/status",
+      "seq": 9,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 45,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/cgroup",
+      "seq": 10,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 11,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
+      "seq": 12,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
+      "seq": 13,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "seq": 14,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/cpu.max",
+      "seq": 15
+    },
+    {
+      "api": "uname",
+      "at_ms": 0,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "seq": 16
+    },
+    {
+      "at_ms": 0,
+      "bytes": 442,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/meminfo",
+      "seq": 17,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 45,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/cgroup",
+      "seq": 18,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 19,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max",
+      "seq": 20
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max",
+      "seq": 21
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/memory.max",
+      "seq": 22
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/memory.max",
+      "seq": 23
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max",
+      "seq": 24
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max",
+      "seq": 25
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/system.slice/memory.swap.max",
+      "seq": 26
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/memory.swap.max",
+      "seq": 27
+    },
+    {
+      "api": "statvfs",
+      "at_ms": 0,
+      "check": "host.disk",
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "path": "/var/lib",
+      "seq": 28
+    },
+    {
+      "at_ms": 0,
+      "bytes": 665,
+      "check": "host.disk",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "seq": 29,
+      "truncated": false
+    },
+    {
+      "answers": 1,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "host": "registry.acme.example",
+      "kind": "lookup",
+      "outcome": "ok",
+      "seq": 30
+    },
+    {
+      "addr": null,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "error": "the connection was reset during the TLS handshake",
+      "host": "registry.acme.example",
+      "kind": "tls",
+      "outcome": "failed",
+      "port": 443,
+      "seq": 31,
+      "sni": "registry.acme.example",
+      "via_proxy": null
+    },
+    {
+      "answers": 1,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "host": "license.acme.example",
+      "kind": "lookup",
+      "outcome": "ok",
+      "seq": 32
+    },
+    {
+      "addr": null,
+      "at_ms": 0,
+      "check": "net.egress",
+      "duration_ms": 0,
+      "error": "the connection was reset during the TLS handshake",
+      "host": "license.acme.example",
+      "kind": "tls",
+      "outcome": "failed",
+      "port": 443,
+      "seq": 33,
+      "sni": "license.acme.example",
+      "via_proxy": null
+    }
+  ],
+  "actions_dropped": {},
+  "actions_truncated": false,
+  "api_version": "rdy/v1",
+  "capabilities": [
+    {
+      "available": true,
+      "detail": null,
+      "hint": null,
+      "name": null,
+      "need": "network"
+    },
+    {
+      "available": false,
+      "detail": "no kubeconfig found",
+      "hint": "Pass --kubeconfig <file> or set KUBECONFIG. k3s keeps one at /etc/rancher/k3s/k3s.yaml, RKE2 at /etc/rancher/rke2/rke2.yaml and kubeadm at /etc/kubernetes/admin.conf. They are root-only: copy one to ~/.kube/config and chmod 600 it.",
+      "name": null,
+      "need": "kube_context"
+    }
+  ],
+  "checks": [
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "min": 8
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.cpu",
+      "key": "host.cpu",
+      "message": "8 vCPUs found, 8 needed",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "allowed_cores": 8,
+        "arch": "x86_64",
+        "effective_cores": 8.0,
+        "flags": {},
+        "hypervisor": true,
+        "logical_cores": 8,
+        "physical_cores": 4,
+        "quota_cores": null,
+        "virtualization": "vm",
+        "x86_64_level": 4
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "band_bytes": 1717986918,
+        "min_available_bytes": 17179869184,
+        "min_bytes": 34359738368,
+        "swap": "any"
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.memory",
+      "key": "host.memory",
+      "message": "31.3 GiB found, 32 GiB needed, inside the 5% tolerance",
+      "name": null,
+      "needs": [],
+      "notes": [
+        "Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent)."
+      ],
+      "observed": {
+        "available_bytes": 30562426880,
+        "available_effective_bytes": 30562426880,
+        "available_estimated": false,
+        "cgroup_hierarchy": null,
+        "cgroup_limit_at": null,
+        "cgroup_limit_bytes": null,
+        "cgroup_swap_limit_bytes": null,
+        "effective_bytes": 33608118272,
+        "swap_total_bytes": 0,
+        "swap_used_bytes": 0,
+        "total_bytes": 33608118272
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "forbid_fstypes": [],
+        "forbid_options": [],
+        "min": 107374182400,
+        "min_inodes": 100000,
+        "recommended": 128849018880
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.disk",
+      "key": "host.disk",
+      "message": "`/var/lib` has 140 GiB free on `/var` (xfs). 100 GiB is needed.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "device": "253:1",
+        "free_bytes": 150323855360,
+        "free_inodes": 900000,
+        "fstype": "xfs",
+        "measured_path": "/var/lib",
+        "mount": "/var",
+        "network": false,
+        "nodev": false,
+        "noexec": false,
+        "nosuid": false,
+        "path": "/var/lib",
+        "read_only": false,
+        "total_bytes": 274877906944,
+        "total_inodes": 1000000
+      },
+      "partial": null,
+      "severity": "warn",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    },
+    {
+      "bucket": "blocker",
+      "builtin_fix": "registry.acme.example:443 ended the TLS handshake. SNI filtering, or a server that speaks only TLS 1.0 and 1.1, does this. Run `openssl s_client -connect registry.acme.example:443 -servername registry.acme.example` to see the chain. Ask the network team whether registry.acme.example is allowed.",
+      "duration_ms": 0,
+      "expected": {
+        "max_latency_ms": 2000,
+        "trust": "system"
+      },
+      "family": "net",
+      "fix": "Ask your network team to allow these endpoints through the proxy.",
+      "fix_source": "spec",
+      "id": "net.egress",
+      "key": "net.egress",
+      "message": "2 of 2 endpoints unreachable: registry.acme.example:443 (reset_after_hello), license.acme.example:443 (reset_after_hello)",
+      "name": null,
+      "needs": [
+        {
+          "hard": true,
+          "met": true,
+          "name": null,
+          "need": "network"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "endpoints": [
+          {
+            "attempts": "[truncated]",
+            "class": "reset_after_hello",
+            "endpoint": "registry.acme.example:443",
+            "lookup": "[truncated]",
+            "optional": false,
+            "result": "failed",
+            "tls": true
+          },
+          {
+            "attempts": "[truncated]",
+            "class": "reset_after_hello",
+            "endpoint": "license.acme.example:443",
+            "lookup": "[truncated]",
+            "optional": false,
+            "result": "failed",
+            "tls": true
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "block",
+      "truncated": true
+    },
+    {
+      "bucket": "required_not_run",
+      "duration_ms": 0,
+      "expected": null,
+      "family": "k8s",
+      "fix": "Set a kubeconfig, or pass --kube-context <name>, then run again.",
+      "fix_source": "rdy",
+      "id": "k8s.version",
+      "key": "k8s.version",
+      "message": "Not run. No Kubernetes cluster was reachable.",
+      "name": null,
+      "needs": [
+        {
+          "hard": true,
+          "met": false,
+          "name": null,
+          "need": "kube_context"
+        }
+      ],
+      "notes": [],
+      "observed": null,
+      "partial": null,
+      "severity": "block",
+      "skip_kind": "missing_need",
+      "started_ms": 0,
+      "status": "skipped",
+      "truncated": false
+    },
+    {
+      "bucket": "warning",
+      "duration_ms": 0,
+      "expected": null,
+      "family": "k8s",
+      "fix": "Set a kubeconfig, or pass --kube-context <name>, then run again.",
+      "fix_source": "rdy",
+      "id": "k8s.storageclass",
+      "key": "k8s.storageclass",
+      "message": "Not run. No Kubernetes cluster was reachable.",
+      "name": null,
+      "needs": [
+        {
+          "hard": true,
+          "met": false,
+          "name": null,
+          "need": "kube_context"
+        }
+      ],
+      "notes": [],
+      "observed": null,
+      "partial": null,
+      "severity": "warn",
+      "skip_kind": "missing_need",
+      "started_ms": 0,
+      "status": "skipped",
+      "truncated": false
+    },
+    {
+      "bucket": "required_not_run",
+      "duration_ms": 0,
+      "expected": null,
+      "family": "gpu",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "id": "gpu.cuda",
+      "key": "gpu.cuda",
+      "message": "Not run. This version of rdy has no gpu checks yet.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": null,
+      "partial": null,
+      "severity": "block",
+      "skip_kind": "not_in_build",
+      "started_ms": 0,
+      "status": "skipped",
+      "truncated": false
+    },
+    {
+      "bucket": "required_not_run",
+      "duration_ms": 0,
+      "expected": null,
+      "family": "aws",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "id": "aws.iam",
+      "key": "aws.iam",
+      "message": "Not run. This version of rdy has no aws checks yet.",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": null,
+      "partial": null,
+      "severity": "block",
+      "skip_kind": "not_in_build",
+      "started_ms": 0,
+      "status": "skipped",
+      "truncated": false
+    }
+  ],
+  "complete": true,
+  "exit_code": 2,
+  "host": {
+    "arch": "x86_64",
+    "container": false,
+    "host_id": null,
+    "hostname": "acme-platform.example",
+    "kernel": "5.14.0-362.el9.x86_64",
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
+      "version": "9.3"
+    }
+  },
+  "identity": {
+    "elevated": true,
+    "euid": 0,
+    "kube": null,
+    "user": null
+  },
+  "interrupted": false,
+  "kind": "Report",
+  "producer": {
+    "commit": "<commit>",
+    "name": "rdy",
+    "rdy_spec": "<rdy_spec>",
+    "target": "<target>",
+    "version": "<version>"
+  },
+  "proxy": null,
+  "redaction": {
+    "by_rule": {},
+    "ruleset": "report",
+    "total": 0
+  },
+  "run": {
+    "duration_ms": 0,
+    "finished_at": "2026-11-02T09:00:00.000Z",
+    "id": "00000000-0000-4000-8000-000000000006",
+    "options": {
+      "allow_unsigned": true,
+      "deadline_ms": 20000,
+      "jobs": 1,
+      "kube_context": null,
+      "network": true
+    },
+    "started_at": "2026-11-02T09:00:00.000Z"
+  },
+  "signature": {
+    "key_fingerprint": null,
+    "key_id": null,
+    "product": null,
+    "reason": null,
+    "signed_at": null,
+    "state": "unsigned",
+    "trust_note": null,
+    "trust_source": null
+  },
+  "spec": {
+    "annotations": {},
+    "contact": null,
+    "expires": null,
+    "file_name": "acme-platform.yaml",
+    "product": "acme-platform",
+    "serial": null,
+    "sha256": "231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f",
+    "size_bytes": 1988,
+    "version": ">=4.2"
+  },
+  "summary": {
+    "block": 1,
+    "error": 0,
+    "not_applicable": 0,
+    "optional_not_run": 1,
+    "pass": 3,
+    "required_not_run": 3,
+    "skipped": 4,
+    "timeout": 0,
+    "total": 8,
+    "warn": 0
+  },
+  "verdict": "not_ready",
+  "verdict_reason": null
+}

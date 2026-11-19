@@ -1,0 +1,5 @@
+{
+  "symlinks": {
+    "etc/resolv.conf": "/run/dnsmasq/resolv.conf"
+  }
+}

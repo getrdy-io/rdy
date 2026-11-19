@@ -48,7 +48,7 @@ our checks directly, so they belong in writing.
    use `nvidia-smi` and `/proc/driver/nvidia`.
 7. User and group lookups skip NSS too. Host checks that need a user read `/etc/passwd` and say "local
    users only" in their evidence.
-8. Temporary CI fallback for macOS arm64 (amended 2026-10-28 in M1-006, correction 05). The org has no
+8. Temporary CI fallback for macOS arm64 (superseded by ADR 0050, 2026-11-18; amended 2026-10-28 in M1-006, correction 05). The org has no
    macOS arm64 runners: `macos-15` was never assigned a runner in four PR runs, and a probe (run
    40737208354) got a runner only for `macos-15-intel`. The PR gate (`ci-ok`) therefore runs four
    native test legs (linux-x64, linux-arm64, windows-x64, macos-x64) and an `aarch64-apple-darwin`

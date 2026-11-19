@@ -1,0 +1,63 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "a.acme.test",
+      "b.acme.test",
+      "c.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`a.acme.test` resolves to a link-local, metadata, unspecified, multicast or broadcast address, which rdy will not contact. Ask the DNS team to point it at the real address, or add a line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "3 of 3 names do not resolve: `a.acme.test` (answer in a refused range), `b.acme.test` (answer in a refused range), `c.acme.test` (answer in a refused range)",
+    "notes": [
+      "`c.acme.test` has only IPv6 (AAAA) answers. A client without IPv6 cannot reach it."
+    ],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "169.254.169.123"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "a.acme.test",
+          "result": "refused_by_policy",
+          "source": "getent"
+        },
+        {
+          "addresses": [
+            "169.254.169.123"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "b.acme.test",
+          "result": "refused_by_policy",
+          "source": "getent"
+        },
+        {
+          "addresses": [
+            "64:ff9b::a9fe:a97b"
+          ],
+          "addresses_total": 1,
+          "ipv4": 0,
+          "ipv6": 1,
+          "ms": 0,
+          "name": "c.acme.test",
+          "result": "refused_by_policy",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

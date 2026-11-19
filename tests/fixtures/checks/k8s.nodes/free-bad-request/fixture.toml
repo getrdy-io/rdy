@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-bad-request"
+summary = "Light requests, and one pod whose CPU request is not a quantity"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

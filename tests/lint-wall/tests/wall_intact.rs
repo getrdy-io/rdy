@@ -931,6 +931,7 @@ const MODULE_WISE: &[(&str, &[&str])] = &[("rdy-checks-k8s", &["client"])];
 const TEST_ROOTS_EXEMPT: &[&str] = &[
     "rdy-checks-k8s/tests/client.rs",
     "rdy-checks-k8s/tests/guard.rs",
+    "rdy-checks-k8s/tests/family.rs",
     "rdy-checks-k8s/tests/impersonate.rs",
     "rdy-checks-k8s/tests/rbac_example.rs",
     "rdy-checks-k8s/tests/live_cluster.rs",

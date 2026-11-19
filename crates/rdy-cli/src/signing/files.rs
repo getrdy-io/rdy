@@ -102,27 +102,80 @@ pub fn read_private(path: &Path, cap: usize) -> Result<Zeroizing<Vec<u8>>, FileE
 ///
 /// [`FileError::Unreadable`], [`FileError::NotRegular`] or [`FileError::TooLarge`].
 pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
+    let (bytes, truncated) = read_checked(path, cap, &|| {})?;
+    if truncated {
+        return Err(FileError::TooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Like [`read_public`], with the same checks on the open handle, but a file longer than `limit` is not
+/// an error: the first `limit` bytes come back and the flag says whether there were more. `rdy spec
+/// lint` reads one byte past the spec limit this way, so it can tell an oversized file as a finding
+/// without reading all of it (M1-183).
+///
+/// # Errors
+///
+/// [`FileError::Unreadable`] or [`FileError::NotRegular`].
+pub fn read_public_prefix(path: &Path, limit: usize) -> Result<(Vec<u8>, bool), FileError> {
+    read_checked(path, limit, &|| {})
+}
+
+/// [`read_public_prefix`] with `between` called after the `stat` and before the open, where a swap would
+/// land. Tests use it to put a named pipe or a device at the path at exactly that point.
+///
+/// # Errors
+///
+/// [`FileError::Unreadable`] or [`FileError::NotRegular`].
+#[cfg(all(test, unix))]
+pub(crate) fn read_public_prefix_between(
+    path: &Path,
+    limit: usize,
+    between: &dyn Fn(),
+) -> Result<(Vec<u8>, bool), FileError> {
+    read_checked(path, limit, between)
+}
+
+fn read_checked(
+    path: &Path,
+    limit: usize,
+    between: &dyn Fn(),
+) -> Result<(Vec<u8>, bool), FileError> {
     let unreadable = |err: &io::Error| FileError::Unreadable {
         reason: crate::error::IoReason::from_io(err),
     };
-    let seen = std::fs::metadata(path).map_err(|err| unreadable(&err))?;
-    if !seen.is_file() {
+    // Unix: a `stat` first, so a device is refused before it is opened. Windows has no such step: `stat`
+    // there opens the path without the identification-level flags, so a pipe server would be connected
+    // at the default impersonation level. Every Windows check runs on the handle from `open_public`.
+    #[cfg(not(windows))]
+    let seen = {
+        let seen = std::fs::metadata(path).map_err(|err| unreadable(&err))?;
+        if !seen.is_file() {
+            return Err(FileError::NotRegular);
+        }
+        Some(seen)
+    };
+    #[cfg(windows)]
+    let seen: Option<std::fs::Metadata> = None;
+    between();
+    let mut file = open_public(path).map_err(|err| unreadable(&err))?;
+    // Windows: `is_file` only means "not a folder or a link", so a pipe or a console passes it. Ask the
+    // handle itself, before anything is read from it.
+    if !is_disk_file(&file) {
         return Err(FileError::NotRegular);
     }
-    let mut file = open_public(path).map_err(|err| unreadable(&err))?;
     let opened = file.metadata().map_err(|err| unreadable(&err))?;
-    if !opened.is_file() || !same_file(&seen, &opened) {
+    if !opened.is_file() || seen.as_ref().is_some_and(|seen| !same_file(seen, &opened)) {
         return Err(FileError::NotRegular);
     }
     let mut buf = Vec::new();
     (&mut file)
-        .take(cap as u64 + 1)
+        .take(limit as u64 + 1)
         .read_to_end(&mut buf)
         .map_err(|err| unreadable(&err))?;
-    if buf.len() > cap {
-        return Err(FileError::TooLarge);
-    }
-    Ok(buf)
+    let truncated = buf.len() > limit;
+    buf.truncate(limit);
+    Ok((buf, truncated))
 }
 
 /// Unix: the handle is the file that `stat` looked at.
@@ -151,9 +204,41 @@ fn open_public(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
-#[cfg(not(unix))]
+/// Windows: the open asks for identification level only (`SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`),
+/// so a pipe server at a path cannot impersonate the person who runs `rdy`. The flags are the documented
+/// values of `winbase.h`.
+#[cfg(windows)]
+fn open_public(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const SECURITY_SQOS_PRESENT: u32 = 0x0010_0000;
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    // Without `FILE_FLAG_BACKUP_SEMANTICS` Windows refuses to open a folder at all ("permission denied").
+    // With it the open works and the handle check says "not a regular file", which is the true answer.
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .security_qos_flags(SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_public(path: &Path) -> io::Result<File> {
     File::open(path)
+}
+
+/// Windows: `GetFileType` says a disk file. A pipe, a console or a device (`NUL`, `CON`) is refused. The
+/// call is `winapi-util`'s safe wrapper, so `rdy-cli` stays free of `unsafe`.
+#[cfg(windows)]
+fn is_disk_file(file: &File) -> bool {
+    winapi_util::file::typ(file).is_ok_and(|kind| kind.is_disk())
+}
+
+/// Unix tells a regular file from the open handle's mode, which the caller checks next.
+#[cfg(not(windows))]
+fn is_disk_file(_file: &File) -> bool {
+    true
 }
 
 #[cfg(unix)]

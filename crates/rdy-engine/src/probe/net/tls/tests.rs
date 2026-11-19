@@ -34,7 +34,7 @@ use crate::probe::{Backend, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 use crate::testing::loopback::{
     ConnectProxy, HttpOptions, HttpServer, NeverAccepts, ProxyMode, ResetAfterClientHello, TestCa,
-    Validity, closed_port,
+    TlsVersion, Validity, closed_port,
 };
 
 const META: CheckMeta = CheckMeta {
@@ -81,7 +81,9 @@ fn direct_only() -> &'static CheckInfo {
 }
 
 fn hub_over(backend: impl Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])));
+    hub.set_network(true);
+    hub
 }
 
 fn target(text: &str) -> Target {
@@ -754,6 +756,48 @@ async fn a_call_after_the_check_ended_is_refused_and_logged() {
         matches!(error, ProbeError::Denied { rule, .. } if rule == crate::probe::RULE_CHECK_FINISHED)
     );
     assert_eq!(server.accepted(), 0);
+}
+
+// ---- the server must hold the leaf's key (M1-184, SF-02) ----------------------------------------
+
+/// The server sends leaf A and signs with key B. The recording verifier accepts every chain, so the
+/// handshake signature is the only thing that ties the chain to the server: if
+/// `verify_tls12_signature` or `verify_tls13_signature` returned `assertion()`, this would give a chain.
+async fn forged_handshake_fails(version: TlsVersion) {
+    let ca = TestCa::root("Acme Test Root");
+    // Both leaves come from the same generator, so key B has the same algorithm as A's.
+    let a = ca.issue(&["web.acme.test"], Validity::Always);
+    let b = ca.issue(&["web.acme.test"], Validity::Always);
+    let server = HttpServer::start(HttpOptions::tls_signing_with_another_key(&a, &b, version))
+        .await
+        .expect("server");
+    let at = web(&server);
+    let hub = hub_over(machine(server.addr(), Some(vec![der(&ca)])));
+    let error = probe(&hub, &[&at])
+        .tls_chain(&target(&at), Route::Direct)
+        .await
+        .expect_err("no chain from a server without the leaf's key");
+    // The failure is the signature check, not a missing scheme or a refused certificate.
+    assert!(
+        matches!(
+            error,
+            ProbeError::Net(NetFailure::TlsFailed { reason, .. })
+                if reason == "the server's certificate could not be used to check its signature"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(server.accepted(), 1);
+    assert_eq!(server.application_bytes(), 0);
+}
+
+#[tokio::test]
+async fn a_server_that_signs_tls13_with_another_key_than_the_leafs_gives_no_chain() {
+    forged_handshake_fails(TlsVersion::Tls13).await;
+}
+
+#[tokio::test]
+async fn a_server_that_signs_tls12_with_another_key_than_the_leafs_gives_no_chain() {
+    forged_handshake_fails(TlsVersion::Tls12).await;
 }
 
 // ---- the live backend ---------------------------------------------------------------------------

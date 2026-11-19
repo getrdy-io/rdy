@@ -14,6 +14,8 @@ use rdy_spec::result::Status;
 use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
+mod late;
+
 use super::*;
 use crate::client::mock::Harness;
 use crate::client::{ImpersonateAs, ImpersonationError, ServerVersion};
@@ -138,7 +140,7 @@ impl Rig {
     }
 
     /// The paths of every request. Every one is a GET: this check only reads.
-    fn paths(&self) -> Vec<String> {
+    fn every_path(&self) -> Vec<String> {
         let requests = self.requests();
         assert!(
             requests.iter().all(|(method, _)| method == "GET"),
@@ -147,8 +149,32 @@ impl Rig {
         requests.into_iter().map(|(_, path)| path).collect()
     }
 
+    /// The paths of the reads of M1-114 (the namespace, discovery and the SCC list): the reads of M1-160
+    /// (webhooks, policies, Services, endpoints and the engines' policies) are left out, and the tests of
+    /// the new reads use `every_path`.
+    fn paths(&self) -> Vec<String> {
+        self.every_path()
+            .into_iter()
+            .filter(|path| !is_late_read(path))
+            .collect()
+    }
+
     fn audit(&self) {
         self.cluster.harness.audit().expect("INV-14 audit is clean");
+    }
+}
+
+/// True for a path that only the M1-160 half of the check reads.
+fn is_late_read(path: &str) -> bool {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match parts.as_slice() {
+        ["apis", "admissionregistration.k8s.io", ..] | ["apis", "discovery.k8s.io", ..] => true,
+        ["api", "v1", "namespaces", _, "services"] => true,
+        // A list of policy objects: group, version, plural. Discovery of a group version has one part less.
+        ["apis", "kyverno.io", "v1", "clusterpolicies"] => true,
+        ["apis", "policies.kyverno.io", _, _] => true,
+        ["apis", "constraints.gatekeeper.sh", "v1beta1", _] => true,
+        _ => false,
     }
 }
 
@@ -386,13 +412,16 @@ async fn the_pass_message_says_what_was_found() {
     );
     assert_eq!(finding.observed["pod_security"]["warn"], "none");
     assert_eq!(finding.observed["pod_security"]["enforce_version"], "v1.29");
-    // The webhooks of M1-160 are said not to be evaluated.
-    assert!(
-        notes(&finding).contains(
-            "Admission webhooks and ValidatingAdmissionPolicy are not evaluated by this version."
-        ),
-        "{finding:?}"
+    // Webhooks and admission policies are read now (M1-160): none are configured on this cluster, and the
+    // old "not evaluated by this version" note is gone.
+    assert!(!notes(&finding).contains("not evaluated by this version"));
+    assert_eq!(finding.observed["webhooks"]["validating"], 0);
+    assert_eq!(finding.observed["webhooks"]["mutating"], 0);
+    assert_eq!(
+        finding.observed["validating_admission_policies"]["policies"],
+        0
     );
+    assert_eq!(finding.observed["engine_policies"], json!([]));
     rig.audit();
 }
 
@@ -701,6 +730,10 @@ async fn no_namespace_means_no_namespace_request() {
             .contains("`namespace: <name>`"),
     );
     assert_eq!(finding.observed["namespace_read"], "not_named");
+    // K1: the engine never turns it into a clean pass: the partial stays on the result.
+    let result = engine(&rig, finding, None);
+    assert!(result.partial.is_some(), "{result:?}");
+    assert_ne!(result.status, Status::Pass, "{result:?}");
     assert_eq!(rig.paths(), [APIS]);
     rig.audit();
 }
@@ -1195,10 +1228,10 @@ async fn every_request_is_a_get_and_every_cluster_is_audited() {
             "{case}: {}",
             finding.message
         );
-        let paths = rig.paths();
+        let paths = rig.every_path();
         assert!(
-            paths.len() <= 8,
-            "{case}: at most eight requests: {paths:?}"
+            paths.len() <= MAX_REQUESTS,
+            "{case}: at most {MAX_REQUESTS} requests: {paths:?}"
         );
         assert!(
             !paths.iter().any(|path| path.contains("secrets")),
@@ -1220,4 +1253,36 @@ fn the_info_is_the_one_the_registry_holds() {
     assert!(INFO.wants.is_empty());
     assert_eq!(INFO.default_timeout, Some(Duration::from_secs(30)));
     assert!(INFO.peers.is_empty());
+}
+
+#[tokio::test]
+async fn openshift_with_the_sync_off_and_no_labels_says_the_cluster_default_applies() {
+    let rig = rig("openshift-sync-off-no-labels");
+    let finding = rig
+        .finding(json!({"pod_security": "baseline", "scc": "anyuid"}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        notes(&finding).contains("so the cluster default applies"),
+        "{finding:?}"
+    );
+    rig.audit();
+}
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    every_request_is_a_get_and_every_cluster_is_audited();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.admission"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.admission is read by no fixture of the tests listed here"
+    );
 }

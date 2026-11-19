@@ -7,12 +7,12 @@ use rdy_engine::check::{Finding, Level};
 use serde_json::{Value, json};
 
 use super::engines::{self, Found, FoundGroup, Group};
-use super::judge::{Gathered, NsFacts, Openshift, judge, shown};
+use super::judge::{Gathered, NsFacts, Openshift, SyncLabel, judge, shown};
 use super::level::{Label, Labels, Need, Standard, Version, need_of};
 use super::scc::uid_range;
 use super::*;
 
-fn params(spec: Value) -> K8sAdmission {
+pub(super) fn params(spec: Value) -> K8sAdmission {
     serde_json::from_value(spec).expect("the parameters parse")
 }
 
@@ -24,7 +24,7 @@ fn labels(pairs: &[(&str, &str)]) -> Labels {
     Labels::from_map(&map)
 }
 
-fn clean(finding: &Finding) {
+pub(super) fn clean(finding: &Finding) {
     for text in finding.fix.iter().chain(&finding.notes) {
         if let Err(error) = rdy_engine::fixtext::check(text) {
             panic!("fix text breaks the allow-list: {error}\n{text}");
@@ -33,7 +33,7 @@ fn clean(finding: &Finding) {
 }
 
 /// A gathered cluster with a readable namespace and nothing else found.
-fn plain(facts: NsFacts) -> Gathered {
+pub(super) fn plain(facts: NsFacts) -> Gathered {
     Gathered {
         namespace: Some("acme".to_owned()),
         ns: Some(Read::Ok(facts)),
@@ -42,20 +42,34 @@ fn plain(facts: NsFacts) -> Gathered {
         engines: Vec::new(),
         scc: None,
         rke2: false,
+        webhooks: Webhooks {
+            validating: Read::Ok(Listed::default()),
+            mutating: Read::Ok(Listed::default()),
+            services: Vec::new(),
+        },
+        policies: Policies {
+            policies: Read::Ok(Listed::default()),
+            bindings: None,
+        },
+        engine_policies: EnginePolicies::default(),
     }
 }
 
-fn facts(pairs: &[(&str, &str)]) -> NsFacts {
+pub(super) fn facts(pairs: &[(&str, &str)]) -> NsFacts {
     NsFacts {
         labels: labels(pairs),
+        all_labels: pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect(),
         uid_range: None,
-        label_sync_off: false,
+        sync_label: SyncLabel::Unset,
     }
 }
 
 // ---- the level the product needs ----------------------------------------------------------------------------
 
-fn need(spec: Value) -> Option<Need> {
+pub(super) fn need(spec: Value) -> Option<Need> {
     need_of(&params(spec))
 }
 
@@ -363,6 +377,7 @@ fn the_worst_finding_is_the_message_and_the_rest_are_notes() {
             kinds: vec!["ClusterPolicy".to_owned()],
             more: 0,
             legacy_policies: Some(true),
+            lists: Vec::new(),
         }],
     }];
     let spec = json!({"uses": ["hostPath"]});
@@ -497,10 +512,116 @@ fn the_observed_value_is_complete_for_a_found_namespace() {
             "uid_range": null,
             "scc_on_cluster": null,
             "policy_engines": [],
+            "webhooks": {"validating": 0, "mutating": 0, "applying": []},
+            "validating_admission_policies": {"policies": 0, "denying": []},
+            "engine_policies": [],
         })
     );
     assert_eq!(
         finding.expected,
         json!({"needs_level": "baseline", "namespace": "acme", "scc": null})
     );
+}
+
+// ---- OpenShift label sync ------------------------------------------------------------------------------------
+
+const PSA: &str = "pod-security.kubernetes.io/";
+
+/// An OpenShift cluster with namespace `name`, the sync label `sync` and these Pod Security labels.
+fn on_openshift(name: &str, sync: SyncLabel, pairs: &[(&str, &str)]) -> Finding {
+    let mut gathered = plain(facts(pairs));
+    gathered.namespace = Some(name.to_owned());
+    gathered.openshift = Openshift::Yes;
+    if let Some(Read::Ok(facts)) = gathered.ns.as_mut() {
+        facts.sync_label = sync;
+    }
+    let spec = json!({"pod_security": "baseline", "scc": "anyuid"});
+    judge(&params(spec.clone()), need(spec).as_ref(), &gathered)
+}
+
+fn synced_note(finding: &Finding) -> bool {
+    finding
+        .notes
+        .iter()
+        .any(|note| note.contains("synced from the SCCs"))
+}
+
+#[test]
+fn openshift_never_syncs_default_kube_and_openshift_and_starts_user_openshift_namespaces_off() {
+    let warn = format!("{PSA}warn");
+    let audit = format!("{PSA}audit");
+    let pairs = [
+        (warn.as_str(), "restricted"),
+        (audit.as_str(), "restricted"),
+    ];
+    // (namespace, sync label, whether the "synced" note holds).
+    let cases = [
+        ("acme", SyncLabel::Unset, true),
+        ("acme", SyncLabel::On, true),
+        ("acme", SyncLabel::Off, false),
+        ("default", SyncLabel::Unset, false),
+        ("default", SyncLabel::On, false),
+        ("kube-system", SyncLabel::Unset, false),
+        ("kube-public", SyncLabel::On, false),
+        ("openshift", SyncLabel::Unset, false),
+        ("openshift-monitoring", SyncLabel::Unset, false),
+        ("openshift-acme", SyncLabel::Unset, false),
+        // The label turns it on for a user-created `openshift-*` namespace.
+        ("openshift-acme", SyncLabel::On, true),
+        ("openshift-acme", SyncLabel::Off, false),
+        // A system namespace is exempt even with the label `true`.
+        ("openshift-monitoring", SyncLabel::On, false),
+        ("openshift-kube-apiserver", SyncLabel::On, false),
+        ("openshift-user-workload-monitoring", SyncLabel::On, false),
+        ("openshift-cloud-credential-operator", SyncLabel::On, false),
+        // A name that only starts like a system one is not exempt.
+        ("openshift-monitoring-extra", SyncLabel::On, true),
+        // The one system namespace of that prefix that the controller does sync.
+        ("openshift-operators", SyncLabel::Unset, true),
+        // Only the exact names and prefixes count.
+        ("openshiftish", SyncLabel::Unset, true),
+        ("kube", SyncLabel::Unset, true),
+    ];
+    for (name, sync, synced) in cases {
+        let finding = on_openshift(name, sync, &pairs);
+        assert_eq!(
+            synced_note(&finding),
+            synced,
+            "{name} {sync:?}: {finding:?}"
+        );
+        let level = if synced { Level::Pass } else { Level::Warn };
+        assert_eq!(finding.level, level, "{name} {sync:?}: {finding:?}");
+        clean(&finding);
+    }
+}
+
+#[test]
+fn with_the_sync_off_and_no_warn_or_audit_label_the_cluster_default_applies() {
+    let unsynced = [
+        ("acme", SyncLabel::Off),
+        ("default", SyncLabel::Unset),
+        ("openshift-acme", SyncLabel::Unset),
+    ];
+    for (name, sync) in unsynced {
+        let finding = on_openshift(name, sync, &[]);
+        assert_eq!(finding.level, Level::Pass, "{name}: {finding:?}");
+        let said = finding
+            .notes
+            .iter()
+            .any(|note| note.contains("so the cluster default applies"));
+        assert!(said, "{name}: {finding:?}");
+        clean(&finding);
+    }
+    // Synced, or a label set by hand: no such note.
+    let warn = format!("{PSA}warn");
+    for finding in [
+        on_openshift("acme", SyncLabel::Unset, &[]),
+        on_openshift("acme", SyncLabel::Off, &[(warn.as_str(), "baseline")]),
+    ] {
+        let said = finding
+            .notes
+            .iter()
+            .any(|note| note.contains("cluster default applies"));
+        assert!(!said, "{finding:?}");
+    }
 }

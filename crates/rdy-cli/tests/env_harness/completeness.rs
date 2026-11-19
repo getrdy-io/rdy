@@ -9,7 +9,7 @@
 //! | `Pass` | always | a case whose `expect.json` has `result.level` `pass` |
 //! | `NonPass` | always | a case whose `result.level` is `warn` or `fail` |
 //! | `Partial` | the check has a `Root` want | a case with `caps.root = false` and `result.partial` set |
-//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case whose `native`, `commands`, `api` or `net.json` files hold a `blackhole` or a `delay_ms` of at least the check's timeout, and whose `expect.json` has `result.timed_out_ms` (the scheduler ended the check) or a `result.notes` entry that names the hang (the check cut the source itself and still gave its verdict) |
+//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case whose `native`, `commands`, `api`, `net.json` or `chain.json` files hold a `blackhole` (or a `silent` chain) or a `delay_ms` of at least the check's timeout, and whose `expect.json` has `result.timed_out_ms` (the scheduler ended the check) or a `result.notes` entry that names the hang (the check cut the source itself and still gave its verdict) |
 //!
 //! A note names the hang when it holds `timed out` or `no reply within` (`HANG_NOTES`). A hang with neither
 //! `timed_out_ms` nor such a note proves nothing about how the check ended, so it does not count.
@@ -287,7 +287,17 @@ fn holds_a_hang(dir: &Path, timeout_ms: u128) -> Result<bool, String> {
         }
     }
     let net = dir.join("net.json");
-    Ok(net.is_file() && has_blackhole(&read_json(&net)?))
+    if net.is_file() && has_blackhole(&read_json(&net)?) {
+        return Ok(true);
+    }
+    let chain = dir.join("chain.json");
+    Ok(chain.is_file() && has_silent_peer(&read_json(&chain)?))
+}
+
+/// A `chain` of `silent` in a `chain.json`: the in-memory peer of `net.tls_intercept` that never answers
+/// the ClientHello. It is the same hang as a `blackhole`, with no address to write it on.
+fn has_silent_peer(chain: &Value) -> bool {
+    chain.get("chain").and_then(Value::as_str) == Some("silent")
 }
 
 /// Every `.json` file below `dir`, in name order.

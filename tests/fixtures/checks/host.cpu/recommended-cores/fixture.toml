@@ -1,0 +1,12 @@
+schema = 1
+name = "recommended-cores"
+summary = "8 vCPUs, min 4 and recommended 16: a warning"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

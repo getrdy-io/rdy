@@ -243,7 +243,7 @@ pub enum SpecError {
         number: usize,
     },
     /// The spec has more checks than the limit.
-    #[error("{count} checks. The limit is {limit}")]
+    #[error("{count} checks. The limit is {limit}.")]
     TooManyChecks {
         /// How many checks the spec has.
         count: usize,
@@ -254,7 +254,7 @@ pub enum SpecError {
     #[error("the spec has no checks")]
     NoChecks,
     /// The checks name more distinct hosts than the limit (threat model INV-11).
-    #[error("{count} endpoints. The limit is {limit}")]
+    #[error("{count} endpoints. The limit is {limit}.")]
     TooManyHosts {
         /// How many distinct hosts the spec names across `net.egress`, `net.tls_intercept`, `net.dns`,
         /// `host.time_sync`, `net.registry` and `net.bandwidth`.
@@ -263,7 +263,7 @@ pub enum SpecError {
         limit: usize,
     },
     /// The checks name more distinct host and port pairs than the limit (threat model INV-11).
-    #[error("{count} host and port pairs. The limit is {limit}")]
+    #[error("{count} host and port pairs. The limit is {limit}.")]
     TooManyEndpoints {
         /// How many distinct host and port pairs the spec names across the same checks, `net.dns`
         /// apart.
@@ -648,21 +648,21 @@ mod tests {
                 count: 257,
                 limit: 256
             }),
-            "257 checks. The limit is 256"
+            "257 checks. The limit is 256."
         );
         assert_eq!(
             msg(SpecError::TooManyHosts {
                 count: 65,
                 limit: 64
             }),
-            "65 endpoints. The limit is 64"
+            "65 endpoints. The limit is 64."
         );
         assert_eq!(
             msg(SpecError::TooManyEndpoints {
                 count: 257,
                 limit: 256
             }),
-            "257 host and port pairs. The limit is 256"
+            "257 host and port pairs. The limit is 256."
         );
         assert_eq!(
             msg(SpecError::BadExpires),

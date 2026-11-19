@@ -326,7 +326,7 @@ impl KubeError {
                 } else if *ca_set {
                     "The certificate authority in the kubeconfig does not match this server, or a proxy re-signs TLS (run net.tls_intercept)."
                 } else {
-                    "The kubeconfig names no certificate authority, so rdy trusts only its bundled public roots, not this machine's store (kubectl uses it). Pass a copy with certificate-authority set with --kubeconfig."
+                    "The kubeconfig names no certificate authority, so rdy trusts the roots it read from this machine's store, or its bundled public roots when it could read none. If the cluster's root is in neither, pass a copy with certificate-authority set with --kubeconfig."
                 };
                 with_proxy_note(base, *proxied)
             }

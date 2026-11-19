@@ -29,7 +29,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use http::Uri;
-use rdy_engine::probe::ProxyUrl;
+use rdy_engine::probe::{Exemption, NoProxy, ProxyUrl};
 use rdy_engine::redact::KNOWN_SECRET_MIN_LEN;
 
 use super::Env;
@@ -351,92 +351,19 @@ fn is_loopback(host: &str) -> bool {
     host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
-/// The first `NO_PROXY` entry that covers `host` and `port`, lower-cased.
+/// The first `NO_PROXY` entry that covers `host` and `port`, lower-cased. The matcher is the facade's
+/// (`rdy_engine::probe::NoProxy`, M1-098), the one every check uses, so `k8s.access` and `net.proxy`
+/// cannot disagree about a list. A loopback host is judged before this call.
 ///
 /// `host` is lower case with no brackets.
 pub(crate) fn no_proxy_entry(list: &str, host: &str, port: u16) -> Option<String> {
-    let ip = host.parse::<IpAddr>().ok();
-    for raw in list.split(',') {
-        let entry = raw.trim().to_ascii_lowercase();
-        if entry.is_empty() {
-            continue;
-        }
-        if entry == "*" {
-            return Some(entry);
-        }
-        if let Some((net, bits)) = entry.split_once('/') {
-            if let (Some(ip), Ok(net), Ok(bits)) = (ip, net.parse::<IpAddr>(), bits.parse::<u8>())
-                && cidr_contains(net, bits, ip)
-            {
-                return Some(entry);
-            }
-            continue;
-        }
-        // `host:abc` is not an entry Go can match: it never matches, not even the bare name.
-        let Some((name, entry_port)) = split_port(&entry) else {
-            continue;
-        };
-        if entry_port.is_some_and(|wanted| wanted != port) {
-            continue;
-        }
-        if let Ok(listed) = name.parse::<IpAddr>() {
-            if ip == Some(listed) {
-                return Some(entry);
-            }
-            continue;
-        }
-        if name.is_empty() {
-            continue;
-        }
-        // `*.acme.example` is `.acme.example`. A name with no leading dot matches itself too.
-        let dotted = name
-            .strip_prefix("*.")
-            .map_or_else(|| name.to_owned(), |rest| format!(".{rest}"));
-        let (suffix, itself) = if dotted.starts_with('.') {
-            (dotted, false)
-        } else {
-            (format!(".{dotted}"), true)
-        };
-        if host.ends_with(&suffix) || (itself && host == &suffix[1..]) {
-            return Some(entry);
-        }
-    }
-    None
-}
-
-/// Splits `name:port`, `[v6]:port` and `[v6]`. An unbracketed IPv6 literal has no port. `None` for an
-/// entry whose port is not a number (`host:abc`, `host:`), which matches nothing.
-fn split_port(entry: &str) -> Option<(&str, Option<u16>)> {
-    if let Some(rest) = entry.strip_prefix('[') {
-        let Some((name, after)) = rest.split_once(']') else {
-            return Some((entry, None));
-        };
-        if after.is_empty() {
-            return Some((name, None));
-        }
-        let port = after.strip_prefix(':')?.parse().ok()?;
-        return Some((name, Some(port)));
-    }
-    if entry.matches(':').count() == 1
-        && let Some((name, port)) = entry.split_once(':')
-    {
-        return port.parse().ok().map(|port| (name, Some(port)));
-    }
-    Some((entry, None))
-}
-
-/// Whether `ip` is inside the network `net`/`bits`. A family mismatch or a prefix too long is no match.
-fn cidr_contains(net: IpAddr, bits: u8, ip: IpAddr) -> bool {
-    match (net, ip) {
-        (IpAddr::V4(net), IpAddr::V4(ip)) if bits <= 32 => {
-            let mask = u32::MAX.checked_shl(32 - u32::from(bits)).unwrap_or(0);
-            u32::from(net) & mask == u32::from(ip) & mask
-        }
-        (IpAddr::V6(net), IpAddr::V6(ip)) if bits <= 128 => {
-            let mask = u128::MAX.checked_shl(128 - u32::from(bits)).unwrap_or(0);
-            u128::from(net) & mask == u128::from(ip) & mask
-        }
-        _ => false,
+    match NoProxy::parse(list).exempts(host, port)? {
+        Exemption::Entry(entry) => Some(entry),
+        Exemption::All => Some("*".to_owned()),
+        // A loopback host is exempt too, but `resolve` judges it first and names it in its own words
+        // ("loopback addresses never use a proxy"), so it never reaches here as an entry. `Exemption` is
+        // non-exhaustive, so a later kind also falls here and reads as "no entry".
+        _ => None,
     }
 }
 

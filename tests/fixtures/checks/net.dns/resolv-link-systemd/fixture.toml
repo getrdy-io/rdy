@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-resolv-link-systemd"
+summary = "getent hangs and resolv.conf links to the declared systemd-resolved file"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

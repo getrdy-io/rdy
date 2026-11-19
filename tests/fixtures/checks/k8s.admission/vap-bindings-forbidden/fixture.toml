@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-vap-bindings-forbidden"
+summary = "The identity may list policies but not bindings"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
