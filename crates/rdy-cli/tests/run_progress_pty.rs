@@ -96,8 +96,17 @@ fn run(on_pty: bool, term: Option<&str>, env: &[(&str, &str)], args: &[&str]) ->
     }
 
     let master = if on_pty {
+        // rustix has `OpenptFlags::CLOEXEC` only where the OS takes it (Linux, FreeBSD, NetBSD). Elsewhere,
+        // macOS among them, the flag is set on the descriptor right after it is opened.
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd"))]
         let master =
             openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC).expect("openpt");
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "netbsd")))]
+        let master = {
+            let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("openpt");
+            rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).expect("close on exec");
+            master
+        };
         grantpt(&master).expect("grantpt");
         unlockpt(&master).expect("unlockpt");
         let name = ptsname(&master, Vec::new()).expect("ptsname");
