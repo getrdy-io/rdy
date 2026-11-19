@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-quantities"
+summary = "Allocatable in the other forms of a quantity: plain cores, M and G, an exponent and plain bytes"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

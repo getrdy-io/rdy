@@ -35,8 +35,10 @@
           "d_type": null,
           "installed": false,
           "proxy": {
-            "http": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
+            "http": "http://proxy.acme.example:3128",
+            "http_credentials": true,
             "https": null,
+            "https_credentials": null,
             "no_proxy": null,
             "source": "/etc/docker/daemon.json"
           },

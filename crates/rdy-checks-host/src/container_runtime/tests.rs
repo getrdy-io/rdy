@@ -52,6 +52,11 @@ const CASES: &[(&str, &str)] = &[
     expect!("docker-down"),
     expect!("docker-down-bad-json"),
     expect!("docker-dropin-proxy"),
+    expect!("docker-proxy-no-scheme"),
+    expect!("docker-dropin-no-scheme"),
+    expect!("docker-daemon-json-no-scheme"),
+    expect!("docker-daemon-json-socks-proxy"),
+    expect!("docker-dropin-space-in-password"),
     expect!("docker-rootless"),
     expect!("docker-podman-shim"),
     expect!("podman-ok"),
@@ -83,6 +88,10 @@ const HUNG: &[&str] = &["docker-hung"];
 
 /// The secret that sits in two of the cases, in a Docker `/info` body and in `daemon.json`.
 const SECRET: &str = "REDACTED-TEST-TOKEN";
+
+/// The password and the user name of the proxy URLs with no scheme in the `*-no-scheme` cases.
+const NOSCHEME_CANARY: &str = "NOSCHEME-CANARY-PW";
+const NOSCHEME_USER: &str = "canary-svc";
 
 fn load(case: &str) -> Fixture {
     let fixture = Fixture::load(
@@ -313,6 +322,11 @@ fn the_levels_are_what_the_catalog_says() {
         ("docker-down", Level::Warn),
         ("docker-down-bad-json", Level::Warn),
         ("docker-dropin-proxy", Level::Warn),
+        ("docker-proxy-no-scheme", Level::Pass),
+        ("docker-dropin-no-scheme", Level::Warn),
+        ("docker-daemon-json-no-scheme", Level::Warn),
+        ("docker-daemon-json-socks-proxy", Level::Warn),
+        ("docker-dropin-space-in-password", Level::Warn),
         ("docker-rootless", Level::Pass),
         ("docker-podman-shim", Level::Fail),
         ("podman-ok", Level::Pass),
@@ -860,6 +874,50 @@ fn a_hung_daemon_does_not_cost_the_other_runtimes_their_result() {
 }
 
 #[test]
+fn three_slow_sockets_are_asked_together_and_cost_one_limit_not_three() {
+    // Docker, Podman and a rootless Docker all accept the connection and never answer. Asked one
+    // after the other they would cost 3 x 1.5 s. Asked together they cost one 1.5 s limit.
+    let fixture = load("docker-slow");
+    let hour = Duration::from_secs(3600);
+    let replay = machine("docker-slow", &fixture)
+        .symlink(SOCK_PODMAN, "socket:[1001]")
+        .unix_get_after(SOCK_PODMAN, "/version", 200, "{}", hour)
+        .env("XDG_RUNTIME_DIR", "/run/user/0")
+        .unix_get_after("/run/user/0/docker.sock", "/version", 200, "{}", hour);
+    let test_run = TestRun::new(replay);
+    let entry = json!({"id": "host.container_runtime"});
+    let scheduler = test_run.scheduler(1, Os::Linux, fixture.available_needs());
+    let planned = Planned::new(Arc::new(check(&entry)), "host.container_runtime");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("a runtime");
+    let started = tokio::time::Instant::now();
+    let mut ran = runtime.block_on(async {
+        let ran = scheduler.run(vec![planned]).await;
+        assert!(
+            started.elapsed() <= Duration::from_millis(1600),
+            "the three slow sockets cost {:?}, not one limit",
+            started.elapsed()
+        );
+        ran
+    });
+    let End::Done(done) = ran.remove(0).end else {
+        panic!("the check did not finish");
+    };
+    let finding = done.as_ref().as_ref().expect("a finding");
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    let timeouts = test_run
+        .action_log()
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Http && a.outcome == ActionOutcome::Timeout)
+        .count();
+    assert_eq!(timeouts, 3, "one timed-out request per socket");
+}
+
+#[test]
 fn the_snapshotter_fix_names_the_table_of_the_config_version_and_the_value_of_the_spec() {
     let v3 = run("containerd-v3-snapshotter");
     let fix = v3.finding().fix.clone().expect("a fix");
@@ -933,6 +991,60 @@ fn the_whole_result_is_searched_for_secrets() {
             "{case}: user and password reached the result"
         );
     }
+    // A proxy URL with no scheme, from each of the three sources, with a canary password. The redactor
+    // takes the userinfo, and the check stores only the origin and a flag, so the user and the password
+    // reach nothing, and the proxy host stays.
+    for case in [
+        "docker-proxy-no-scheme",
+        "docker-dropin-no-scheme",
+        "docker-daemon-json-no-scheme",
+    ] {
+        let result = run(case);
+        let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+        for planted in [NOSCHEME_CANARY, NOSCHEME_USER] {
+            assert!(!everything.contains(planted), "{case}: {planted} leaked");
+        }
+        let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+        assert_eq!(proxy["http"], "http://proxy.acme.example:3128", "{case}");
+        assert_eq!(proxy["http_credentials"], true, "{case}");
+    }
+    // `/info` has both fields.
+    let result = run("docker-proxy-no-scheme");
+    let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["https"], "http://proxy.acme.example:3128");
+    assert_eq!(proxy["https_credentials"], true);
+    // A password the redactor does not read (a space ends the value it reads): the check still stores
+    // only the origin and a flag. A socks5 proxy is kept as its evidence URL, with a note that names
+    // the source and not the text.
+    let result = run("docker-dropin-space-in-password");
+    let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+    for planted in ["CANARY-PW", NOSCHEME_USER] {
+        assert!(
+            !everything.contains(planted),
+            "space case: {planted} leaked"
+        );
+    }
+    let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["http"], "http://proxy.acme.example:3128");
+    assert_eq!(proxy["http_credentials"], true);
+    let result = run("docker-daemon-json-socks-proxy");
+    let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+    for planted in ["SOCKS-CANARY-PW", NOSCHEME_USER] {
+        assert!(
+            !everything.contains(planted),
+            "socks case: {planted} leaked"
+        );
+    }
+    let finding = result.finding();
+    let proxy = &finding.observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["https"], "socks5://proxy.acme.example:1080");
+    assert!(
+        finding.notes.iter().any(|n| n.contains(
+            "The https proxy in /etc/docker/daemon.json is not an http://host:port address"
+        )),
+        "{:?}",
+        finding.notes
+    );
     // The config with the password still parses, so the case is judged on its cgroup driver.
     let result = run("containerd-registry-auth");
     assert_eq!(result.finding().level, Level::Pass);

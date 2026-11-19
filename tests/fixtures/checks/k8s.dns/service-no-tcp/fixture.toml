@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-service-no-tcp"
+summary = "The Service has a ClusterIP and UDP port 53 only"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

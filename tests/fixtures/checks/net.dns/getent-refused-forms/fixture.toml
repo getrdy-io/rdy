@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-getent-refused-forms"
+summary = "getent answers with the metadata address in three forms"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

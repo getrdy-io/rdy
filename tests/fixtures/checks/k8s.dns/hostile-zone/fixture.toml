@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-hostile-zone"
+summary = "A Corefile whose kubernetes zone is a quoted shell command"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

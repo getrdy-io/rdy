@@ -245,6 +245,9 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
             format!("{prefix}/namespaces/{}/{resource}", name(only))
         }
         Access::Get(only) => format!("{prefix}/{resource}/{}", name(only)),
+        Access::GetIn { namespace, name } => {
+            format!("{prefix}/namespaces/{namespace}/{resource}/{name}")
+        }
     }
 }
 
@@ -253,7 +256,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            if matches!(access, Access::Get(_))
+            if matches!(access, Access::Get(_) | Access::GetIn { .. })
                 || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
@@ -284,6 +287,10 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             Access::List,
             Access::ListInNamespace(Only::Any),
             Access::Get(Only::Any),
+            Access::GetIn {
+                namespace: "x",
+                name: "x",
+            },
         ];
         for access in all {
             let listed = entry
@@ -295,6 +302,34 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
         }
+    }
+}
+
+#[test]
+fn a_get_in_one_namespace_names_both_the_namespace_and_the_object() {
+    // k8s.dns: the DNS service and the Corefile ConfigMap are read by name in one namespace each.
+    for path in [
+        "/api/v1/namespaces/kube-system/services/kube-dns",
+        "/api/v1/namespaces/openshift-dns/services/dns-default",
+        "/api/v1/namespaces/kube-system/configmaps/coredns",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
+    }
+    for path in [
+        // Another name, another namespace, the pair of another entry, a list, and a subresource.
+        "/api/v1/namespaces/kube-system/services/other",
+        "/api/v1/namespaces/default/services/kube-dns",
+        "/api/v1/namespaces/kube-system/services/dns-default",
+        "/api/v1/namespaces/openshift-dns/configmaps/coredns",
+        "/api/v1/namespaces/kube-system/configmaps/kube-dns",
+        "/api/v1/namespaces/kube-system/configmaps",
+        "/api/v1/configmaps",
+        "/api/v1/services",
+        "/api/v1/namespaces/kube-system/services",
+        "/api/v1/namespaces/kube-system/configmaps/coredns/status",
+        "/api/v1/namespaces/kube-system/services/kube-dns/proxy",
+    ] {
+        assert!(judge_get(path).is_err(), "{path}");
     }
 }
 
@@ -386,6 +421,32 @@ fn an_endpoint_slice_list_must_name_one_service_by_label() {
 }
 
 #[test]
+fn a_key_selector_needs_a_term_on_its_key() {
+    // The rule on the type, with the `status.phase` key of the pod list entry. The text is the decoded
+    // `fieldSelector` value.
+    let phase = FieldSelector::Key("status.phase");
+    for text in [
+        "status.phase!=Succeeded,status.phase!=Failed",
+        "status.phase=Running",
+        "status.phase==Running",
+        "spec.nodeName=n1,status.phase!=Failed",
+        "status.phase!=Failed,spec.nodeName=n1",
+    ] {
+        assert!(phase.met_by(Some(text), None), "{text}");
+    }
+    for text in [
+        "spec.nodeName=n1",
+        "metadata.name=status.phase",
+        "xstatus.phase=Running",
+        "status.phasex=Running",
+        "",
+    ] {
+        assert!(!phase.met_by(Some(text), None), "{text}");
+    }
+    assert!(!phase.met_by(None, None));
+}
+
+#[test]
 fn a_pod_list_needs_the_phase_field_selector() {
     let pods = "/api/v1/pods";
     for query in [
@@ -429,6 +490,15 @@ fn a_pod_list_needs_the_phase_field_selector() {
             "{query}"
         );
     }
+    // Only a list: a get of one pod by name is not an allowed shape.
+    assert_eq!(
+        judge_get("/api/v1/namespaces/app/pods?fieldSelector=status.phase%21%3DFailed"),
+        Err(RULE_NOT_ALLOWED)
+    );
+    assert_eq!(
+        judge_get("/api/v1/namespaces/app/pods/web-0"),
+        Err(RULE_NOT_ALLOWED)
+    );
 }
 
 #[test]
@@ -1310,7 +1380,9 @@ fn calls_of(check: &str) -> Vec<Call> {
         "k8s.nodes" => vec![
             get("/api/v1/nodes?&limit=500"),
             get(pods_uri()),
-            get("/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed"),
+            get(
+                "/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed&limit=500",
+            ),
             get("/apis/karpenter.sh"),
             get("/apis/karpenter.k8s.aws"),
             get("/apis/apps/v1/namespaces/kube-system/deployments?&limit=500"),

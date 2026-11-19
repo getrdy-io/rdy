@@ -47,6 +47,7 @@ use serde_json::Value;
 
 use super::policy::{RULE_NOT_DIR, RULE_NOT_FILE_OR_DIR, RULE_NOT_REGULAR};
 use super::sealed::Sealed;
+pub use super::sock::replay::DnsScript;
 use super::sock::{UdpReply, UnixResponse};
 use super::{
     Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, Output, ProbeError, ReadGuard,
@@ -864,6 +865,31 @@ impl Backend for Replay {
             // `runtime` there is no clock and the timeout is immediate.
             if matches!(answer, Err(ProbeError::Timeout)) {
                 let _ = pause(timeout).await;
+            }
+            answer
+        })
+    }
+
+    fn dns_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        transport: super::sock::DnsTransport,
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(async move {
+            let delay = self.net.dns_delay(to);
+            // A server that answers after the limit is a timeout at the limit, as a live one is.
+            if delay >= timeout {
+                pause(timeout).await.map_err(|e| ProbeError::from_io(&e))?;
+                return Err(ProbeError::Timeout);
+            }
+            pause(delay).await.map_err(|e| ProbeError::from_io(&e))?;
+            let answer = self.net.dns(to, payload, transport, max_reply);
+            // A silent server takes what is left of the timeout, as a live one does.
+            if matches!(answer, Err(ProbeError::Timeout)) {
+                let _ = pause(timeout.saturating_sub(delay)).await;
             }
             answer
         })

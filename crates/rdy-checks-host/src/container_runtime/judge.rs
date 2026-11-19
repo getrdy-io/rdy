@@ -5,6 +5,8 @@
 //! has no issue, and the others' issues become notes. With no allowed runtime present the check fails.
 
 use rdy_engine::check::{Finding, Level, Need, Partial};
+use rdy_engine::probe::ProxyUrl;
+use rdy_engine::redact::evidence_url;
 use rdy_engine::text::escape_untrusted;
 use rdy_engine::units::version_at_least;
 use rdy_spec::check::{CgroupDriver, ContainerRuntime};
@@ -277,7 +279,7 @@ fn start_fix(seen: &Seen) -> String {
     format!("Run `systemctl enable --now {}`.", seen.unit())
 }
 
-fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<Issue> {
+fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet, root: bool) -> Vec<Issue> {
     let name = seen.named();
     let mut out = Vec::new();
 
@@ -292,7 +294,10 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
         Api::Denied => out.push(Issue::new(
             Level::Warn,
             format!("{name} is present, but this user may not open its socket {}, so rdy could not read its settings.", seen.socket),
-            if seen.kind == ContainerRuntime::Docker {
+            if root {
+                // Root was refused, so "run as root" would send the reader in a circle.
+                "A security module (SELinux or AppArmor) or a user namespace may be refusing rdy the socket.".to_owned()
+            } else if seen.kind == ContainerRuntime::Docker {
                 format!("Run rdy as root. Adding the user to the docker group with `usermod -aG docker USER` also works. {DOCKER_GROUP_WARNING}")
             } else {
                 "Run rdy as root, or as a user who may open the socket.".to_owned()
@@ -348,7 +353,7 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
         }
     }
 
-    out.extend(cgroup_issues(check, seen, kubelet, state_issue));
+    out.extend(cgroup_issues(check, seen, kubelet, state_issue, root));
     out.extend(storage_issues(check, seen, state_issue));
 
     if seen.d_type == Some(false) {
@@ -371,6 +376,7 @@ fn cgroup_issues(
     seen: &Seen,
     kubelet: &Kubelet,
     state_issue: bool,
+    root: bool,
 ) -> Vec<Issue> {
     let name = seen.named();
     let target = check.cgroup_driver.unwrap_or(CgroupDriver::Systemd);
@@ -402,10 +408,19 @@ fn cgroup_issues(
                 escape_untrusted(why),
                 seen.name()
             ),
-            format!(
-                "Run rdy as root, or check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
-                driver_text(have)
-            ),
+            // "Run rdy as root" is said once: not when rdy is root, and not when the denied socket
+            // already said it.
+            if root || matches!(seen.api, Api::Denied) {
+                format!(
+                    "Check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
+                    driver_text(have)
+                )
+            } else {
+                format!(
+                    "Run rdy as root, or check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
+                    driver_text(have)
+                )
+            },
         )]
         .into_iter()
         .chain(spec_cgroup_issue(check, seen, have))
@@ -568,13 +583,54 @@ fn list_text(words: &[&str]) -> String {
     }
 }
 
+/// A proxy URL as the result stores it, never as it was read.
+struct StoredProxy {
+    /// `ProxyUrl::origin` (`http://host:port`), or the `evidence_url` of a value that `ProxyUrl` refuses,
+    /// or `None` when there is neither.
+    shown: Option<String>,
+    /// The URL carried userinfo. For a value `ProxyUrl` refuses, any `@` counts.
+    credentials: bool,
+    /// `ProxyUrl` refused the value.
+    refused: bool,
+}
+
+fn store_proxy(value: Option<&str>) -> Option<StoredProxy> {
+    let value = value?;
+    Some(match ProxyUrl::parse(value) {
+        Ok(url) => StoredProxy {
+            shown: Some(url.origin()),
+            credentials: url.has_credentials(),
+            refused: false,
+        },
+        Err(_) => StoredProxy {
+            shown: evidence_url(value),
+            credentials: value.contains('@'),
+            refused: true,
+        },
+    })
+}
+
 fn proxy_json(proxy: &(Proxy, &'static str)) -> Value {
+    let http = store_proxy(proxy.0.http.as_deref());
+    let https = store_proxy(proxy.0.https.as_deref());
     json!({
         "source": proxy.1,
-        "http": proxy.0.http,
-        "https": proxy.0.https,
+        "http": http.as_ref().and_then(|p| p.shown.as_deref()),
+        "http_credentials": http.as_ref().map(|p| p.credentials),
+        "https": https.as_ref().and_then(|p| p.shown.as_deref()),
+        "https_credentials": https.as_ref().map(|p| p.credentials),
         "no_proxy": proxy.0.no_proxy,
     })
+}
+
+/// The proxy values that `ProxyUrl` refuses, by field name. The note that follows names the source and
+/// never the text.
+fn refused_proxies(proxy: &Proxy) -> Vec<&'static str> {
+    [("http", &proxy.http), ("https", &proxy.https)]
+        .into_iter()
+        .filter(|(_, value)| store_proxy(value.as_deref()).is_some_and(|p| p.refused))
+        .map(|(name, _)| name)
+        .collect()
 }
 
 fn observed(seen: &[Seen], kubelet: &Kubelet) -> Value {
@@ -679,6 +735,11 @@ pub(super) fn judge(
                 "{} has a proxy set in {source}. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses.",
                 s.name()
             ));
+            for field in refused_proxies(proxy) {
+                notes.push(format!(
+                    "The {field} proxy in {source} is not an http://host:port address, so rdy shows only the parts of it that are safe to show."
+                ));
+            }
         }
     }
     // When a runtime's driver is known, an unreadable kubelet config is a warning of that runtime. Without
@@ -696,7 +757,7 @@ pub(super) fn judge(
     } else {
         let results: Vec<(&Seen, Vec<Issue>)> = allowed
             .iter()
-            .map(|s| (*s, issues(check, s, kubelet)))
+            .map(|s| (*s, issues(check, s, kubelet, root)))
             .collect();
         // A hard issue (d_type) decides: the runtime that has it is not hidden by a good one. Otherwise the
         // first runtime with the least severe worst issue; `min_by_key` keeps the first of equals.
@@ -789,4 +850,49 @@ fn none_allowed(check: &ContainerRuntimeCheck, found: &[&Seen]) -> Finding {
         )
     };
     Finding::fail(message).with_fix(fix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proxy(http: &str, https: &str) -> (Proxy, &'static str) {
+        (
+            Proxy {
+                http: Some(http.to_owned()),
+                https: Some(https.to_owned()),
+                no_proxy: Some("localhost,.cluster.local".to_owned()),
+            },
+            "docker info",
+        )
+    }
+
+    #[test]
+    fn a_proxy_is_stored_as_its_origin_and_a_flag_even_when_the_text_was_not_redacted() {
+        let stored = proxy_json(&proxy(
+            "svc:pw-canary@proxy.acme.test:3128",
+            "http://proxy.acme.test:3128",
+        ));
+        assert_eq!(stored["http"], "http://proxy.acme.test:3128");
+        assert_eq!(stored["http_credentials"], true);
+        assert_eq!(stored["https"], "http://proxy.acme.test:3128");
+        assert_eq!(stored["https_credentials"], false);
+        assert_eq!(stored["no_proxy"], "localhost,.cluster.local");
+        assert!(!stored.to_string().contains("pw-canary"));
+    }
+
+    #[test]
+    fn a_proxy_that_proxy_url_refuses_keeps_only_its_evidence_url_or_nothing() {
+        let stored = proxy_json(&proxy(
+            "socks5://svc:pw-canary@proxy.acme.test:1080",
+            "svc:pw-canary@proxy.acme.test:3128/path",
+        ));
+        assert_eq!(stored["http"], "socks5://proxy.acme.test:1080");
+        assert_eq!(stored["http_credentials"], true);
+        assert!(stored["https"].is_null());
+        assert_eq!(stored["https_credentials"], true);
+        assert!(!stored.to_string().contains("pw-canary"));
+        let (refused, _) = proxy("socks5://h:1", "x://y:2");
+        assert_eq!(refused_proxies(&refused), ["http", "https"]);
+    }
 }

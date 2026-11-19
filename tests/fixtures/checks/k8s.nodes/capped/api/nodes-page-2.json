@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "continue=tok-more&limit=500"
+  },
+  "status": 503,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "the server is overloaded, try again",
+    "reason": "ServiceUnavailable",
+    "details": {},
+    "code": 503
+  }
+}

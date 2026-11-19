@@ -1,6 +1,6 @@
 //! The terminal styling layer: colour choice, width, escaping and ASCII text (07 section 6, M1-070).
 //!
-//! The renderers of `rdy run` (M1-086), `rdy verify` and the progress line (M1-142) call this module for
+//! The renderers of `rdy run` (M1-086), `rdy verify` and the progress line (M1-142, [`crate::progress`]) call this module for
 //! every decision about how text looks. It writes nothing itself. It has four parts.
 //!
 //! - **Colour choice.** [`use_color`] applies the five rules of 07 section 6, first match wins, to one
@@ -129,8 +129,8 @@ pub fn wrap_width(terminal_columns: Option<usize>, env: &StyleEnv) -> usize {
 }
 
 /// The width of the terminal on stderr, or `None` when stderr is not a terminal or the size is not
-/// known. Unix asks the terminal. Windows returns `None`, so it uses `COLUMNS` or 100 until M1-142
-/// asks the console through the `console` crate that indicatif brings (backlog correction-27).
+/// known. Unix asks the terminal. Windows asks the console through the `console` crate that indicatif
+/// brings (M1-142), and `None` there means `COLUMNS` or 100.
 #[must_use]
 pub fn stderr_columns() -> Option<usize> {
     stderr_columns_impl()
@@ -148,7 +148,18 @@ fn stderr_columns_impl() -> Option<usize> {
 
 #[cfg(not(unix))]
 fn stderr_columns_impl() -> Option<usize> {
-    None
+    if !std::io::stderr().is_terminal() {
+        return None;
+    }
+    columns_from_size(console::Term::stderr().size_checked())
+}
+
+/// The columns of a console size as `console` reports it, `(rows, columns)`. A console that reports 0
+/// columns has none. Split out so a test can feed a size: the CI leg for Windows has no console.
+#[cfg(any(not(unix), test))]
+fn columns_from_size(size: Option<(u16, u16)>) -> Option<usize> {
+    size.map(|(_rows, columns)| usize::from(columns))
+        .filter(|columns| *columns > 0)
 }
 
 /// How the human output looks on stderr, decided once per run.

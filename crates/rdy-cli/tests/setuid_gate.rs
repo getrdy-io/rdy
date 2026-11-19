@@ -19,6 +19,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 mod common;
+use common::NoProxyEnv;
 
 /// The user the tests drop to when they run as root (a local run under `sudo`). CI runs as its own user.
 const UNPRIVILEGED_ID: u32 = 65534;
@@ -84,6 +85,7 @@ fn run_for(binary: &Path, args: &[&str], limit: Duration) -> Ended {
     command
         .args(args)
         .env_remove("RDY_PROGRESS")
+        .no_proxy_env()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -121,10 +123,9 @@ fn run_for(binary: &Path, args: &[&str], limit: Duration) -> Ended {
 }
 
 /// Every command that reads a spec, with `FIFO` standing for the spec path. `run` is not built yet and
-/// exits 70 on its own, so the refusal text is what tells the gate from that. `spec lint` and
-/// `trust add` look at the path first and refuse a FIFO as "not a regular file" (exit 64), which is
-/// also how the gate is told apart from them. `spec sign` opens its spec, so it is the command that
-/// blocks.
+/// exits 70 on its own, so the refusal text is what tells the gate from that. Every one
+/// of them refuses a FIFO as "not a regular file" (exit 64) when no gate stops it first, which is how
+/// the gate is told apart.
 const COMMANDS: &[&[&str]] = &[
     &["run", "FIFO"],
     &["verify", "FIFO"],
@@ -147,27 +148,22 @@ fn with_fifo(command: &[&str], set: &Setup) -> Vec<String> {
         .collect()
 }
 
-/// The control: the same copy with no privilege bit opens the FIFO in `spec sign` and blocks, and
-/// reaches the path check of `spec lint`. Without this, a FIFO that did not block would make every
-/// other assertion here empty.
-fn assert_the_fifo_blocks(set: &Setup) {
-    let sign = with_fifo(&["spec", "sign", "FIFO", "--secret-key", "FIFO"], set);
-    let words: Vec<&str> = sign.iter().map(String::as_str).collect();
-    let ended = run_for(&set.binary, &words, Duration::from_secs(2));
-    assert!(
-        ended.timed_out,
-        "an unprivileged rdy did not block on the FIFO (exit {:?}): {}",
-        ended.code, ended.stderr
-    );
-    let lint = with_fifo(&["spec", "lint", "FIFO"], set);
-    let words: Vec<&str> = lint.iter().map(String::as_str).collect();
-    let ended = run_for(&set.binary, &words, Duration::from_secs(5));
-    assert_eq!(ended.code, Some(64), "{}", ended.stderr);
-    assert!(
-        ended.stderr.contains("not a regular file"),
-        "{}",
-        ended.stderr
-    );
+/// The control: the same copy with no privilege bit reads the path, and since M1-183 every spec read
+/// refuses a FIFO at once as "not a regular file" (exit 64). The gate answers 70 before the path is
+/// read, so a command that read the spec before the gate shows as 64 and fails below. Without this
+/// control, a gate that did nothing would look the same as one that refused.
+fn assert_the_fifo_is_refused_by_the_read(set: &Setup) {
+    for command in COMMANDS {
+        let args = with_fifo(command, set);
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        let ended = run_for(&set.binary, &words, Duration::from_secs(5));
+        assert_eq!(ended.code, Some(64), "rdy {words:?}: {}", ended.stderr);
+        assert!(
+            ended.stderr.contains("not a regular file"),
+            "rdy {words:?}: {}",
+            ended.stderr
+        );
+    }
 }
 
 /// The refusal text of INV-10.
@@ -207,7 +203,7 @@ fn a_setuid_root_rdy_exits_70_and_never_opens_the_spec() {
         return;
     }
     let set = setup();
-    assert_the_fifo_blocks(&set);
+    assert_the_fifo_is_refused_by_the_read(&set);
     let binary = set.binary.to_string_lossy().into_owned();
     sudo(&["chown", "root", &binary]);
     sudo(&["chmod", "u+s", &binary]);
@@ -223,7 +219,7 @@ fn refused_with_file_capability(capability: &str) {
         return;
     }
     let set = setup();
-    assert_the_fifo_blocks(&set);
+    assert_the_fifo_is_refused_by_the_read(&set);
     let binary = set.binary.to_string_lossy().into_owned();
     sudo(&["setcap", capability, &binary]);
     assert_refused_without_opening_the_spec(&set, capability);

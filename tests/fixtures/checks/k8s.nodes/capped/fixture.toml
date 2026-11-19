@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-capped"
+summary = "Two healthy nodes on page one and the server fails on page two"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

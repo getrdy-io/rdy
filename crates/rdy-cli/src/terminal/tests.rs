@@ -1012,3 +1012,137 @@ fn a_state_other_than_verified_or_unsigned_gets_a_banner_and_no_trust_words() {
     );
     assert!(out.contains("sig     NOT VERIFIED (odd\\x1b)"), "{out}");
 }
+
+#[test]
+fn a_130_character_message_wraps_at_100_with_a_hanging_indent() {
+    let mut report = sample("ready");
+    let message = format!("{}!", "word ".repeat(26).trim_end());
+    assert_eq!(message.len(), 130);
+    report
+        .checks
+        .get_mut(0)
+        .unwrap_or_else(|| panic!("cpu"))
+        .message
+        .clone_from(&message);
+    let out = full(&report, "x.yaml", "./f", false, Styler::new(false), 100);
+    let lines: Vec<&str> = out.lines().collect();
+    let first = lines
+        .iter()
+        .position(|line| line.contains("host.cpu"))
+        .unwrap_or_else(|| panic!("{out}"));
+    let (head, tail) = (lines[first], lines[first + 1]);
+    assert!(head.len() <= 100, "{head:?}");
+    assert!(tail.len() <= 100, "{tail:?}");
+    // The continuation sits under the message column, which starts after the key.
+    let column = head.find("word").unwrap_or_else(|| panic!("{head:?}"));
+    assert!(tail.starts_with(&" ".repeat(column)), "{tail:?}");
+    assert_eq!(tail.as_bytes().get(column), Some(&b'w'), "{tail:?}");
+    // Nothing is lost.
+    let joined = format!("{} {}", head[column..].trim(), tail.trim());
+    assert!(joined.ends_with("word!"), "{joined}");
+    assert_eq!(joined.matches("word").count(), 26, "{joined}");
+}
+
+// ---- missing grants (M1-186) --------------------------------------------------------------------
+
+fn with_grants(grants: &[&str], width: usize, styler: Styler) -> String {
+    let mut report = sample("ready-with-warnings");
+    let disk = report.checks.get_mut(2).unwrap_or_else(|| panic!("disk"));
+    disk.partial = Some(
+        rdy_spec::result::Partial::new(vec![], "Read in part")
+            .with_missing_grants(grants.iter().map(|g| (*g).to_owned()).collect()),
+    );
+    full(&report, "x.yaml", "./f", false, styler, width)
+}
+
+#[test]
+fn one_grant_is_one_line_between_the_message_and_the_fix() {
+    let out = with_grants(&["list csinodes (storage.k8s.io)"], 100, Styler::new(false));
+    let lines: Vec<&str> = out.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("missing grants: list csinodes (storage.k8s.io)"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(lines[at - 1].contains("host.disk"), "{out}");
+    assert!(lines[at + 1].contains("fix from"), "{out}");
+    assert!(lines[at].starts_with(&" ".repeat(29)), "{out}");
+}
+
+#[test]
+fn several_grants_keep_the_check_order() {
+    let out = with_grants(
+        &["list nodes", "get pods", "list csinodes"],
+        100,
+        Styler::new(false),
+    );
+    assert!(
+        out.contains("missing grants: list nodes, get pods, list csinodes\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_long_grant_list_wraps_with_the_hanging_indent() {
+    let out = with_grants(
+        &[
+            "list nodes",
+            "list csinodes (storage.k8s.io)",
+            "get pods in namespace payments",
+        ],
+        60,
+        Styler::new(false),
+    );
+    let lines: Vec<&str> = out.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains("missing grants:"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(lines[at].len() <= 60, "{out}");
+    assert!(lines[at + 1].starts_with(&" ".repeat(29)), "{out}");
+    assert!(!lines[at + 1].contains("fix from"), "{out}");
+    assert!(out.contains("payments"), "{out}");
+}
+
+#[test]
+fn a_list_past_the_cap_ends_and_n_more() {
+    let grants: Vec<String> = (1..=8).map(|n| format!("get thing{n}")).collect();
+    let refs: Vec<&str> = grants.iter().map(String::as_str).collect();
+    let out = with_grants(&refs, 100, Styler::new(false));
+    let flat = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("get thing5, and 3 more"), "{out}");
+    assert!(!out.contains("thing6"), "{out}");
+}
+
+#[test]
+fn a_grant_is_escaped_and_never_styled() {
+    let raw = "list \u{1b}[31mnodes";
+    let escaped = untrusted(raw);
+    assert_ne!(escaped, raw);
+    // Colour off: the whole line is exact.
+    let plain = with_grants(&[raw], 100, Styler::new(false));
+    let line = plain
+        .lines()
+        .find(|l| l.contains("missing grants:"))
+        .unwrap_or_else(|| panic!("{plain}"));
+    assert_eq!(line.trim_start(), format!("missing grants: {escaped}"));
+    let after = line.split("grants:").nth(1).unwrap_or_default();
+    assert!(!after.contains('\u{1b}'), "{line:?}");
+    // Colour on: the labels are styled, the grant text is not and holds no ESC.
+    let styled = with_grants(&[raw], 100, Styler::new(true));
+    let line = styled
+        .lines()
+        .find(|l| l.contains(&escaped))
+        .unwrap_or_else(|| panic!("{styled}"));
+    let text = line.split_once("list").map_or("", |(_, rest)| rest);
+    assert!(
+        text.ends_with(escaped.trim_start_matches("list")),
+        "{line:?}"
+    );
+    assert!(!text.contains('\u{1b}'), "{line:?}");
+}
+
+#[test]
+fn no_grants_print_no_line() {
+    let out = with_grants(&[], 100, Styler::new(false));
+    assert!(!out.contains("missing grants"), "{out}");
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-no-dns"
+summary = "No DNS workload in kube-system or openshift-dns, and no Service"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

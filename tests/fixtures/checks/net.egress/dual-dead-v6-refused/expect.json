@@ -1,0 +1,53 @@
+{
+  "entry": {
+    "endpoints": [
+      "dual.acme.test:8080"
+    ],
+    "id": "net.egress"
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 2000,
+      "trust": "system"
+    },
+    "fix": null,
+    "level": "warn",
+    "message": "dual.acme.test:8080: the ipv6 address failed (refused) and another family carried the connection",
+    "notes": [
+      "dual.acme.test:8080: the ipv6 address failed (refused) and another family carried the connection"
+    ],
+    "observed": {
+      "endpoints": [
+        {
+          "attempts": [
+            {
+              "addr": "2001:db8::1",
+              "elapsed_ms": 0,
+              "family": "ipv6",
+              "outcome": "refused",
+              "started_ms": 0
+            },
+            {
+              "addr": "192.0.2.1",
+              "elapsed_ms": 0,
+              "family": "ipv4",
+              "outcome": "connected",
+              "started_ms": 0
+            }
+          ],
+          "connect_ms": 0,
+          "endpoint": "dual.acme.test:8080",
+          "lookup": {
+            "ipv4": 1,
+            "ipv6": 1,
+            "ms": 0
+          },
+          "optional": false,
+          "result": "reached",
+          "tls": false
+        }
+      ]
+    },
+    "partial": null
+  }
+}

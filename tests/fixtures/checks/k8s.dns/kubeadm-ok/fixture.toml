@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-kubeadm-ok"
+summary = "CoreDNS 2 of 2, a Service with a ClusterIP, and a pod with 14 old restarts"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

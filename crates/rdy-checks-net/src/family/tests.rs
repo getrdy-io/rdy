@@ -41,9 +41,18 @@ fn skip_kind(plan: &RunPlan, key: &str) -> Option<SkipKind> {
 }
 
 #[test]
-fn the_family_lists_net_egress_and_net_mtu_and_registers_once() {
+fn the_family_lists_its_checks_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
-    assert_eq!(ids, ["net.egress", "net.mtu"]);
+    assert_eq!(
+        ids,
+        [
+            "net.egress",
+            "net.proxy",
+            "net.mtu",
+            "net.tls_intercept",
+            "net.dns"
+        ]
+    );
     let mut twice = registry();
     assert_eq!(
         twice.register(NetFamily).map(|_| ()),
@@ -58,17 +67,46 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         assert_eq!(info.family, "net");
         let timeout = info.default_timeout.expect("a timeout from the catalog");
         assert!(timeout.as_secs() >= 1 && timeout <= rdy_engine::check::MAX_TIMEOUT);
-        // Only net.egress needs the network (`--no-network` skips it as `missing_need`); net.mtu reads the
-        // interface table and needs nothing.
-        let expected: &[Need] = if info.id == "net.egress" {
-            &[Need::Network]
-        } else {
+        // net.egress, net.tls_intercept and net.dns need the network (`--no-network` skips them as
+        // `missing_need`); net.mtu reads the interface table and net.proxy reads the environment: they need nothing.
+        let expected: &[Need] = if matches!(info.id, "net.mtu" | "net.proxy") {
             &[]
+        } else {
+            &[Need::Network]
         };
         assert_eq!(info.needs, expected, "{} needs", info.id);
     }
-    // 03 gives net.mtu 3 seconds.
+    // 03 gives net.mtu 3 seconds and net.proxy 5.
     assert_eq!(mtu::INFO.default_timeout.map(|d| d.as_secs()), Some(3));
+    assert_eq!(proxy::INFO.default_timeout.map(|d| d.as_secs()), Some(5));
+}
+
+#[test]
+fn net_proxy_runs_on_every_os_and_is_partial_where_only_the_environment_is_read() {
+    let entries = [json!({"id": "net.proxy", "required_no_proxy": [".svc"]})];
+    for os in [Os::Linux, Os::Macos, Os::Windows] {
+        let planned = plan(os, &entries);
+        assert_eq!(planned.runnable().count(), 1, "{os:?}");
+        assert_eq!(skip_kind(&planned, "net.proxy"), None, "{os:?}");
+    }
+    assert_eq!(proxy::INFO.os.on(Os::Linux), Support::Full);
+    for os in [Os::Macos, Os::Windows] {
+        assert!(proxy::INFO.os.on(os).partial_note().is_some(), "{os:?}");
+    }
+}
+
+#[test]
+fn net_proxy_builds_from_its_params_and_has_no_spec_hosts() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "net.proxy", "required_no_proxy": [".svc"], "daemons_need_proxy": true}),
+    )
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.proxy");
+    assert!(built.hosts.is_empty(), "the proxy is not a spec host");
 }
 
 #[test]
@@ -117,10 +155,41 @@ fn build_makes_the_check_from_its_params_and_refuses_another_id() {
 }
 
 #[test]
+fn net_tls_intercept_builds_with_the_hosts_of_its_own_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "net.tls_intercept", "hosts": ["a.acme.test", "b.acme.test:8443", "a.acme.test:443"]}),
+    )
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.tls_intercept");
+    // `a.acme.test` and `a.acme.test:443` are one host.
+    assert_eq!(built.hosts.len(), 2);
+}
+
+#[test]
 fn every_remediation_passes_the_fix_text_audit() {
     for info in NetFamily.checks() {
         if let Err(error) = rdy_engine::fixtext::check(info.meta.remediation) {
             panic!("{} has fix text that is not on the lists: {error}", info.id);
         }
     }
+}
+
+#[test]
+fn the_family_builds_net_dns_with_its_names_as_the_host_set() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "net.dns",
+        "names": ["Registry.Acme.Test", {"name": "api.acme.test", "expect_public": true}]
+    }))
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.dns");
+    let hosts: Vec<String> = built.hosts.iter().map(|t| t.host().to_string()).collect();
+    assert_eq!(hosts, ["registry.acme.test", "api.acme.test"]);
 }
