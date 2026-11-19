@@ -125,7 +125,7 @@ carry annotations and environment values with markers that no result may hold.
 `checks/net.egress/` holds eleven scripted `net.json` cases, each with a reviewed `expect.json` (M1-095, M1-096): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
 `refused`, `nxdomain`, and the HTTP cases `http-ok`, `http-503`, `http-401-default`, `http-404-not-expected` and `not-http`. A `serve` entry names a server that
 code registers, so `crates/rdy-checks-net/src/expect_cases.rs` runs them through `rdy_engine::testing::assert_cases_with`, which takes the replay servers and the hosts the family builds. The TLS cases need real sockets and are in the check's own tests.
-`checks/net.tls_intercept/` holds 16 cases (M1-100), each with a reviewed `expect.json`: the generated-chain cases `public`, `machine-only`, `machine-only-forbidden`, `unknown-ca`, `expired-pinned-clock`, `expired-inside-window`, `empty-os-store`, `env-store-canary-user`, `issuer-match`, `issuer-mismatch`, `pin-match`, `pin-ca-only`, `pin-mismatch`, `pin-root-not-sent` and `handshake-never-completes` (an in-memory peer that never reads or answers the ClientHello, run on a paused clock so the 5 s handshake limit costs nothing), and the scripted `refused`. A generated case names its chain in `chain.json` and holds no certificate: the env harness (`crates/rdy-cli/tests/env_harness/chains.rs`) builds a root, an issuing CA and a leaf with rcgen at test time, serves them from a loopback server and points the case's host at it. `chain` is `public`, `machine_only`, `unknown_ca`, `expired` (the last needs a pinned `clock`: after the leaf's notAfter it is `clock_or_expiry`, inside the window it is `machine_only`) or `silent`; `os_store: "empty"`, `sources` (where the OS roots were read from, with an optional `env`) and `home` are optional. An `expect.json` `entry` may list `<leaf>`, `<issuing>`, `<root>` or `<other>` in `pin_sha256`, which the rig swaps for that certificate's SHA-256, and the golden writes every 64 digit hash as `<sha256>`. `env-store-canary-user` holds a canary user name in its sources and a test proves it is in no golden. The `Timeout` class is still owed by M1-179 (PENDING row).
+`checks/net.tls_intercept/` holds 16 cases (M1-100), each with a reviewed `expect.json`: the generated-chain cases `public`, `machine-only`, `machine-only-forbidden`, `unknown-ca`, `expired-pinned-clock`, `expired-inside-window`, `empty-os-store`, `env-store-canary-user`, `issuer-match`, `issuer-mismatch`, `pin-match`, `pin-ca-only`, `pin-mismatch`, `pin-root-not-sent` and `handshake-never-completes` (an in-memory peer that never reads or answers the ClientHello, run on a paused clock so the 5 s handshake limit costs nothing), and the scripted `refused`. A generated case names its chain in `chain.json` and holds no certificate: the env harness (`crates/rdy-cli/tests/env_harness/chains.rs`) builds a root, an issuing CA and a leaf with rcgen at test time, serves them from a loopback server and points the case's host at it. `chain` is `public`, `machine_only`, `unknown_ca`, `expired` (the last needs a pinned `clock`: after the leaf's notAfter it is `clock_or_expiry`, inside the window it is `machine_only`) or `silent`; `os_store: "empty"`, `sources` (where the OS roots were read from, with an optional `env`) and `home` are optional. An `expect.json` `entry` may list `<leaf>`, `<issuing>`, `<root>` or `<other>` in `pin_sha256`, which the rig swaps for that certificate's SHA-256, and the golden writes every 64 digit hash as `<sha256>`. `env-store-canary-user` holds a canary user name in its sources and a test proves it is in no golden. Its `Timeout` class is `handshake-never-completes`: a `silent` chain is a hang, and the note says the host timed out (M1-179).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one.
 `checks/k8s.dns/` holds 43 clusters, `generated` by `scripts/gen-k8s-dns-fixtures.py` (`--check` fails on drift
@@ -668,7 +668,7 @@ with no `spec` is a base that other environments build on, and is skipped. Not b
 | passing | always | `result.level` is `pass` |
 | non-passing | always | `result.level` is `warn` or `fail` |
 | no-privilege partial | the check has a `Root` want | `caps.root = false` and `result.partial` set |
-| Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `blackhole` or a `delay_ms` of at least the check's timeout in the case |
+| Timeout | the check declares a command, a peer or a `statfs` prefix | a `blackhole` or a `delay_ms` of at least the check's timeout in the case, and `result.timed_out_ms` or a `result.notes` entry that names the hang |
 
 An `expect.json` has two keys, `entry` and `result`, with sorted keys, two-space indent and a final newline:
 
@@ -693,13 +693,17 @@ of `result` and ignores the rest:
 | `result.level` | `"pass"`, `"warn"` or `"fail"` | The finding's level. Decides the passing and non-passing classes. A timeout case has no `level`. |
 | `result.partial` | object or `null` | Set (not `null`) when the check ran with less than it asked for. Counts only in a case with `caps.root = false`. |
 | `result.timed_out_ms` | number | Present only when the scheduler ended the check at its deadline, in milliseconds. Counts only when the case also holds a hang. |
+| `result.notes` | array of text | A note that holds `timed out` or `no reply within` names a hang the check cut itself. It counts as the Timeout class, with a hang in the case, when `timed_out_ms` is absent. |
 
 A hang is a `blackhole`, or a `delay_ms` at or above the check's default timeout, in one of the case's
-`native`, `commands` or `net` files. A shorter delay lets the check finish, so it does not count.
+`native`, `commands`, `api` or `net.json` files, or a `silent` chain in `chain.json`. A shorter delay lets the check finish, so it does not count.
+A hang with neither `timed_out_ms` nor a note that names it fails the rule. `host.time_sync` is the first
+check that cuts a hung source itself: its `hung-chronyc` case has no `timed_out_ms` and a note that says
+chronyc timed out.
 
 A missing class that `PENDING` (in `main.rs`) does not list is a failure. Each `PENDING` row names the
 check, the classes and the ticket that owes them. A row for a class that is no longer missing is a failure
-too. `PENDING` has been empty since M1-174. A new family adds its row in
+too. `PENDING` has been empty since M1-174 (and again since M1-179). A new family adds its row in
 `crates/rdy-cli/tests/env_harness/families.rs`.
 
 **Known gaps.** None. `host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm` blessed behaviour that
