@@ -59,6 +59,7 @@ rules:
   # k8s.nodes: pod requests, node name and phase (free capacity). k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
   # k8s.admission: the Service behind an admission webhook that fails closed (its type only).
+  # k8s.ingress: the name, age, type and load balancer state of the Services of the target namespace.
   # k8s.dns: the container states of the cluster DNS pods (one list with a label selector; the rest of each
   # pod is dropped).
   - apiGroups: [""]
