@@ -10,13 +10,20 @@
 //!
 //! The run plans for the OS it runs on, so the caller skips an environment of another OS (`main`).
 //!
-//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`. A fixture that sets
-//! `kube = true` gets no cluster until M1-107, because `rdy run` builds no Kubernetes client yet.
+//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`.
+//!
+//! The cluster (M1-185). An env whose `kube` cap is true serves its `api/` tree as a scripted cluster: the
+//! kube mock of `rdy-checks-k8s`, behind that crate's `testing` feature, stands where the kubeconfig and
+//! the socket would be, and the read-only guard stays in front of it. After the run the driver audits it
+//! (INV-14) against the report's action log and puts any violation in `EnvRun::violations`. An env whose
+//! `kube` cap is false gets the `k8s` family over an empty `Env` (`families::registry`), so a spec with a
+//! k8s check finds no kubeconfig and the check is skipped `missing_need`.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rdy_checks_k8s::testing::ScriptedCluster;
 use rdy_cli::RunHooks;
 use rdy_engine::check::Os;
 use rdy_engine::probe::{NativeCall, NativeValue, UnameInfo};
@@ -40,6 +47,9 @@ pub struct EnvRun {
     pub terminal: String,
     /// One line per refusal that shows a check went beyond its declared `CheckInfo`. Empty when none did.
     pub violations: Vec<String>,
+    /// `METHOD path?query` of every request the scripted cluster saw, in arrival order. Empty when the env
+    /// has no cluster.
+    pub kube_requests: Vec<String>,
 }
 
 /// The names of the environments under `<root>/envs` that carry a spec, in order. `root` is the fixtures
@@ -112,6 +122,12 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
     hooks.stderr_terminal = Some(false);
     hooks.stderr_columns = Some(100);
 
+    let cluster = if manifest.caps.kube {
+        Some(ScriptedCluster::new(fixture.replay()).map_err(|e| format!("{name}: {e}"))?)
+    } else {
+        None
+    };
+    families::serve(cluster.clone());
     let machine = machine(&fixture, env);
     let jobs_arg = jobs.to_string();
     let out_arg = out_dir.map(|dir| dir.to_string_lossy().into_owned());
@@ -150,6 +166,7 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
             &mut err,
         ))
         .code();
+    families::serve(None);
     let stdout = String::from_utf8(out).map_err(|e| format!("{name}: stdout is not UTF-8: {e}"))?;
     let stderr = String::from_utf8(err).map_err(|e| format!("{name}: stderr is not UTF-8: {e}"))?;
     let report: Report = serde_json::from_str(&stdout)
@@ -161,7 +178,12 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
         ));
     }
 
-    let violations = violations(&report)?;
+    let mut violations = violations(&report)?;
+    let mut kube_requests = Vec::new();
+    if let Some(cluster) = &cluster {
+        violations.extend(cluster.audit(&report.actions));
+        kube_requests = cluster.requests();
+    }
     // Two things differ between machines and releases: where the checkout is, and the version of rdy.
     let version_line = format!("rdy {}", report.producer.version);
     let terminal: String = stderr
@@ -179,6 +201,7 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
         report,
         terminal,
         violations,
+        kube_requests,
     })
 }
 

@@ -298,6 +298,13 @@ async fn execute(
     let mut execute = std::pin::pin!(engine.execute(&loaded, plan, &privilege, &options));
     let executed = std::future::poll_fn(|cx| {
         let polled = execute.as_mut().poll(cx);
+        if !announced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            line.clear(stderr);
+        }
         print_announced(&announced, stderr);
         polled
     })

@@ -634,7 +634,7 @@ pub(crate) fn judge(
 }
 
 /// What a request path is, for the audit of a fixture run (`client::mock`).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     /// A path with no [`ALLOWED`] entry by design: `/version`, discovery and the three review POSTs.
@@ -647,7 +647,7 @@ pub(crate) enum Target {
 
 /// Classifies a path as written in the action log (no query string). Only the path is judged, so this
 /// says which entry a request belongs to, not whether the guard would allow it ([`judge`] does that).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn target_of(path: &str) -> Target {
     const REVIEWS: [&str; 3] = [
         "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
