@@ -154,6 +154,7 @@ If a `COSIGN_` variable can weaken a check, add it to the refused list in both s
 | --- | --- | --- |
 | The plan job fails on the tag | The tag does not equal the `rdy` version, or is not `v<major>.<minor>.<patch>[-<pre>]` | The tag is burned. Fix the version in a PR and use the next number. |
 | A build or `custom-check-release-artifacts` fails | The artifacts are not fit to sign. No release exists | Fix on `main`. Use the next number. Do not move or delete the tag. |
+| `custom-check-release-artifacts` fails at "Check the security-agent catalog is fresh" | An entry in `crates/rdy-checks-host/data/agents.toml` has a `checked_on` more than 180 days old. The log names each entry | Read each named `source` page again. Fix the process names if they changed. Set `checked_on` to today. Merge, then use the next tag number. Run `cargo xtask agents-stale --today "$(date -u +%F)"` first to check. |
 | `custom-sign-release` never shows Waiting | The environment is not named exactly `release`, or does not allow `v*` tags | Fix the environment. Use the next number. |
 | `sign` fails in `cosign sign-blob` with an OIDC error | The caller job lacks `id-token: write` | Check `release.yml` against `scripts/harden-release-workflow.py`. |
 | `sign` fails on the self-verify | The identity or the caller claims are not what the contract expects (06) | Do not publish. Read the `error:` and `fix:` lines. Ask `security-reviewer`. |
