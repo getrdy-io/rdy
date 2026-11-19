@@ -240,7 +240,7 @@ pub const ALLOWED: &[Allowed] = &[
         resource: "nodes",
         access: &[Access::List],
         checks: &["k8s.nodes", "k8s.version", "k8s.cni"],
-        reads: "k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing",
+        reads: "k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the reason of the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {

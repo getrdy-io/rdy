@@ -66,7 +66,7 @@ Set the Pod Security level of the install namespace to what the product needs: `
 - **Reads:** none
 - **API reads:**
   - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions; k8s.cni: whether calico-system and kube-flannel exist, before it asks for a DaemonSet there
-  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
+  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the reason of the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
   - `apps/v1 daemonsets` (list in a namespace, get): k8s.dns: desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns. k8s.cni: the network plugin node agent DaemonSets of data/cni.toml, by name in one namespace each (desired and ready counts, and ENABLE_NETWORK_POLICY of aws-node; every other env value, args and annotations are dropped while parsing)
   - `v1 configmaps` (get): k8s.dns: the Corefile key of the coredns ConfigMap in kube-system. k8s.cni: the ClusterConfiguration key of the kubeadm-config ConfigMap in kube-system (the service range). Every other key is dropped while parsing
   - `config.openshift.io/v1 networks` (get): the OpenShift network type and the pod and service ranges
@@ -155,7 +155,7 @@ Ask the platform team for a namespace the product can install into. Create it wi
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
 - **API reads:**
-  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
+  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the reason of the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
   - `v1 pods` (list): k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector
   - `apps/v1 deployments` (list in a namespace, get by name in the spec's namespace, granted by the optional examples/rbac/rdy-readonly-operator.yaml): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)
 
@@ -207,7 +207,7 @@ Mark one StorageClass as the default: `kubectl patch storageclass <name> -p '{"m
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
 - **API reads:**
-  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
+  - `v1 nodes` (list): k8s.nodes: allocatable, conditions, taints, labels. k8s.version: providerID and kubeletVersion. k8s.cni: the reason of the NetworkUnavailable condition, spec.podCIDRs and the kubelet version; annotations, labels and the rest are dropped while parsing
   - `config.openshift.io/v1 clusterversions` (get): the OpenShift version
 
 **Remediation**

@@ -31,8 +31,13 @@ const FILES: [&str; 4] = [
 
 /// The documents of the example files, parsed.
 fn documents() -> Vec<Value> {
+    documents_of(&FILES)
+}
+
+/// The documents of the named example files, parsed.
+fn documents_of(files: &[&str]) -> Vec<Value> {
     let mut out = Vec::new();
-    for file in FILES {
+    for file in files {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/rbac")
             .join(file);
@@ -228,5 +233,27 @@ fn every_binding_points_at_a_role_in_the_file() {
         // Only the rdy service account, never a group such as system:authenticated.
         let subjects = binding["subjects"].as_array().expect("subjects");
         assert!(subjects.iter().all(|s| s["kind"] == "ServiceAccount"));
+    }
+}
+
+#[test]
+fn the_main_role_file_alone_holds_no_k8s_cni_grant() {
+    // The k8s.cni reads live in the optional file (ADR 0046). The union test cannot see one that moved.
+    let docs = documents_of(&["rdy-readonly.yaml"]);
+    let mut granted = grants(&docs, "ClusterRole");
+    granted.extend(grants(&docs, "Role"));
+    for (_, grant) in granted {
+        for banned in [
+            "configmaps get name=kubeadm-config",
+            "networkpolicies",
+            "servicecidrs",
+            "/networks ",
+        ] {
+            assert!(!grant.contains(banned), "{grant}");
+        }
+        assert!(
+            !(grant.contains("apps/daemonsets get name=")),
+            "a named DaemonSet get belongs to the optional file: {grant}"
+        );
     }
 }

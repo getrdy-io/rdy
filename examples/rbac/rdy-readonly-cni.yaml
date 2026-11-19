@@ -7,7 +7,8 @@
 # from API discovery (no grant needed), and it reports each read it could not make with the grant to ask
 # for. This file adds the rest, and keeps each grant as small as it can be:
 #
-# - A DaemonSet holds environment values, which often hold credentials, so no Role here lists DaemonSets.
+# - A DaemonSet holds environment values, which often hold credentials, so no Role in this file lists DaemonSets. (The optional kube-system Role in
+#   rdy-readonly.yaml already lists DaemonSets there for k8s.dns, env values included.)
 #   Each is a `get` by name (`resourceNames`) in the namespace its project documents: the node agent of
 #   each network plugin in kube-system, calico-system (Calico installed by its operator) and kube-flannel
 #   (Flannel's own manifest). rdy keeps the ready counts, and the value of ENABLE_NETWORK_POLICY of the AWS
