@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/configmaps/coredns"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "configmaps \"coredns\" is forbidden: User \"acme-installer\" cannot get resource \"configmaps\" in API group \"\" in the namespace \"kube-system\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

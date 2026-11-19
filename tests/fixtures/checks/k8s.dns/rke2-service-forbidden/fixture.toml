@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-rke2-service-forbidden"
+summary = "RKE2: kube-dns is not there and the identity may not get the Service named like the Deployment"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true
