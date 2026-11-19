@@ -1,5 +1,5 @@
 //! The live progress line of `rdy run` end to end (M1-142): drawn on a slow run on a terminal, cleared
-//! before the check list, and not drawn at all on a fast run, a pipe, `--quiet`, `--progress never`,
+//! before the check list, and not drawn at all on a fast run, a pipe, `--quiet`, `--verbose`, `--progress never`,
 //! `TERM=dumb` or `RUST_LOG`. Never on stdout.
 //!
 //! The terminal is a buffer here (`RunHooks::progress_capture`), so no pty is needed. The glyph and gate

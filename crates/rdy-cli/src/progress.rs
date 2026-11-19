@@ -5,7 +5,7 @@
 //! needed to read a result, and it never writes to stdout.
 //!
 //! - **When it draws.** [`live_line_allowed`] says yes only when stderr is a terminal, `TERM` is not
-//!   `dumb`, `RUST_LOG` is not set, and none of `--quiet`, `--progress never` and `RDY_PROGRESS=never`
+//!   `dumb`, `RUST_LOG` is not set, and none of `--quiet`, `--verbose`, `--progress never` and `RDY_PROGRESS=never`
 //!   (clap reads that variable into `--progress`) is given. indicatif checks only the terminal, so these
 //!   rules are ours. The bar is made hidden and gets a real draw target only when the first frame is due.
 //! - **First frame.** It waits [`FIRST_FRAME`] (250 ms), so a fast run draws no byte at all.
@@ -94,19 +94,16 @@ impl ProgressEnv {
     }
 }
 
-/// Whether the live line may draw (07 section 3). `stderr_is_terminal` is the stream, not stdout.
+/// Whether the live line may draw (07 section 3). `off` is `--quiet` or `--verbose`. `stderr_is_terminal`
+/// is the stream, not stdout.
 #[must_use]
 pub fn live_line_allowed(
     choice: ProgressChoice,
-    quiet: bool,
+    off: bool,
     env: &ProgressEnv,
     stderr_is_terminal: bool,
 ) -> bool {
-    stderr_is_terminal
-        && choice == ProgressChoice::Auto
-        && !quiet
-        && !env.term_dumb
-        && !env.rust_log
+    stderr_is_terminal && choice == ProgressChoice::Auto && !off && !env.term_dumb && !env.rust_log
 }
 
 /// Whether the spinner may be Braille (07 D.1). `windows` picks the Windows rule over the Unix one.

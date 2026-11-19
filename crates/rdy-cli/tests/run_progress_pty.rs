@@ -5,7 +5,7 @@
 //!
 //! - On a terminal: the spinner draws, the last clear (`\r\x1b[2K`) comes before the first check line, and
 //!   nothing of it is on stdout.
-//! - A pipe, `--quiet`, `--progress never`, `RDY_PROGRESS=never`, `TERM=dumb` and `RUST_LOG` draw no
+//! - A pipe, `--quiet`, `--verbose`, `--progress never`, `RDY_PROGRESS=never`, `TERM=dumb` and `RUST_LOG` draw no
 //!   progress byte at all.
 #![cfg(unix)]
 #![allow(clippy::expect_used)]

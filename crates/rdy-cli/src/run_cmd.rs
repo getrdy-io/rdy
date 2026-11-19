@@ -418,7 +418,8 @@ async fn execute(
 }
 
 /// Starts the live progress line when the rules of 07 section 3 allow it, else a line that draws nothing.
-fn start_progress(choice: ProgressChoice, quiet: bool, hooks: &RunHooks, total: usize) -> Progress {
+/// `off` is `--quiet` or `--verbose`.
+fn start_progress(choice: ProgressChoice, off: bool, hooks: &RunHooks, total: usize) -> Progress {
     let env = hooks
         .progress_env
         .clone()
@@ -426,7 +427,7 @@ fn start_progress(choice: ProgressChoice, quiet: bool, hooks: &RunHooks, total: 
     let terminal = hooks
         .stderr_terminal
         .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
-    if !live_line_allowed(choice, quiet, &env, terminal) {
+    if !live_line_allowed(choice, off, &env, terminal) {
         return Progress::off();
     }
     let target = hooks

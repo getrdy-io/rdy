@@ -1872,7 +1872,8 @@ and the list are printed when the run ends, because the header holds facts that 
 `needs` row). A check the plan skipped never ran, so it has no line (`host.disk/system`). A time under
 10 s is in milliseconds, and from 10 s on in whole seconds. The `expected` and `observed` pairs are in key
 order, as in the JSON file (01 section 5.5), so the text does not depend on how the build orders a map. `--verbose` turns the live progress line off,
-because these lines say the same thing.
+because these lines say the same thing. When a family prints its cluster line (ADR 0031), it can land inside
+the event block, between two whole lines.
 
 ```console
 $ rdy run acme-quickstart.yaml --verbose
