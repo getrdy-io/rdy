@@ -632,7 +632,9 @@ pub(crate) fn audit(
                 "INV-14: the log holds a sent request for `{path}`, which no entry of ALLOWED names"
             )),
             Target::Entry(allowed) => {
-                if !check.is_some_and(|id| allowed.checks.contains(&id)) {
+                if let Some(id) = check.filter(|id| allowed.checks.contains(id)) {
+                    hits::record(allowed, id);
+                } else {
                     violations.push(format!(
                         "INV-14: `{path}` was read under {}, but its ALLOWED entry ({}) cites only {:?}",
                         check.map_or("no check id".to_owned(), |id| format!("`{id}`")),
@@ -653,6 +655,49 @@ pub(crate) fn audit(
         format!("the fixture has no answer for `{line}`; record it under api/ or fix the check")
     }));
     violations
+}
+
+/// The (`ALLOWED` entry, check) pairs that fixture runs on this thread have hit (M1-115). A test that sweeps
+/// the fixtures of one check reads it with [`hits::unhit`]; it is per thread so parallel tests do not mix.
+pub(crate) mod hits {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+
+    #[cfg(test)]
+    use crate::client::guard::ALLOWED;
+    use crate::client::guard::Allowed;
+
+    thread_local! {
+        static HITS: RefCell<BTreeSet<(String, String)>> = const { RefCell::new(BTreeSet::new()) };
+    }
+
+    fn key(entry: &Allowed) -> String {
+        format!("{}/{}/{}", entry.group, entry.version, entry.resource)
+    }
+
+    pub(super) fn record(entry: &Allowed, check: &str) {
+        HITS.with(|hits| hits.borrow_mut().insert((key(entry), check.to_owned())));
+    }
+
+    /// Forgets this thread's hits. Only the crate's own pair tests read the hits.
+    #[cfg(test)]
+    pub(crate) fn clear() {
+        HITS.with(|hits| hits.borrow_mut().clear());
+    }
+
+    /// The `ALLOWED` entries that cite `check` and that no run on this thread has read under it.
+    #[cfg(test)]
+    pub(crate) fn unhit(check: &str) -> Vec<String> {
+        HITS.with(|hits| {
+            let hits = hits.borrow();
+            ALLOWED
+                .iter()
+                .filter(|entry| entry.checks.contains(&check))
+                .map(key)
+                .filter(|entry| !hits.contains(&(entry.clone(), check.to_owned())))
+                .collect()
+        })
+    }
 }
 
 // ---- the harness --------------------------------------------------------------------------------------------
