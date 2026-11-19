@@ -373,7 +373,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-178 | [#76](https://github.com/getrdy-io/rdy/pull/76) | 2026-11-19 | `SysctlName::canonical` by the first separator: spec, check and docs agree, no deferrals | added 2026-10-30 (correction-34, PR #20 review)
 
-- M1-179 | [#70](https://github.com/getrdy-io/rdy/pull/70) | 2026-11-17 | none
+- M1-179 | [#70](https://github.com/getrdy-io/rdy/pull/70) | 2026-11-19 | none
 
 - M1-180 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-11-06 | Live macOS and Windows runs keep the fields null until M2-005; added 2026-11-06 (correction-41, PR #42 reviews)
 
@@ -392,4 +392,42 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 ## Summary
 
-Written when the last M1 ticket merges: what shipped, what moved to M2 and why.
+Written on 2026-11-19, when the last M1 code ticket (M1-179, #70) merged. Main is at a870ec3f.
+
+M1 has 184 tickets and 405 h, 345 h of them core (after correction-59; correction-60 adds only M2
+work). 181 are merged, 400.5 h: 154 of 156 core and 27 of 28 non-core. The three left are founder steps:
+M1-138 (tag and release 0.1.0) and M1-139 (the alpha announcement), both core, and M1-167 (time the
+quickstart with two design-partner SEs), non-core. Together they are 4.5 h.
+
+What shipped:
+- `rdy-spec`: the `rdy/v1` spec format and its JSON schema, parsing with typo hints, validation, ed25519
+  signatures and the trust store. The schema writes the spec reference page.
+- `rdy-engine`: the check trait, the scheduler with a timeout per check and a run deadline, the watchdog,
+  the probe facade with least privilege and `--no-network`, the redactor, and the terminal, JSON and HTML
+  reports.
+- Checks: 13 host checks (`host.cgroups`, `host.container_runtime`, `host.cpu`, `host.disk`,
+  `host.firewall`, `host.kernel`, `host.lsm`, `host.memory`, `host.os`, `host.ports`,
+  `host.security_agents`, `host.sysctl`, `host.time_sync`), 5 network checks (`net.dns`, `net.egress`,
+  `net.mtu`, `net.proxy`, `net.tls_intercept`) and 11 Kubernetes checks (`k8s.access`, `k8s.admission`,
+  `k8s.cni`, `k8s.crds`, `k8s.dns`, `k8s.ingress`, `k8s.namespace`, `k8s.nodes`, `k8s.rbac`,
+  `k8s.storageclass`, `k8s.version`), behind a read-only guard. A check whose data source is not built
+  for an OS reports Skipped, not yet on this OS.
+- CLI: `rdy run`, `rdy verify`, `rdy spec lint|sign|keygen`, `rdy trust add|list|remove` and
+  `rdy version`, with exit codes 0, 1, 2, 64 and 70.
+- Release: dist builds for five targets, cosign signatures, SBOMs, `install.sh` with checksum and
+  signature checks, and `scripts/verify-release.sh`.
+- Tests: fixture envs for every verdict, the timeouts env, golden reports and README transcripts, the
+  docs-test runner and the SEC-22 no-phone-home strace test.
+
+What moved to M2, and why:
+- In the review pass before the build, the draft ids M1-045, M1-104, M1-140, M1-202, M1-203, M1-205,
+  M1-214 to M1-216, M1-224 and M1-227 became M2-001 to M2-011. Among them are host identity, golden
+  results per released version, the cluster facts cache, and the macOS and Windows data sources. They did
+  not fit the M1 budget, and 0.1.0 does not need them.
+- Correction-58 moved M1-156 (net.registry) to M2-149, M1-158 (net.bandwidth) to M2-151 and M1-166 (the
+  net-airgapped env) to M2-153. Each needed a facade or harness piece that does not exist yet:
+  `Probe::http` with a body and Bearer support, and a TLS server rig in the env driver. Each piece needs
+  its own security review, so none was built under an M1 ticket.
+- Review findings that belong after 0.1.0 have M2 ids, for example M2-126 (the per-check Service pin),
+  M2-152 (generated TLS chains in the env driver) and M2-154 to M2-156. The `11-backlog.md` corrections
+  log says where each came from.

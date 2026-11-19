@@ -218,25 +218,25 @@ main). No document may name a person as owner, and no document may mention the f
 - #82 M1-088, #94 M1-127, #100 M1-140, #109 M1-097, #72 M1-153, #80 M1-117.
 - #56 the http 302 flake fix, #115 correction-58, #116 M1-098.
 
-**Merged on 2026-11-18 and 2026-11-19** (main at 34466f6a), in merge order:
+**Merged on 2026-11-18 and 2026-11-19** (main at a870ec3f), in merge order:
 - #123 the macOS PR legs on Intel, #117 M1-107, #124 M1-113, #125 M1-175, #126 M1-115, #127 M1-118.
 - #128 M1-185, #129 M1-186, #130 M1-135, #131 M1-137, #132 M1-116, #119 M1-119, #133 M1-159, #134 M1-187.
 - #118 M1-155, #135 the probe clock fix, #121 the install redirects, #136 M1-154, #137 M1-162 (replaces #62,
   closed unmerged).
 - #60 M1-142, #61 M1-173, #68 M1-143, #65 M1-163, #64 M1-164, #78 M1-165, #75 correction-46, #76 M1-178.
+- #70 M1-179 (31aa9926), the last M1 code PR, and #120 correction-59 (a870ec3f).
 
-**Progress.** 180 of 184 M1 tickets are merged on main: 154 of 156 core and 26 of 28 non-core. The 184
-count M1-187 (correction-59) and leave out M1-156, M1-158 and M1-166, which correction-58 moved to M2; their
-rows are stubs. Not merged: M1-179 (#70, in CI, the last M1 code PR) and the founder steps M1-138, M1-139
-and M1-167. Once #70 lands, every M1 ticket is merged except those three. `12-progress.md` links the PR
-and gives the merge date of every merged line: this PR filled seven (M1-058 #47, M1-097 #109, M1-098 #116,
-M1-128 #113, M1-134 #114, not #112, M1-136 #111 and M1-184 #107), correction-60 filled the rest, and this
-PR sets M1-178 (#76) to its merge date, 2026-11-19.
+**Progress.** 181 of 184 M1 tickets are merged on main, 400.5 of 405 h: 154 of 156 core (342.5 of 345 h)
+and 27 of 28 non-core. The 184 count M1-187 (correction-59) and leave out M1-156, M1-158 and M1-166, which
+correction-58 moved to M2; their rows are stubs. All M1 code is merged. The three tickets left are founder
+steps: M1-138 and M1-139 (core) and M1-167 (non-core), 4.5 h. `12-progress.md` links the PR and gives the
+merge date of every merged line: this PR filled seven (M1-058 #47, M1-097 #109, M1-098 #116, M1-128 #113,
+M1-134 #114, not #112, M1-136 #111 and M1-184 #107), correction-60 (#138) filled the rest, and this PR
+sets M1-178 (#76) and M1-179 (#70) to their merge date, 2026-11-19. It also writes the "Summary" section.
 
-Totals on main, after correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153 tickets, 509.75 h; all
-milestones 436 tickets, 1427.75 h, 1367.75 h core. After #120 (correction-59) and the correction-60 PR:
-M1 184 tickets, 405 h, 345 h core; M2 156 tickets, 513.25 h; all milestones 440 tickets, 1431.75 h,
-1371.75 h core. Recompute with
+Totals on main, after correction-59 (#120): M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h;
+all milestones 438 tickets, 1429.25 h, 1369.25 h core. After #138 (correction-60): M2 156 tickets,
+513.25 h; all milestones 440 tickets, 1431.75 h, 1371.75 h core. Recompute with
 `python3 -I docs/plan/reviews/open-findings-2026-11-06/totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session.** Corrections 35 to 47 are in `11-backlog.md`'s correction log and in
@@ -288,14 +288,14 @@ the earlier pause notes in this file's history. 46 is #75, merged 2026-11-19.
   M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
   progress line gets #104. Merged M1-101, M1-112, M1-124, M1-169, M1-170, M1-174 and M1-182 move weeks.
   The moves to M2 are below.
-- 59 (#120, open, merges after #70): new core M1-187 (0.5 h, week 24): the slow `/version` case in the
+- 59 (#120, merged 2026-11-19): new core M1-187 (0.5 h, week 24): the slow `/version` case in the
   `timeouts` env, after M1-119 (#119) and M1-185 merge; M1-185 proves it at family level only, and M1-138
   depends on M1-187. M1-135's acme-platform transcript ends `1 block, ... 1 optional check not run` and
   `NOT READY` (no TLS server for `:443` in the env harness); the reason-line variant waits for M2-152. 03
   net.dns: Alpine's `musl-utils` ships `getent`; the M1-154 fixture stays a minimal musl image without it.
   New M2-154 (SEC-22 strace leg for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
   M1-187 has since merged (#134).
-- 60 (branch `correction-60`, its PR opens after #120 merges): new M2-155 (the k8s skip after a probe
+- 60 (#138, in CI at 567b9b96, merges before this PR): new M2-155 (the k8s skip after a probe
   timeout shows the capability's hint, with a second 01 5.2 and 07 text) and M2-156 (the scheduler origin
   on the deadlines' clock under a paused clock). M2-126 becomes the per-check `services` pin (a new public
   `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules, `FieldSelector::Key` only
@@ -313,10 +313,9 @@ does not exist yet, and each piece needs its own security review, so it is not b
   interception case to M2-152.
 
 **Open PRs at the pause.**
-- In CI: #70 M1-179, the last M1 code PR.
-- After #70, one at a time: #120 correction-59, then the correction-60 PR, then #122 (this pause-state PR).
-  Each edits `12-progress.md` and this section, so each merges main first. #120 and correction-60 edit 03,
-  so they need `ci-ok`.
+- In CI: #138 correction-60 (head 567b9b96), the last open PR before this one. It merges first.
+- Then #122, this pause-state PR. It merges main after #138 and needs `ci-ok`, because it edits
+  `12-progress.md`.
 - Closed: #62 (M1-162). It held an unsigned merge commit; #137 replaced it.
 - Parked: #83, the `merge_group` CI trigger. It is useless while `getrdy-io` is a personal account (owner
   type User), because merge queues need an organization. Do not merge it unless the repo moves to an org.
@@ -330,23 +329,25 @@ arm64 pool returns, swap those two lines back and ADR 0050 applies again. The ac
 so CI runs one PR at a time.
 
 **Not finished.**
-- M1-179 is in #70.
 - Founder steps: M1-138 (tag and release 0.1.0), M1-139 (the alpha announcement) and M1-167 (time the
   quickstart with two design-partner SEs). M1-137's review left one open item for M1-167 or release: time
   the five-minute quickstart on a clean VM.
 
 **Numbers.**
-- The next PR is #138. The correction-60 PR takes it or a later number.
+- The next PR is #139. #138 is correction-60.
 - The next free ADR on main is 0053. ADRs 0043 to 0046 (#137, #65, #64, #78), 0047 (#85), 0048 (#111),
   0049 (correction-56, Proposed), 0050 (#110, suspended by #123), and 0051 and 0052 (#118) are on main.
-- The next ticket ids are M1-188 and M2-157, and the next correction is 61. Those assume #120 and the
-  correction-60 PR merge; they take M1-187, M2-154, M2-155 and M2-156.
+- The next ticket ids are M1-188 and M2-157, and the next correction is 61. Those assume #138 merges; it
+  takes M2-155 and M2-156 (#120 took M1-187 and M2-154).
 - The next plan-correction row is PC-55. PC-54 is on main (#82).
 
-**Definition of done** (the "Done means" paragraph at the top of this file), at main 34466f6a:
-- Every M1 ticket merged: waits on #70 (M1-179), and on the founder for M1-138, M1-139 and M1-167.
-- CI green on main: passing. The last two main commits (630cd50e, f0038ad8) passed all 18 checks; the run
-  on 34466f6a was still going at the pause.
+**Definition of done** (the "Done means" paragraph at the top of this file), at main a870ec3f:
+- Every M1 ticket merged: the founder's. Only M1-138, M1-139 and M1-167 are left, all founder steps.
+- CI green on main: not met yet. The push run on 31aa9926 (#70) failed one test on `macos-x64`:
+  `rdy::prompt_pty a_password_over_the_cap_is_refused_with_exit_64` timed out at 300 s (run 44567636207),
+  the same macOS pty timeout class noted under "Notes carried to later tickets". The run on a870ec3f was
+  still going at the pause. 34466f6a passed all 18 checks, and 31aa9926 passes the full
+  `cargo test --workspace` on Linux.
 - `cargo install --path crates/rdy-cli` builds: passing. Checked on main 34466f6a plus this PR's docs; the
   binary then ran `rdy run examples/specs/acme-platform.yaml --allow-unsigned` and exited 2, not ready.
 - `rdy run examples/specs/acme-platform.yaml` gives the expected report against the fixtures: passing on
@@ -354,11 +355,10 @@ so CI runs one PR at a time.
   2 (correction-59, #120).
 - `rdy verify` rejects a tampered spec: passing on main (M1-126, #84;
   `crates/rdy-cli/tests/verify_command.rs`).
-- `12-progress.md` summarizes what shipped and what moved to M2 and why: waits on #70, #120 and the
-  correction-60 PR. Its "Summary" section is written when the last M1 ticket merges. A draft is ready.
+- `12-progress.md` summarizes what shipped and what moved to M2 and why: in this PR ("Summary").
 - The final reply to the founder (that summary, the install command a design partner runs, and the three
-  decisions to look at): the founder's, after M1-138 tags 0.1.0. The install command is the M1 one in
-  CLAUDE.md until M1-138 publishes a release.
+  decisions to look at): drafted by the coordinator, sent when #122 merges. The install command is the M1
+  one in CLAUDE.md until M1-138 publishes a release.
 
 **Process lessons from this session.**
 - Stack builders on approved but unmerged branches. A ticket whose dependency is approved does not wait for
