@@ -1852,6 +1852,7 @@ dependencies = [
  "minisign",
  "proptest",
  "rdy-checks-host",
+ "rdy-checks-k8s",
  "rdy-checks-net",
  "rdy-engine",
  "rdy-spec",
@@ -1966,6 +1967,9 @@ dependencies = [
  "askama",
  "clap",
  "colorchoice",
+ "http",
+ "k8s-openapi",
+ "kube",
  "proc-macro2",
  "rdy-engine",
  "rdy-spec",
@@ -1975,6 +1979,7 @@ dependencies = [
  "syn 2.0.119",
  "tokio",
  "toml",
+ "tower",
 ]
 
 [[package]]
@@ -3273,6 +3278,7 @@ dependencies = [
  "clap",
  "jsonschema",
  "rdy",
+ "rdy-checks-k8s",
  "rdy-engine",
  "rdy-spec",
  "serde-saphyr 2.0.0",

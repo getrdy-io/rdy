@@ -14,7 +14,8 @@
 //!
 //! A block may also carry `transcript=<path>`, on the README only. Its body must equal that golden file below
 //! the repo root. Every `console` block of the README has one, and every golden in `tests/fixtures/readme/`
-//! is used. The golden's `$ echo $?` value must be in the block's exit set, and its verdict line must match
+//! is used, unless the M1-135 generator lists it (`common/readme_goldens.rs`, the one source: the goldens
+//! are made in process from the Replay envs by `env_harness/readme.rs`). The golden's `$ echo $?` value must be in the block's exit set, and its verdict line must match
 //! the block's shape.
 //!
 //! How a tested block runs: in a fresh folder that holds `examples/` and a flat copy of every example
@@ -36,6 +37,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
+
+// The goldens that M1-135 makes from the Replay envs. A golden that no README block uses may stand only if
+// it is listed here.
+#[path = "common/readme_goldens.rs"]
+mod readme_goldens;
 
 /// The README and the folder of the published pages. Both are read; nothing else is.
 const README: &str = "README.md";
@@ -637,8 +643,18 @@ fn every_readme_transcript_equals_its_golden_and_every_golden_is_used() {
     for entry in fs::read_dir(root.join(GOLDENS)).expect("the readme golden folder") {
         let name = entry.expect("a directory entry").file_name();
         let rel = format!("{GOLDENS}/{}", name.to_string_lossy());
-        if !used.contains(&rel) {
-            failures.push(format!("{rel} is used by no README transcript. Remove it."));
+        let generated = readme_goldens::GENERATED.contains(&name.to_string_lossy().as_ref());
+        if !used.contains(&rel) && !generated {
+            failures.push(format!(
+                "{rel} is used by no README transcript and the generator does not list it. Remove it."
+            ));
+        }
+    }
+    for name in readme_goldens::GENERATED {
+        if !root.join(GOLDENS).join(name).is_file() {
+            failures.push(format!(
+                "{GOLDENS}/{name} is listed by the generator but missing"
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

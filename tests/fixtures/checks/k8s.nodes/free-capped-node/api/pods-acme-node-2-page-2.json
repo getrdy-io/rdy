@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "continue=tok-more&limit=500&fieldSelector=spec.nodeName=acme-node-2,status.phase!=Succeeded,status.phase!=Failed"
+  },
+  "status": 503,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "the server is overloaded, try again",
+    "reason": "ServiceUnavailable",
+    "details": {},
+    "code": 503
+  }
+}

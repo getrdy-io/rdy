@@ -386,6 +386,32 @@ fn an_endpoint_slice_list_must_name_one_service_by_label() {
 }
 
 #[test]
+fn a_key_selector_needs_a_term_on_its_key() {
+    // The rule on the type, with the `status.phase` key of the pod list entry. The text is the decoded
+    // `fieldSelector` value.
+    let phase = FieldSelector::Key("status.phase");
+    for text in [
+        "status.phase!=Succeeded,status.phase!=Failed",
+        "status.phase=Running",
+        "status.phase==Running",
+        "spec.nodeName=n1,status.phase!=Failed",
+        "status.phase!=Failed,spec.nodeName=n1",
+    ] {
+        assert!(phase.met_by(Some(text), None), "{text}");
+    }
+    for text in [
+        "spec.nodeName=n1",
+        "metadata.name=status.phase",
+        "xstatus.phase=Running",
+        "status.phasex=Running",
+        "",
+    ] {
+        assert!(!phase.met_by(Some(text), None), "{text}");
+    }
+    assert!(!phase.met_by(None, None));
+}
+
+#[test]
 fn a_pod_list_needs_the_phase_field_selector() {
     let pods = "/api/v1/pods";
     for query in [
@@ -429,6 +455,15 @@ fn a_pod_list_needs_the_phase_field_selector() {
             "{query}"
         );
     }
+    // Only a list: a get of one pod by name is not an allowed shape.
+    assert_eq!(
+        judge_get("/api/v1/namespaces/app/pods?fieldSelector=status.phase%21%3DFailed"),
+        Err(RULE_NOT_ALLOWED)
+    );
+    assert_eq!(
+        judge_get("/api/v1/namespaces/app/pods/web-0"),
+        Err(RULE_NOT_ALLOWED)
+    );
 }
 
 #[test]
@@ -1310,7 +1345,9 @@ fn calls_of(check: &str) -> Vec<Call> {
         "k8s.nodes" => vec![
             get("/api/v1/nodes?&limit=500"),
             get(pods_uri()),
-            get("/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed"),
+            get(
+                "/api/v1/pods?&fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed&limit=500",
+            ),
             get("/apis/karpenter.sh"),
             get("/apis/karpenter.k8s.aws"),
             get("/apis/apps/v1/namespaces/kube-system/deployments?&limit=500"),

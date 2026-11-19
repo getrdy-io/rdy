@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-healthy"
+summary = "Three healthy 8 vCPU nodes in three zones, allocatable written as 7910m and Ki values"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

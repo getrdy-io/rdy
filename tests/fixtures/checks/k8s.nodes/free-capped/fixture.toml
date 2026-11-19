@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-capped"
+summary = "The cluster-wide pod list is cut, and each counted node is listed on its own"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

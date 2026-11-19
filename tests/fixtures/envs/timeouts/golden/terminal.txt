@@ -1,0 +1,29 @@
+WARNING: UNSIGNED SPEC
+spec.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
+rdy <version>
+spec    acme-platform >=1.0   (spec.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    timeouts.example   rhel 9.2   x86_64
+user    uid 1000 (not root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
+
+  BLOCK    net.egress   1 of 1 endpoints unreachable: hole.acme.test:8080 (blackhole)
+                        fix from rdy: No reply to SYN from 192.0.2.9:8080 in 3s, a firewall is
+                        dropping it. Ask the network team to allow tcp/8080 to hole.acme.test from
+                        this machine.
+  TIMEOUT  host.disk    Timed out after 5 s. (required)
+                        fix from rdy: Run again. If it times out again, tell the vendor which check
+                        it was.
+  SKIP     k8s.version  Not run. No Kubernetes cluster was reachable. (required)
+                        fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                        again.
+
+1 block, 0 warnings, 0 passed, 2 required checks not run (1 timed out)
+
+WARNING: UNSIGNED SPEC
+NOT READY

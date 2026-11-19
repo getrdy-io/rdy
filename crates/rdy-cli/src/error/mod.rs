@@ -264,6 +264,14 @@ pub enum InternalKind {
         /// The variable that holds the proxy URL.
         var: String,
     },
+    /// A check family's probe ended the run (the Kubernetes family could not promise to hide a credential
+    /// of the kubeconfig or of the proxy). The text and the hint are the family's own and hold no secret.
+    FamilyFatal {
+        /// What went wrong.
+        message: String,
+        /// How to fix it.
+        hint: String,
+    },
 }
 
 /// Every failure that ends a command with exit 64 or 70 and no verdict.
@@ -374,6 +382,7 @@ fn internal_message(kind: &InternalKind) -> String {
         InternalKind::ProxySecretRefused { var } => format!(
             "rdy cannot promise to keep the password in the proxy URL of {var} out of its output"
         ),
+        InternalKind::FamilyFatal { message, .. } => message.clone(),
     }
 }
 
@@ -681,6 +690,7 @@ impl CliError {
             Self::Internal(InternalKind::ProxySecretRefused { var }) => format!(
                 "use a proxy password of 6 bytes or more in {var}, or take the user name and password out of it, then run rdy again"
             ),
+            Self::Internal(InternalKind::FamilyFatal { hint, .. }) => hint.clone(),
         }
     }
 

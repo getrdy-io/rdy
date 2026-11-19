@@ -1,0 +1,297 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-amd-1",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "amd64",
+            "kubernetes.io/hostname": "acme-amd-1",
+            "topology.kubernetes.io/zone": "us-east-1a"
+          }
+        },
+        "spec": {},
+        "status": {
+          "capacity": {
+            "cpu": "8",
+            "memory": "32Gi",
+            "ephemeral-storage": "104857600Ki",
+            "pods": "58"
+          },
+          "conditions": [
+            {
+              "type": "MemoryPressure",
+              "status": "False"
+            },
+            {
+              "type": "DiskPressure",
+              "status": "False"
+            },
+            {
+              "type": "PIDPressure",
+              "status": "False"
+            },
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.10.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd://acme-1",
+            "kubeletVersion": "v1.29.4-eks-abc1234",
+            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          },
+          "allocatable": {
+            "cpu": "7910m",
+            "memory": "29567452Ki",
+            "ephemeral-storage": "95551679124",
+            "pods": "58"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-amd-2",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "amd64",
+            "kubernetes.io/hostname": "acme-amd-2",
+            "topology.kubernetes.io/zone": "us-east-1b"
+          }
+        },
+        "spec": {},
+        "status": {
+          "capacity": {
+            "cpu": "8",
+            "memory": "32Gi",
+            "ephemeral-storage": "104857600Ki",
+            "pods": "58"
+          },
+          "conditions": [
+            {
+              "type": "MemoryPressure",
+              "status": "False"
+            },
+            {
+              "type": "DiskPressure",
+              "status": "False"
+            },
+            {
+              "type": "PIDPressure",
+              "status": "False"
+            },
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.10.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd://acme-1",
+            "kubeletVersion": "v1.29.4-eks-abc1234",
+            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          },
+          "allocatable": {
+            "cpu": "7910m",
+            "memory": "29567452Ki",
+            "ephemeral-storage": "95551679124",
+            "pods": "58"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-arm-1",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "arm64",
+            "kubernetes.io/hostname": "acme-arm-1",
+            "topology.kubernetes.io/zone": "us-east-1a"
+          }
+        },
+        "spec": {},
+        "status": {
+          "capacity": {
+            "cpu": "8",
+            "memory": "32Gi",
+            "ephemeral-storage": "104857600Ki",
+            "pods": "58"
+          },
+          "conditions": [
+            {
+              "type": "MemoryPressure",
+              "status": "False"
+            },
+            {
+              "type": "DiskPressure",
+              "status": "False"
+            },
+            {
+              "type": "PIDPressure",
+              "status": "False"
+            },
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.10.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd://acme-1",
+            "kubeletVersion": "v1.29.4-eks-abc1234",
+            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "operatingSystem": "linux",
+            "architecture": "arm64"
+          },
+          "allocatable": {
+            "cpu": "7910m",
+            "memory": "29567452Ki",
+            "ephemeral-storage": "95551679124",
+            "pods": "58"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-arm-2",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "arm64",
+            "kubernetes.io/hostname": "acme-arm-2",
+            "topology.kubernetes.io/zone": "us-east-1b"
+          }
+        },
+        "spec": {},
+        "status": {
+          "capacity": {
+            "cpu": "8",
+            "memory": "32Gi",
+            "ephemeral-storage": "104857600Ki",
+            "pods": "58"
+          },
+          "conditions": [
+            {
+              "type": "MemoryPressure",
+              "status": "False"
+            },
+            {
+              "type": "DiskPressure",
+              "status": "False"
+            },
+            {
+              "type": "PIDPressure",
+              "status": "False"
+            },
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.10.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd://acme-1",
+            "kubeletVersion": "v1.29.4-eks-abc1234",
+            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "operatingSystem": "linux",
+            "architecture": "arm64"
+          },
+          "allocatable": {
+            "cpu": "7910m",
+            "memory": "29567452Ki",
+            "ephemeral-storage": "95551679124",
+            "pods": "58"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-power-1",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.io/arch": "ppc64le",
+            "kubernetes.io/hostname": "acme-power-1",
+            "topology.kubernetes.io/zone": "us-east-1c"
+          }
+        },
+        "spec": {},
+        "status": {
+          "capacity": {
+            "cpu": "8",
+            "memory": "32Gi",
+            "ephemeral-storage": "104857600Ki",
+            "pods": "58"
+          },
+          "conditions": [
+            {
+              "type": "MemoryPressure",
+              "status": "False"
+            },
+            {
+              "type": "DiskPressure",
+              "status": "False"
+            },
+            {
+              "type": "PIDPressure",
+              "status": "False"
+            },
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.10.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd://acme-1",
+            "kubeletVersion": "v1.29.4-eks-abc1234",
+            "kubeProxyVersion": "v1.29.4-eks-abc1234",
+            "operatingSystem": "linux",
+            "architecture": "ppc64le"
+          },
+          "allocatable": {
+            "cpu": "7910m",
+            "memory": "29567452Ki",
+            "ephemeral-storage": "95551679124",
+            "pods": "58"
+          }
+        }
+      }
+    ]
+  }
+}
