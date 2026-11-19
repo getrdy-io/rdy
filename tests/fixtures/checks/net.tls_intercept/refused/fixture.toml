@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-refused"
+summary = "A host whose port is closed, so no chain can be had"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

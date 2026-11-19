@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "controllers": [
+      "pids"
+    ],
+    "id": "host.cgroups",
+    "version": "v1"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "pids"
+      ],
+      "version": "v1"
+    },
+    "fix": "If rdy runs in a container, run it on the host so every controller is visible. On the host, check that each one is mounted under `/sys/fs/cgroup`.",
+    "level": "warn",
+    "message": "cgroup hybrid layout in use, could not confirm `pids`",
+    "notes": [
+      "Hybrid layout: the controllers are in cgroup v1 hierarchies, and a v2 hierarchy is mounted beside them.",
+      "`pids` was not confirmed: it is attached to no v1 hierarchy and the v2 controller lists could not be read."
+    ],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "pids": "not_confirmed"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuacct",
+        "memory"
+      ],
+      "controllers_enabled": [],
+      "layout": "hybrid",
+      "proc_cgroups": {
+        "pids": {
+          "enabled": true,
+          "hierarchy": 0
+        }
+      }
+    },
+    "partial": null
+  }
+}

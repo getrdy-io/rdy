@@ -175,7 +175,13 @@ fn quiet_machine() -> Replay {
 #[test]
 fn color_never_and_a_pipe_give_plain_text_and_color_always_gives_codes() {
     let (_dir, spec) = spec_file();
-    let never = run_reader_on(&spec, quiet_machine(), &["--color", "never"], true);
+    // `--progress never`: this run pins a terminal, and a terminal gets the static line (M1-088).
+    let never = run_reader_on(
+        &spec,
+        quiet_machine(),
+        &["--color", "never", "--progress", "never"],
+        true,
+    );
     assert!(!never.stderr.contains('\x1b'), "{}", never.stderr);
 
     let auto_pipe = run_reader_on(&spec, quiet_machine(), &["--color", "auto"], false);
@@ -246,6 +252,7 @@ fn stdout_is_never_coloured_and_json_stays_the_report() {
     // The report block lists the files that were written, and the verdict is last.
     assert!(ran.stderr.contains("Report written to "), "{}", ran.stderr);
     assert!(ran.stderr.contains("\n  spec.yaml\n"), "{}", ran.stderr);
+    assert!(ran.stderr.contains(".html\n"), "{}", ran.stderr);
     assert!(ran.stderr.contains(".json\n"), "{}", ran.stderr);
     let mut plain = Vec::new();
     rdy_cli::style::write_styled(&mut plain, false, &ran.stderr).unwrap_or_else(|e| panic!("{e}"));

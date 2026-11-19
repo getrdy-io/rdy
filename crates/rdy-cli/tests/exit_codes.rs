@@ -6,12 +6,14 @@
 use std::process::{Command, Output};
 
 mod common;
+use common::NoProxyEnv;
 
 fn rdy(args: &[&str]) -> Output {
     common::quiet(
         Command::new(env!("CARGO_BIN_EXE_rdy"))
             .args(args)
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .output()
             .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
     )
@@ -156,37 +158,6 @@ fn a_usage_error_never_names_the_trust_flags() {
             "rdy {args:?}: {err:?}"
         );
     }
-}
-
-// `verify` is the command that is not built yet. M1-126 builds it, and then deletes these two tests and
-// `a_command_that_is_not_built_yet_prints_an_internal_error_object` in error_json.rs, or points them at
-// the next command that is still missing.
-#[test]
-fn commands_for_later_tickets_exit_70_with_a_fix_line() {
-    let args = &["verify", "spec.yaml"];
-    let out = rdy(args);
-    assert_eq!(code(&out), 70, "rdy {args:?}: {out:?}");
-    assert!(out.stdout.is_empty(), "rdy {args:?} wrote to stdout");
-    let err = text(&out.stderr);
-    assert!(
-        err.starts_with("error: rdy ") && err.contains("is not yet implemented in this build"),
-        "rdy {args:?}: {err:?}"
-    );
-    assert!(err.contains("\nfix: "), "rdy {args:?} has no fix: {err:?}");
-}
-
-/// With `--json` the same failure also puts an error object on stdout (M1-021, 07 section 4.1).
-#[test]
-fn a_later_ticket_command_with_json_prints_the_error_object_too() {
-    let out = rdy(&["verify", "spec.yaml", "--json"]);
-    assert_eq!(code(&out), 70);
-    let err = text(&out.stderr);
-    assert!(
-        err.contains("is not yet implemented in this build"),
-        "{err:?}"
-    );
-    assert!(err.contains("\nfix: "), "{err:?}");
-    assert!(text(&out.stdout).contains("\"code\": \"internal\""));
 }
 
 #[test]

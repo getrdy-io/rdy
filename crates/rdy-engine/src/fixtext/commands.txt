@@ -7,8 +7,10 @@
 # `host.os` FIPS fix text.
 Set-VMProcessor
 aa-status
+apk
 apparmor_parser
 apt
+apt-get
 ausearch
 aws
 az
@@ -37,15 +39,20 @@ kubelogin
 lvextend
 modprobe
 mount
+netstat
 nvidia-ctk
 nvidia-smi
 oc
+openssl
 printf
 pro
 rancher
 rdy
 rmmod
+route
+security
 setenforce
+sntp
 ss
 swapoff
 sysctl
@@ -59,3 +66,5 @@ update-ca-trust
 update-grub
 update-initramfs
 usermod
+w32tm
+zypper

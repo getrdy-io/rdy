@@ -1,0 +1,8 @@
+{
+  "log-driver": "json-file",
+  "proxies": {
+    "http-proxy": "http://svc:daemon-canary-pw@proxy.acme.test:3128",
+    "https-proxy": "http://svc:daemon-canary-pw@proxy.acme.test:3128",
+    "no-proxy": ".svc"
+  }
+}

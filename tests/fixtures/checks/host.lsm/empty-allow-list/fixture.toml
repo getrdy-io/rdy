@@ -1,0 +1,12 @@
+schema = 1
+name = "empty-allow-list"
+summary = "SELinux enforcing, the spec allow list is empty so no mode is accepted"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = true
+network = false
+kube = false

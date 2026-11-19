@@ -31,13 +31,15 @@ ed25519-dalek = { workspace = true, features = ["zeroize"] }
 getrandom = { workspace = true }
 indicatif = { workspace = true }
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
+rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
+rdy-checks-k8s = { path = "../rdy-checks-k8s", version = "0.1.0-alpha.0" }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 scrypt = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt", "signal", "macros", "time"] }
 tracing = { workspace = true, features = ["std"] }
 tracing-subscriber = { workspace = true, features = ["std", "fmt", "env-filter", "registry"] }
 unicode-width = { workspace = true }
@@ -47,6 +49,10 @@ zeroize = { workspace = true }
 [target.'cfg(not(unix))'.dependencies]
 console = { workspace = true }
 rpassword.workspace = true
+
+# `GetFileType` through a safe wrapper: a spec or key file must be a disk file (M1-183). No `unsafe` here.
+[target.'cfg(windows)'.dependencies]
+winapi-util = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["std", "fs", "process", "termios"] }
@@ -58,18 +64,31 @@ proptest = { workspace = true, features = ["std"] }
 # The env harness (M1-075) runs the real host family over fixture environments, in process. `rdy run`
 # will depend on the families for real in M1-057.
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
+rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
+# `testing` serves a scripted cluster from an env's `api/` tree (M1-185). It is a dev-dependency feature, so
+# the shipped binary never has it: a release build with it does not compile, and the CI guard on the normal
+# build graph keeps it out.
+rdy-checks-k8s = { path = "../rdy-checks-k8s", version = "0.1.0-alpha.0", features = ["testing"] }
 # `testing` adds the panicking-redactor seam. It is a dev-dependency feature, so the shipped binary
-# never has it (rdy-engine refuses a release build with it).
-rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
+# never has it (rdy-engine refuses a release build with it). `loopback` adds the TLS server and the
+# generated CA that the env harness builds its certificate chains from (M1-100, ADR 0035); the CI guard
+# on the normal build graph keeps it out of the binary.
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }
+# The docs-test runner (M1-136) matches each tested block's output against the regex it declares.
+regex = { workspace = true, features = ["std", "perf", "unicode"] }
 sha2 = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 # `test-util` gives the harness a paused clock, so a hung source costs no real time.
-tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "test-util", "io-util"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
 # The pty tests of the progress line give stderr a pty and keep stdout a pipe (M1-142).
 rustix = { workspace = true, features = ["std", "fs", "pty", "termios"] }
+
+# A named pipe server for the Windows spec-read test (M1-183).
+[target.'cfg(windows)'.dev-dependencies]
+tokio = { workspace = true, features = ["rt", "net"] }
 
 [lints]
 workspace = true

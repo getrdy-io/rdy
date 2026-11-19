@@ -27,8 +27,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub use crate::probe::replay::{
-    ApiRecord, Caps, DnsAnswer, Expect, Fixture, FixtureError, Manifest, NetScript, Origin, Replay,
-    RunPins, TcpScript,
+    ApiRecord, Caps, DnsAnswer, DnsScript, Expect, Fixture, FixtureError, Manifest, NetScript,
+    Origin, Replay, RunPins, TcpScript,
 };
 
 #[cfg(feature = "runtime")]
@@ -37,18 +37,25 @@ mod expect;
 mod fake;
 mod fixture_run;
 pub mod golden;
+#[cfg(feature = "html")]
+mod html_static;
 mod normalize;
 #[cfg(test)]
 mod tests;
 
 #[cfg(feature = "runtime")]
-pub use expect::{assert_cases, assert_cases_in, expect_bytes, render, run_case, sorted};
+pub use expect::{
+    assert_cases, assert_cases_in, assert_cases_with, assert_cases_with_in, expect_bytes, render,
+    run_case, run_case_on, sorted,
+};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{
     FixtureRun, assert_within_manifest, manifest_violations, run_fixture, run_fixture_in,
     run_loaded,
 };
+#[cfg(feature = "html")]
+pub use html_static::assert_static_html;
 pub use normalize::{normalize, normalize_across_jobs};
 #[cfg(feature = "loopback")]
 pub mod loopback;
@@ -57,6 +64,14 @@ use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
+
+/// Waits `delay` on the tokio clock. Under a paused clock the wait costs no real time, and it uses no thread,
+/// so a single-thread runtime is never blocked by it. A scripted server that answers late (the `delay_ms` of
+/// a recorded API response) uses it, so a crate that may not depend on tokio can still wait.
+#[cfg(feature = "runtime")]
+pub async fn sleep(delay: std::time::Duration) {
+    tokio::time::sleep(delay).await;
+}
 
 /// The shared fixtures directory, `tests/fixtures` at the repo root (08 section 1). It resolves from
 /// this crate's manifest directory, so it works from any crate of the workspace and not from a
@@ -103,9 +118,59 @@ impl TestRun {
     #[must_use]
     pub fn new(replay: Replay) -> Self {
         let redactor = Redactor::new(TagKey::fixed([7; 32]));
-        Self {
-            hub: ProbeHub::new(Arc::new(replay), redactor),
-        }
+        let hub = ProbeHub::new(Arc::new(replay), redactor);
+        // The rig allows the network, as a plain run does. `TestRun::offline` is `--no-network`.
+        hub.set_network(true);
+        Self { hub }
+    }
+
+    /// The same run with `--no-network`: the facade refuses every network call and command.
+    #[must_use]
+    pub fn offline(self) -> Self {
+        self.hub.set_network(false);
+        self
+    }
+
+    /// The same run with a proxy set, as `rdy run` sets it from `HTTPS_PROXY`.
+    ///
+    /// # Panics
+    ///
+    /// If `text` is not a usable proxy URL or its password is refused: a test of that is a test of
+    /// [`ProbeHub::set_proxy_text`].
+    #[must_use]
+    pub fn with_proxy(self, text: &str) -> Self {
+        self.hub
+            .set_proxy_text(text)
+            .unwrap_or_else(|e| panic!("the test proxy URL is not usable: {e}"));
+        self
+    }
+
+    /// The same run with the proxy read from the machine's environment, as `rdy run` reads it
+    /// ([`ProbeHub::set_proxy_from_env`]). The variable it came from is then known to the checks.
+    ///
+    /// # Panics
+    ///
+    /// If the variable is not a usable proxy URL or its password is refused.
+    #[must_use]
+    pub fn with_proxy_from_env(self) -> Self {
+        self.hub
+            .set_proxy_from_env()
+            .unwrap_or_else(|e| panic!("the test proxy variable is not usable: {e}"));
+        self
+    }
+
+    /// Pins the clock that every TLS verdict of this run sees, as time since the Unix epoch. See
+    /// `ProbeHub::pin_clock`. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn pin_clock(&self, since_epoch: std::time::Duration) {
+        self.hub.pin_clock(since_epoch);
+    }
+
+    /// Makes the bundled public roots hold `root_der` for this run (`ProbeHub::trust_as_public`), so a
+    /// generated CA can play a public one. Call it before the check runs.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub fn trust_as_public(&self, root_der: &[u8]) {
+        self.hub.trust_as_public(root_der);
     }
 
     /// A run over the machine of a loaded fixture (08 section 2).
@@ -168,6 +233,15 @@ impl TestRun {
         CheckContext::new(key, os, available).with_probe(probe)
     }
 
+    /// `ctx` with a deadline `after` from now, as the scheduler sets one, so `CheckContext::remaining`
+    /// counts down on the tokio clock. A context from this rig has none, so `remaining` is constant; a check
+    /// that measures a latency with it needs this (M1-155).
+    #[cfg(feature = "runtime")]
+    #[must_use]
+    pub fn with_deadline(&self, ctx: CheckContext, after: std::time::Duration) -> CheckContext {
+        ctx.at_deadline(tokio::time::Instant::now() + after)
+    }
+
     /// The run-level probe (`check: null` in the log) for `os`, as the privilege snapshot and the
     /// capability probes use it.
     #[must_use]
@@ -193,6 +267,28 @@ impl TestRun {
         available: impl IntoIterator<Item = Need>,
     ) -> crate::sched::Scheduler {
         crate::sched::Scheduler::new(jobs, os, available).with_probes(self.hub.clone())
+    }
+
+    /// `text` as the run's redactor writes it, with every known secret of the run removed.
+    #[must_use]
+    pub fn redact(&self, text: &str) -> String {
+        self.hub.redactor().redact_str(text).to_string()
+    }
+
+    /// The context a family's probe gets, over this run's hub and its run-level probe. `checks` are the
+    /// checks of the family that will run, and `announce` takes the lines the probe prints.
+    #[must_use]
+    pub fn family_probe<'a>(
+        &'a self,
+        checks: &'a [&'static crate::check::CheckInfo],
+        announce: &'a (dyn Fn(&str) + Send + Sync),
+    ) -> crate::family::FamilyProbe<'a> {
+        crate::family::FamilyProbe::new(
+            self.hub.run_probe_for(Os::Linux),
+            self.hub.secret_sink(),
+            checks,
+            announce,
+        )
     }
 
     /// The action log so far.

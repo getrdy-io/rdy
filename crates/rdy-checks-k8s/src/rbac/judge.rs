@@ -427,7 +427,7 @@ pub(super) fn judge(params: &K8sRbac, gathered: &Gathered) -> Finding {
     }
     if matches!(gathered.impersonation, Impersonation::Refused(_)) {
         finding = finding.with_note(
-            "This check asked about the `impersonate` verb. A cluster with constrained impersonation can grant `impersonate:user-info` or `impersonate-on:*` instead, which this check does not ask about.",
+            "This check asked about the `impersonate` verb. A cluster with constrained impersonation can grant `impersonate:user-info` or `impersonate-on:*` instead, which this check does not ask about. If the cluster grants only those, the answers here may be wrong.",
         );
     }
     if let Identity::Unverified(why) = &gathered.identity {

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-scaler-small"
+summary = "One node that is too small, and the cluster serves the Karpenter API group"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,6 @@
+{
+  "unreadable": [
+    "sys/fs/cgroup/unified/cgroup.controllers",
+    "sys/fs/cgroup/unified/user.slice/user-1000.slice/session-3.scope/cgroup.controllers"
+  ]
+}

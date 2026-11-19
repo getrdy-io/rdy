@@ -1,0 +1,3 @@
+# Synthetic.
+SELINUX=permissive
+SELINUXTYPE=targeted

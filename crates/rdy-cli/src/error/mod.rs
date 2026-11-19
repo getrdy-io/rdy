@@ -26,7 +26,8 @@ use std::fmt;
 use std::io::{self, Write};
 
 use rdy_engine::privilege::PrivilegeError;
-use rdy_engine::report::JsonError;
+use rdy_engine::probe::{ProxyEnvError, ProxyError};
+use rdy_engine::report::{HtmlError, JsonError};
 use rdy_spec::result::{ExitCode, Verdict};
 use rdy_spec::sig::SignatureError;
 use rdy_spec::{ScalarError, SpecError};
@@ -256,10 +257,20 @@ pub enum InternalKind {
         /// The variable names.
         names: Vec<String>,
     },
-    /// The command exists in the tree but a later ticket builds it.
-    NotImplemented {
-        /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
-        command: &'static str,
+    /// The run could not promise to hide the password of the proxy URL in an environment variable,
+    /// because the known-secret set refused it (under 6 bytes, over the limit or no room). The variable
+    /// name is one of the four proxy variables. No part of the value is held here (M1-097).
+    ProxySecretRefused {
+        /// The variable that holds the proxy URL.
+        var: String,
+    },
+    /// A check family's probe ended the run (the Kubernetes family could not promise to hide a credential
+    /// of the kubeconfig or of the proxy). The text and the hint are the family's own and hold no secret.
+    FamilyFatal {
+        /// What went wrong.
+        message: String,
+        /// How to fix it.
+        hint: String,
     },
 }
 
@@ -286,12 +297,20 @@ pub enum CliError {
         reason: IoReason,
     },
     /// A spec error from `rdy-spec`.
-    #[error("{source}")]
+    #[error("{}", spec_text(source, *crlf))]
     Spec {
         /// The spec path as typed, when known.
         file: Option<String>,
         /// The error.
         source: SpecError,
+        /// The spec file holds a CR LF pair. A signature error then adds the line-ending note (01
+        /// section 4.8).
+        crlf: bool,
+        /// A root run found no pinned key. Its fix says that root reads only the system store (01
+        /// section 4.3).
+        root: bool,
+        /// A key was given for this run, so the signature is not optional.
+        key: bool,
     },
     /// A scalar error from `rdy-spec`, such as a bad size or duration.
     #[error("{source}")]
@@ -360,9 +379,10 @@ fn internal_message(kind: &InternalKind) -> String {
             "rdy cannot promise to keep the value of {} out of its output",
             names.join(", ")
         ),
-        InternalKind::NotImplemented { command } => {
-            format!("rdy {command} is not yet implemented in this build")
-        }
+        InternalKind::ProxySecretRefused { var } => format!(
+            "rdy cannot promise to keep the password in the proxy URL of {var} out of its output"
+        ),
+        InternalKind::FamilyFatal { message, .. } => message.clone(),
     }
 }
 
@@ -373,6 +393,37 @@ impl CliError {
         Self::Usage {
             message: message.into(),
             fix: fix.into(),
+        }
+    }
+
+    /// The proxy in the environment could not be used (M1-097). A URL that does not parse is a usage
+    /// error (exit 64) with the parser's fix; a password the known-secret set refused is exit 70; any
+    /// other failure (a proxy set twice, or after the run started) is a bug in rdy. The text names the
+    /// variable and never any part of its value.
+    #[must_use]
+    pub fn proxy_env(failure: ProxyEnvError) -> Self {
+        let var = failure.var;
+        match failure.error {
+            ProxyError::Url(why) => {
+                let text = why.to_string();
+                let (message, fix) = text.split_once(" Fix: ").unwrap_or((text.as_str(), ""));
+                let fix = fix.trim_end_matches('.');
+                Self::usage(
+                    format!(
+                        "{var} is not a usable proxy URL: {}",
+                        message.trim_end_matches('.')
+                    ),
+                    if fix.is_empty() {
+                        format!("fix the proxy URL in {var}, or unset it")
+                    } else {
+                        format!("{fix}; or unset {var}")
+                    },
+                )
+            }
+            ProxyError::SecretRefused => Self::Internal(InternalKind::ProxySecretRefused {
+                var: var.to_owned(),
+            }),
+            _ => Self::bug(),
         }
     }
 
@@ -391,7 +442,41 @@ impl CliError {
         Self::Spec {
             file: Some(file.into()),
             source,
+            crlf: false,
+            root: false,
+            key: false,
         }
+    }
+
+    /// A spec error found in the file at `file`, whose bytes are `bytes`. A signature error says so when
+    /// the file has Windows line endings, the usual honest cause of a signature that does not match.
+    #[must_use]
+    pub fn spec_in(file: impl Into<String>, source: SpecError, bytes: &[u8]) -> Self {
+        Self::Spec {
+            file: Some(file.into()),
+            source,
+            crlf: bytes.windows(2).any(|pair| pair == b"\r\n"),
+            root: false,
+            key: false,
+        }
+    }
+
+    /// Marks a spec error as found by a run that was given a key, so a missing signature says so.
+    #[must_use]
+    pub fn with_key(mut self) -> Self {
+        if let Self::Spec { key, .. } = &mut self {
+            *key = true;
+        }
+        self
+    }
+
+    /// Marks a spec error as found by a root run, so an unknown key says which store root reads.
+    #[must_use]
+    pub fn as_root(mut self) -> Self {
+        if let Self::Spec { root, .. } = &mut self {
+            *root = true;
+        }
+        self
     }
 
     /// The report writer refused, with its own words (code `report_write`, exit 70).
@@ -407,15 +492,33 @@ impl CliError {
         if !matches!(error, JsonError::TooLarge { .. } | JsonError::Io(_)) {
             return None;
         }
-        let text = error.to_string();
-        let (message, fix) = match text.split_once(" Fix: ") {
-            Some((message, fix)) => (message, fix),
-            None => (text.as_str(), "check that the output is open and has room"),
-        };
-        Some(Self::ReportWriter {
+        Some(Self::writer_words(
+            &error.to_string(),
+            "check that the output is open and has room",
+        ))
+    }
+
+    /// The HTML renderer refused (code `report_write`, exit 70), with its own words (M1-181).
+    ///
+    /// A writer refusal inside the page (the embedded JSON is too big) is the same error as for the
+    /// `.json` file, so both files fail the same way. Any other error is the renderer's own message,
+    /// which quotes no report text, with its `Fix:` as the fix line.
+    #[must_use]
+    pub fn report_html(error: &HtmlError) -> Self {
+        if let HtmlError::Json(json) = error {
+            return Self::report_writer(json).unwrap_or_else(Self::bug);
+        }
+        Self::writer_words(&error.to_string(), "this is a bug in rdy")
+    }
+
+    /// A `report_write` error from a message that ends with `Fix: <what to do>`. Without a `Fix:` the
+    /// whole text is the message and `default_fix` is the fix.
+    fn writer_words(text: &str, default_fix: &str) -> Self {
+        let (message, fix) = text.split_once(" Fix: ").unwrap_or((text, default_fix));
+        Self::ReportWriter {
             message: message.trim_end_matches('.').to_owned(),
             fix: fix.trim_end_matches('.').to_owned(),
-        })
+        }
     }
 
     /// A bug, with the standard hint.
@@ -451,7 +554,15 @@ impl CliError {
             Err(err) => err,
         };
         let err = match err.downcast::<SpecError>() {
-            Ok(source) => return Self::Spec { file: None, source },
+            Ok(source) => {
+                return Self::Spec {
+                    file: None,
+                    source,
+                    crlf: false,
+                    root: false,
+                    key: false,
+                };
+            }
             Err(err) => err,
         };
         match err.downcast::<ScalarError>() {
@@ -498,6 +609,35 @@ impl CliError {
                 }
             }
             .to_owned(),
+            // Windows has no `rdy trust add` in M1, so the fix points at the page (ADR 0027).
+            Self::Spec {
+                source: SpecError::Signature(SignatureError::UnknownKey { .. }),
+                ..
+            } if cfg!(windows) => "see https://docs.getrdy.io/unsigned".to_owned(),
+            // A key was given but the spec has no signature: no page about unsigned specs helps.
+            Self::Spec {
+                file: Some(file),
+                source: SpecError::Signature(SignatureError::Missing),
+                key: true,
+                ..
+            } => format!("ask the vendor for {file}.minisig and put it next to the spec, then run again"),
+            Self::Spec {
+                file: Some(file),
+                source: SpecError::Signature(SignatureError::Missing),
+                ..
+            } => format!(
+                "ask the vendor for {file}.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned"
+            ),
+            // A root run reads only /etc/rdy/trust.yaml, and never looks under a user's home to word a
+            // hint (INV-04). So it says what it read, whatever the user may have pinned.
+            Self::Spec {
+                source: SpecError::Signature(SignatureError::UnknownKey { product, .. }),
+                root: true,
+                ..
+            } => format!(
+                "{}. As root, rdy reads only /etc/rdy/trust.yaml. If you pinned this key as a normal user, pin it for root too: sudo rdy trust add {product} --key <file>",
+                source_fix_without_end(self)
+            ),
             Self::Spec { source, .. } => source.fix(),
             Self::Scalar { source, .. } => source.hint().to_owned(),
             Self::Password(err) => err.fix(),
@@ -547,10 +687,10 @@ impl CliError {
                 "unset {}, or give it a value of 6 bytes to 64 KiB, then run rdy again",
                 names.join(" and ")
             ),
-            Self::Internal(InternalKind::NotImplemented { .. }) => {
-                "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
-                    .to_owned()
-            }
+            Self::Internal(InternalKind::ProxySecretRefused { var }) => format!(
+                "use a proxy password of 6 bytes or more in {var}, or take the user name and password out of it, then run rdy again"
+            ),
+            Self::Internal(InternalKind::FamilyFatal { hint, .. }) => hint.clone(),
         }
     }
 
@@ -570,8 +710,29 @@ impl CliError {
             }
             _ => None,
         };
+        // The signature and expiry refusals name the file inside the sentence, with no `file:` in front
+        // (01 section 4.8), so their JSON has no `file` either.
+        if let Self::Spec {
+            file: Some(file),
+            source,
+            crlf,
+            key,
+            ..
+        } = self
+            && let Some(message) = refusal_line(file, source, *crlf, *key)
+        {
+            return Rendered {
+                code: self.code(),
+                message: clean(&message),
+                fix: clean(&self.hint()),
+                file: Some(clean(file)),
+                line: None,
+                column: None,
+                named: true,
+            };
+        }
         let (file, location) = match self {
-            Self::Spec { file, source } => (file.as_deref(), source.location()),
+            Self::Spec { file, source, .. } => (file.as_deref(), source.location()),
             Self::Scalar { file, .. } => (file.as_deref(), None),
             Self::TrustStore(err) => (trust_file.as_deref(), err.location()),
             _ => (None, None),
@@ -583,7 +744,87 @@ impl CliError {
             file: file.map(clean),
             line: location.map(|at| at.line),
             column: location.map(|at| at.column),
+            named: false,
         }
+    }
+}
+
+/// The fix of a spec error with no final full stop, so a sentence can follow it.
+fn source_fix_without_end(error: &CliError) -> String {
+    match error {
+        CliError::Spec { source, .. } => source.fix().trim_end_matches('.').to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// What a spec error reads like when no file name is at hand, with the line-ending note when it applies.
+fn spec_text(source: &SpecError, crlf: bool) -> String {
+    let mut text = source.to_string();
+    if let SpecError::Signature(error) = source
+        && crlf
+        && wants_crlf_note(error)
+        && !matches!(error, SignatureError::Tampered { crlf: true })
+    {
+        text.push_str(". ");
+        text.push_str(CRLF_NOTE);
+    }
+    text
+}
+
+/// The note for a spec file with Windows line endings (01 section 4.8).
+const CRLF_NOTE: &str =
+    "The file has Windows line endings. If it went through Git or email, ask for the original.";
+
+/// A signature error that a line-ending conversion could be behind, or hide. A missing signature and a
+/// key that cannot be used have nothing to do with the spec's bytes.
+fn wants_crlf_note(error: &SignatureError) -> bool {
+    !matches!(
+        error,
+        SignatureError::Missing | SignatureError::BadKey { .. } | SignatureError::WeakKey
+    )
+}
+
+/// The first line of a refusal that names the file inside the sentence (01 section 4.8): the signature
+/// errors and an expired spec. `None` for every other error, which the terminal prefixes with the file.
+fn refusal_line(file: &str, source: &SpecError, crlf: bool, key: bool) -> Option<String> {
+    match source {
+        SpecError::Expired { expired_on, today } => Some(format!(
+            "{file} expired on {expired_on}. This machine's clock says {today}."
+        )),
+        SpecError::Signature(error) => {
+            let mut line = match error {
+                SignatureError::Missing if key => format!(
+                    "a key was given, but {file} has no signature. rdy looked for {file}.minisig"
+                ),
+                SignatureError::Missing => format!("no signature found at {file}.minisig"),
+                SignatureError::UnknownKey { key_id, product } => format!(
+                    "{file} is signed with key {key_id}, which you have not trusted for {product}"
+                ),
+                SignatureError::Tampered { .. } | SignatureError::CommentTampered => format!(
+                    "the signature on {file} does not match the file. It may have been changed after signing."
+                ),
+                SignatureError::SidecarTooLarge { .. }
+                | SignatureError::Malformed { .. }
+                | SignatureError::LegacyAlgorithm
+                | SignatureError::BadComment { .. } => {
+                    format!("the signature on {file} is not in the form rdy accepts.")
+                }
+                SignatureError::ProductMismatch { signed, spec } => {
+                    format!("{file} is signed for product '{signed}', but the spec says '{spec}'.")
+                }
+                _ => return None,
+            };
+            let crlf = crlf || matches!(error, SignatureError::Tampered { crlf: true });
+            if crlf && wants_crlf_note(error) {
+                if !line.ends_with('.') {
+                    line.push('.');
+                }
+                line.push(' ');
+                line.push_str(CRLF_NOTE);
+            }
+            Some(line)
+        }
+        _ => None,
     }
 }
 
@@ -672,6 +913,9 @@ pub struct Rendered {
     pub line: Option<u32>,
     /// The column in the file, from 1.
     pub column: Option<u32>,
+    /// The message already names the file inside the sentence (01 section 4.8), so the terminal puts no
+    /// `file:` in front of it. The JSON `file` is still filled.
+    pub named: bool,
 }
 
 impl Rendered {
@@ -684,6 +928,7 @@ impl Rendered {
             file: None,
             line: None,
             column: None,
+            named: false,
         }
     }
 
@@ -697,7 +942,8 @@ impl Rendered {
     /// front of the message. The JSON message does not repeat it (07 section 4.1).
     #[must_use]
     pub fn text(&self) -> String {
-        let place = match (&self.file, self.line, self.column) {
+        let shown = self.file.as_ref().filter(|_| !self.named);
+        let place = match (shown, self.line, self.column) {
             (Some(file), Some(line), Some(column)) => format!("{file}:{line}:{column}: "),
             (Some(file), _, _) => format!("{file}: "),
             _ => String::new(),

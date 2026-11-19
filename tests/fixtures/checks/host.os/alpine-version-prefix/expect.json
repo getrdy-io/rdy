@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "alpine",
+        "versions": [
+          "3.19"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "alpine",
+          "versions": [
+            "3.19"
+          ]
+        }
+      ]
+    },
+    "fix": "Use a supported OS image, or ask the vendor whether alpine 3.19.1 can be supported.",
+    "level": "fail",
+    "message": "Alpine Linux v3.19 (alpine 3.19.1) is not supported. The spec supports alpine 3.19.",
+    "notes": [
+      "The host is 3.19.1; the spec lists 3.19, which matches only 3.19 exactly. List 3.19.1, or the major version to accept every release of it."
+    ],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": null,
+      "init": "other",
+      "kernel": "6.6.14-0-lts",
+      "os": {
+        "id": "alpine",
+        "id_like": [],
+        "name": "Alpine Linux",
+        "pretty_name": "Alpine Linux v3.19",
+        "source": "/etc/os-release",
+        "version_id": "3.19.1"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/getent",
+    "ahosts",
+    "--",
+    "web.acme.test"
+  ],
+  "stdout": "",
+  "stderr": "Unknown database: ahosts\n",
+  "exit": 1,
+  "delay_ms": 0
+}

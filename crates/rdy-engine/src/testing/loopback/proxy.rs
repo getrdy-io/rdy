@@ -1,5 +1,6 @@
 //! A CONNECT proxy on loopback with the four answers of 08 section 8: `ok`, `403`, `407-basic` and
-//! `407-negotiate`.
+//! `407-negotiate`. Started with [`ConnectProxy::start_forwarding`] it also answers a plain
+//! `http://` request in the absolute form, with the same four modes (M1-097).
 
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -41,6 +42,7 @@ struct Shared {
     accepted: AtomicUsize,
     bytes_received: AtomicUsize,
     requests: Mutex<Vec<ConnectRequest>>,
+    plain: Mutex<Vec<ConnectRequest>>,
 }
 
 /// A running proxy. It stops when dropped.
@@ -79,6 +81,35 @@ impl ConnectProxy {
         mode: ProxyMode,
         routes: &[(&str, SocketAddr)],
     ) -> io::Result<Self> {
+        Self::bind(mode, routes, false).await
+    }
+
+    /// Like [`ConnectProxy::start_with_routes`], and the proxy also answers a plain request in the
+    /// absolute form (`GET http://host:port/path HTTP/1.1`), as a forward proxy does. In
+    /// [`ProxyMode::Ok`] it sends the request on to the loopback address of `host:port` (from `routes`,
+    /// or a loopback literal) in the origin form, without the `Proxy-Authorization` header, and relays the
+    /// reply. The other modes answer `403` or `407` as they do for a `CONNECT`. The requests are in
+    /// [`ConnectProxy::plain_requests`].
+    ///
+    /// # Errors
+    ///
+    /// If the socket cannot be bound.
+    ///
+    /// # Panics
+    ///
+    /// If an address in `routes` is not a loopback address.
+    pub async fn start_forwarding(
+        mode: ProxyMode,
+        routes: &[(&str, SocketAddr)],
+    ) -> io::Result<Self> {
+        Self::bind(mode, routes, true).await
+    }
+
+    async fn bind(
+        mode: ProxyMode,
+        routes: &[(&str, SocketAddr)],
+        forward: bool,
+    ) -> io::Result<Self> {
         for (name, to) in routes {
             assert!(
                 to.ip().is_loopback(),
@@ -96,7 +127,13 @@ impl ConnectProxy {
         );
         let for_conns = Arc::clone(&shared);
         let guard = serve(listener, move |stream| {
-            handle(stream, Arc::clone(&for_conns), mode, Arc::clone(&routes))
+            handle(
+                stream,
+                Arc::clone(&for_conns),
+                mode,
+                Arc::clone(&routes),
+                forward,
+            )
         });
         Ok(Self {
             addr,
@@ -129,6 +166,17 @@ impl ConnectProxy {
         self.shared.bytes_received.load(Ordering::SeqCst)
     }
 
+    /// The absolute-form requests read so far (only a proxy from [`ConnectProxy::start_forwarding`]
+    /// reads any). `target` is the absolute URL as sent.
+    #[must_use]
+    pub fn plain_requests(&self) -> Vec<ConnectRequest> {
+        self.shared
+            .plain
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// The `CONNECT` requests read so far.
     #[must_use]
     pub fn requests(&self) -> Vec<ConnectRequest> {
@@ -145,6 +193,7 @@ async fn handle(
     shared: Arc<Shared>,
     mode: ProxyMode,
     routes: Arc<Vec<(String, SocketAddr)>>,
+    forward: bool,
 ) {
     shared.accepted.fetch_add(1, Ordering::SeqCst);
     let Some(head) = read_head(&mut stream, &shared.bytes_received).await else {
@@ -152,7 +201,12 @@ async fn handle(
     };
     let request = parse_head(&head);
     if !request.method.eq_ignore_ascii_case("CONNECT") {
-        let _ = respond(&mut stream, "405 Method Not Allowed", &[]).await;
+        let absolute = request.target.to_ascii_lowercase().starts_with("http://");
+        if forward && absolute {
+            relay_plain(stream, &head, &request, &shared, mode, &routes).await;
+        } else {
+            let _ = respond(&mut stream, "405 Method Not Allowed", &[]).await;
+        }
         return;
     }
     shared
@@ -198,6 +252,79 @@ async fn handle(
             if let Some(rest) = head.get(end..).filter(|r| !r.is_empty())
                 && upstream.write_all(rest).await.is_err()
             {
+                return;
+            }
+            let _ = copy_bidirectional(&mut stream, &mut upstream).await;
+        }
+    }
+}
+
+/// Answers an absolute-form request by `mode`: a refusal, or the request sent on to the target.
+async fn relay_plain(
+    mut stream: TcpStream,
+    head: &[u8],
+    request: &super::http::Request,
+    shared: &Shared,
+    mode: ProxyMode,
+    routes: &[(String, SocketAddr)],
+) {
+    shared
+        .plain
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(ConnectRequest {
+            target: request.target.clone(),
+            proxy_authorization: request.header("Proxy-Authorization").map(str::to_owned),
+        });
+    match mode {
+        ProxyMode::Forbidden => {
+            let _ = respond(&mut stream, "403 Forbidden", &[]).await;
+        }
+        ProxyMode::Basic407 => {
+            let challenge = [("Proxy-Authenticate", "Basic realm=\"rdy-test\"")];
+            let _ = respond(&mut stream, "407 Proxy Authentication Required", &challenge).await;
+        }
+        ProxyMode::Negotiate407 => {
+            let challenge = [("Proxy-Authenticate", "Negotiate")];
+            let _ = respond(&mut stream, "407 Proxy Authentication Required", &challenge).await;
+        }
+        ProxyMode::Ok => {
+            // `http://host:port/path?query` becomes the authority and the origin-form target.
+            let rest = request.target.get("http://".len()..).unwrap_or_default();
+            let (authority, tail) = rest
+                .find(['/', '?'])
+                .map_or((rest, "/"), |at| (&rest[..at], &rest[at..]));
+            let authority = if authority.contains(':') {
+                authority.to_owned()
+            } else {
+                format!("{authority}:80")
+            };
+            let tail = if tail.starts_with('?') {
+                format!("/{tail}")
+            } else {
+                tail.to_owned()
+            };
+            let Some(to) = destination(&authority, routes) else {
+                let _ = respond(&mut stream, "502 Bad Gateway", &[]).await;
+                return;
+            };
+            let Ok(mut upstream) = TcpStream::connect(to).await else {
+                let _ = respond(&mut stream, "502 Bad Gateway", &[]).await;
+                return;
+            };
+            let text = String::from_utf8_lossy(head);
+            let mut lines = text.split("\r\n");
+            let mut out = format!("{} {tail} HTTP/1.1\r\n", request.method);
+            lines.next();
+            for line in lines.take_while(|l| !l.is_empty()) {
+                let name = line.split(':').next().unwrap_or_default().trim();
+                if !name.eq_ignore_ascii_case("proxy-authorization") {
+                    out.push_str(line);
+                    out.push_str("\r\n");
+                }
+            }
+            out.push_str("\r\n");
+            if upstream.write_all(out.as_bytes()).await.is_err() {
                 return;
             }
             let _ = copy_bidirectional(&mut stream, &mut upstream).await;

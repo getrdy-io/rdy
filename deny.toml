@@ -73,7 +73,7 @@ deny = [
     { crate = "reqwest", reason = "ADR 0014: the probe facade owns sockets in M1" },
     # The kube client types are on the check-crate deny list (02 Appendix A, ADR 0031). Only the k8s
     # check crate may depend on kube, and kube's own crates only through kube.
-    { crate = "kube", wrappers = ["rdy-checks-k8s"], reason = "ADR 0031: only rdy-checks-k8s builds a kube client" },
+    { crate = "kube", wrappers = ["rdy-checks-k8s", "rdy-lint-wall"], reason = "ADR 0031: only rdy-checks-k8s builds a kube client; rdy-lint-wall (a test crate, feature use-kube) compiles the kube use file that proves the lint wall entries" },
     { crate = "kube-client", wrappers = ["kube"], reason = "ADR 0031: reached through kube only" },
     { crate = "kube-core", wrappers = ["kube", "kube-client"], reason = "ADR 0031: reached through kube only" },
 
@@ -89,7 +89,8 @@ deny = [
     { crate = "which", reason = "02 lint wall: a program is resolved by the command table" },
     { crate = "ureq", reason = "02 lint wall: HTTP goes through the probe facade" },
     { crate = "hickory-resolver", reason = "02 lint wall: DNS goes through the probe facade" },
-    { crate = "hickory-proto", reason = "02 lint wall: DNS goes through the probe facade" },
+    # hickory-proto is the test oracle of the net.dns codec (ADR 0052). deny cannot tell a dev-dependency from a normal one, so rdy-checks-net is a wrapper, and tests/lint-wall/tests/deps_allowlist.rs fails if it is anything but a dev-dependency there.
+    { crate = "hickory-proto", wrappers = ["rdy-checks-net"], reason = "02 lint wall: DNS goes through the probe facade; the test oracle of the net.dns codec, dev only (ADR 0052)" },
     { crate = "hickory-client", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "hickory-net", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "nix", wrappers = ["rexpect"], reason = "02 lint wall: rexpect drives the prompt tests (dev only); no check crate" },
@@ -131,6 +132,14 @@ crate = "console"
 exact = true
 allow = ["alloc", "ansi-parsing", "std"]
 reason = "05 dependency record: what indicatif needs; no unicode-width, no windows-console-colors"
+
+# hickory-proto is only a test oracle (ADR 0052), built with no features. `exact` fails the build on any feature a
+# later change turns on.
+[[bans.features]]
+crate = "hickory-proto"
+exact = true
+allow = []
+reason = "ADR 0052: test oracle only; no std, no dnssec, no mdns"
 
 [sources]
 unknown-registry = "deny"

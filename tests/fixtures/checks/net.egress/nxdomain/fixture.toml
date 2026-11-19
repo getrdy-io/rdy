@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-nxdomain"
+summary = "A name that does not exist"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

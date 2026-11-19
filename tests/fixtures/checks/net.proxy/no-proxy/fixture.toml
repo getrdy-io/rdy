@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-no-proxy"
+summary = "A host with no proxy variable and no drop-in"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -86,6 +86,12 @@ impl StyleEnv {
     pub fn from_process() -> Self {
         Self::from_lookup(|name| std::env::var_os(name))
     }
+
+    /// Whether `TERM` is `dumb`.
+    #[must_use]
+    pub fn term_dumb(&self) -> bool {
+        self.term_dumb
+    }
 }
 
 /// Decides whether one stream gets colour. The first rule that matches wins (07 section 6).

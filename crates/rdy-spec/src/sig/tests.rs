@@ -1036,3 +1036,64 @@ proptest! {
         prop_assert_eq!(parses, 0);
     }
 }
+
+#[test]
+fn a_one_run_store_trusts_the_key_for_the_signed_product_as_flag_only() {
+    let pair = Pair::new();
+    let other = Pair::new();
+    let sidecar = pair.sign(SPEC.as_bytes(), COMMENT);
+    let trust = TrustStore::for_one_run(sidecar.as_bytes(), pair.key()).expect("store");
+    let (result, _) = run(
+        SPEC.as_bytes(),
+        Some(sidecar.as_bytes()),
+        &trust,
+        Policy::RequireSigned,
+    );
+    let loaded = result.expect("loads");
+    let SignatureState::Verified {
+        trust_source,
+        trust_note,
+        ..
+    } = loaded.signature()
+    else {
+        panic!("expected a verified signature");
+    };
+    assert_eq!(*trust_source, TrustSource::Flag);
+    assert_eq!(*trust_note, None);
+    // A different key id is unknown, with the flag key as the only pin.
+    let trust = TrustStore::for_one_run(sidecar.as_bytes(), other.key()).expect("store");
+    let (result, _) = run(
+        SPEC.as_bytes(),
+        Some(sidecar.as_bytes()),
+        &trust,
+        Policy::AllowUnsigned,
+    );
+    assert!(matches!(
+        sig_error(result),
+        SignatureError::UnknownKey { .. }
+    ));
+}
+
+#[test]
+fn a_one_run_store_refuses_a_sidecar_that_is_not_a_signature() {
+    let pair = Pair::new();
+    for sidecar in [&b""[..], b"x", b"untrusted comment: x\n"] {
+        assert!(matches!(
+            TrustStore::for_one_run(sidecar, pair.key()),
+            Err(SignatureError::Malformed { .. })
+        ));
+    }
+}
+
+#[test]
+fn an_empty_sidecar_is_malformed_under_both_policies() {
+    // The CLI turns a sidecar it cannot read into empty input. It must fail closed, flag or no flag.
+    for policy in [Policy::RequireSigned, Policy::AllowUnsigned] {
+        let (result, parses) = run(SPEC.as_bytes(), Some(b""), &TrustStore::new(), policy);
+        assert!(matches!(
+            sig_error(result),
+            SignatureError::Malformed { .. }
+        ));
+        assert_eq!(parses, 0);
+    }
+}

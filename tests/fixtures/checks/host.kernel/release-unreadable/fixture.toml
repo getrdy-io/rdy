@@ -1,0 +1,12 @@
+schema = 1
+name = "release-unreadable"
+summary = "No kernel release can be read (uname fails, no /proc/sys/kernel/osrelease): a module cannot be settled"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

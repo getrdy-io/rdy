@@ -1,0 +1,40 @@
+$ rdy run examples/specs/acme-platform.yaml --allow-unsigned --no-report
+WARNING: UNSIGNED SPEC
+examples/specs/acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+rdy <version>
+spec    acme-platform >=4.2   (examples/specs/acme-platform.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    acme-platform.example   rhel 9.3   x86_64
+user    uid 0 (root)
+cluster no kubeconfig found
+
+  BLOCK    net.egress        2 of 2 endpoints unreachable: registry.acme.example:443
+                             (reset_after_hello), license.acme.example:443 (reset_after_hello)
+                             fix from the spec file (not verified): Ask your network team to allow
+                             these endpoints through the proxy.
+  SKIP     k8s.version       Not run. No Kubernetes cluster was reachable. (required)
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  SKIP     gpu.cuda          Not run. This version of rdy has no gpu checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     aws.iam           Not run. This version of rdy has no aws checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     k8s.storageclass  Not run. No Kubernetes cluster was reachable.
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  PASS     host.cpu          8 vCPUs found, 8 needed
+  PASS     host.memory       31.3 GiB found, 32 GiB needed, inside the 5% tolerance
+  PASS     host.disk         `/var/lib` has 140 GiB free on `/var` (xfs). 100 GiB is needed.
+
+1 block, 0 warnings, 3 passed, 3 required checks not run, 1 optional check not run
+
+WARNING: UNSIGNED SPEC
+NOT READY
+$ echo $?
+2

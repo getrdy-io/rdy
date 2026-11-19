@@ -7,7 +7,9 @@
 //! The fields so far are the ones `rdy run` reads (M1-057): the wall clock of the run record and of
 //! the report folder name, the run id, the run deadline and the check families. None of them reaches
 //! the spec loader, so a pinned clock cannot defeat `metadata.expires`, and none touches the privilege
-//! gate, the redactor or the output folder rules. The watchdog needs no field: the binary starts it in
+//! gate, the redactor or the output folder rules. `fail_files` only turns the write of the report files
+//! into a "disk full" failure after the verdict exists: it skips a write and never loosens a folder
+//! rule, and it writes nothing the run would not write. The watchdog needs no field: the binary starts it in
 //! `entry`, and a test that calls `run` gets one that is disarmed when `run` returns (M1-176). The
 //! privilege ids need no field: the privilege snapshot reads them through the backend, so a replay backend that
 //! records `/proc/self/status` supplies them (02, "Privilege and needs").
@@ -55,14 +57,18 @@ pub struct RunHooks {
     /// The quiet time before the first frame of the live line. `None` is 250 ms. A test that must see
     /// "a run ends before the first frame" gives a long one, so a slow machine cannot make it flaky.
     pub progress_first_frame: Option<Duration>,
+    /// Makes the write of the report files fail with "disk full" after the verdict exists, so a test
+    /// can reach the exit 70 path of 07 section 4.1 without a full disk. It has no effect with
+    /// `--no-report`. `false` (the default) writes the files.
+    pub fail_files: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::RunHooks;
 
-    /// The default is "no hook": every field is `None`, so the shipped binary (which passes the default
-    /// and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
+    /// The default is "no hook": every field is `None` or `false`, so the shipped binary (which passes
+    /// the default and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
     /// one does not compile until it is listed here.
     #[test]
     fn every_field_of_the_default_hooks_is_none() {
@@ -77,6 +83,7 @@ mod tests {
             progress_env,
             progress_capture,
             progress_first_frame,
+            fail_files,
         } = RunHooks::default();
         assert!(clock.is_none());
         assert!(run_id.is_none());
@@ -88,5 +95,6 @@ mod tests {
         assert!(progress_env.is_none());
         assert!(progress_capture.is_none());
         assert!(progress_first_frame.is_none());
+        assert!(!fail_files);
     }
 }

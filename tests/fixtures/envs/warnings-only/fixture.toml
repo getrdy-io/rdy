@@ -1,0 +1,24 @@
+schema = 1
+name = "warnings-only"
+summary = "The all-pass machine with vm.max_map_count at 65530 and SELinux permissive, so two warn-level checks warn and nothing blocks"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "all-pass"
+answers = ["host.sysctl", "host.lsm"]
+spec = "spec.yaml"
+
+[caps]
+root = true
+network = true
+kube = true
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000003"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "ready_with_warnings"
+exit_code = 1

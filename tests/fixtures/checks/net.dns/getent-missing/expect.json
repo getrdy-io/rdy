@@ -1,0 +1,46 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "web.acme.test",
+      "gone.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`gone.acme.test` does not resolve on this machine: the system resolver found no record, or no nameserver answered. Ask the DNS team for a record or a conditional forwarder for `acme.test`. Check that the `hosts:` line of `/etc/nsswitch.conf` lists `dns`. As a stopgap add a line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 2 names do not resolve: `gone.acme.test` (not found)",
+    "notes": [
+      "getent is not installed on this machine, so rdy asked its own resolver. That resolver does not follow nsswitch.conf (mDNS, sssd), so a name served that way can differ from what the product sees."
+    ],
+    "observed": {
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "addresses_total": 1,
+          "fallback": "getent is not installed",
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "web.acme.test",
+          "result": "found",
+          "source": "rdy_resolver"
+        },
+        {
+          "fallback": "getent is not installed",
+          "ms": 0,
+          "name": "gone.acme.test",
+          "result": "not_found",
+          "source": "rdy_resolver"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

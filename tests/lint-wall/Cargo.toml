@@ -20,6 +20,11 @@ dist = false
 # Do not build the workspace with `--all-features`: that turns this on, and then clippy fails by design.
 use-all = ["dep:anstream", "dep:askama", "dep:clap", "dep:colorchoice", "dep:console", "dep:indicatif", "dep:rdy-engine", "dep:rdy-spec", "dep:rustls", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
 
+# The kube entries of `crates/rdy-checks-k8s/clippy.toml` are proven the same way, with the use file
+# `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt` (M1-107, ADR 0031). A separate feature keeps kube out of
+# the other runs. Do not build the workspace with `--all-features`: that turns this on too.
+use-kube = ["dep:http", "dep:k8s-openapi", "dep:kube", "dep:serde_json", "dep:tower"]
+
 [dependencies]
 # These are the crates whose paths the wall names, so that every path resolves and every entry can fire.
 anstream = { workspace = true, features = ["auto"], optional = true }
@@ -33,6 +38,11 @@ rdy-spec = { path = "../../crates/rdy-spec", optional = true }
 rustls = { workspace = true, features = ["std"], optional = true }
 socket2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net", "process", "rt"], optional = true }
+http = { workspace = true, features = ["std"], optional = true }
+k8s-openapi = { workspace = true, features = ["std", "v1_36"], optional = true }
+kube = { workspace = true, features = ["client", "rustls-tls", "ring", "webpki-roots"], optional = true }
+serde_json = { workspace = true, features = ["std"], optional = true }
+tower = { workspace = true, features = ["util"], optional = true }
 
 [dev-dependencies]
 proc-macro2 = { workspace = true }
