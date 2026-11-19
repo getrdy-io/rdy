@@ -34,9 +34,8 @@
 //! it is empty and exits 70 with no report. The run never sees it.
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095) and the kube flags
-//! (M1-107). `--quiet` and `--verbose` (M1-143) and the
-//! live progress line (M1-142) change the output later; this is the plain run, plus the static
-//! "Running N checks..." line of [`crate::static_line`] on a terminal.
+//! (M1-107). `--quiet` and `--verbose` (M1-143) change the output later. The live progress line
+//! (M1-142, [`crate::progress`]) is on stderr while the checks run and is cleared before the check list.
 
 use std::io::Write;
 use std::sync::{Arc, Weak};
@@ -62,10 +61,10 @@ use crate::cli::{COMMIT, ColorChoice, ProgressChoice, RunArgs, TARGET};
 use crate::error::{CliError, InternalKind, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::progress::{FIRST_FRAME, Progress, ProgressEnv, Target, frames, live_line_allowed};
 use crate::redaction;
 use crate::rig::Rig;
 use crate::spec_load::{self, Given};
-use crate::static_line::{Detail, Gate, StaticLine};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
 use crate::terminal::{View, banner, render};
 use crate::trust::{Layout, Vars};
@@ -271,21 +270,11 @@ async fn execute(
         board
     });
 
-    // The static line (07 section 3, M1-088): after the banner and the folder, before the first probe,
-    // and cleared before anything else is written to stderr.
-    let gate = Gate::new(
-        progress,
-        Detail::from_flags(quiet, verbose),
-        hooks
-            .stderr_terminal
-            .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr())),
-        hooks
-            .style_env
-            .clone()
-            .unwrap_or_else(StyleEnv::from_process)
-            .term_dumb(),
-    );
-    let mut line = StaticLine::show(gate, plan.runnable().count(), stderr);
+    // The live line (07 section 3, M1-142) starts after the banner and the folder, and it is cleared
+    // before anything else is written to stderr: right after the checks, and on any early return, since
+    // it clears itself when dropped. It replaces the static line of M1-088 (PC-54 in 13). `--verbose`
+    // keeps the line off until M1-143 (PR #68) moves that rule into the gate.
+    let mut live = start_progress(progress, quiet || verbose, &hooks, plan.runnable().count());
 
     let host = host_facts(&engine.hub().run_probe()).await;
     if let Some(board) = &board {
@@ -303,13 +292,13 @@ async fn execute(
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty()
         {
-            line.clear(stderr);
+            live.clear();
         }
         print_announced(&announced, stderr);
         polled
     })
     .await;
-    line.clear(stderr);
+    live.clear();
     // A family's probe ended the run: no check ran. No report is written for a run that did not start.
     if let Some(fatal) = executed.fatal {
         discard_if_empty(dir);
@@ -415,6 +404,30 @@ async fn execute(
             ))
         }
     }
+}
+
+/// Starts the live progress line when the rules of 07 section 3 allow it, else a line that draws nothing.
+fn start_progress(choice: ProgressChoice, quiet: bool, hooks: &RunHooks, total: usize) -> Progress {
+    let env = hooks
+        .progress_env
+        .clone()
+        .unwrap_or_else(ProgressEnv::from_process);
+    let terminal = hooks
+        .stderr_terminal
+        .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
+    if !live_line_allowed(choice, quiet, &env, terminal) {
+        return Progress::off();
+    }
+    let target = hooks
+        .progress_capture
+        .clone()
+        .map_or(Target::Stderr, Target::Capture);
+    Progress::start_after(
+        hooks.progress_first_frame.unwrap_or(FIRST_FRAME),
+        total,
+        frames(&env),
+        target,
+    )
 }
 
 /// What `--jobs` came to.

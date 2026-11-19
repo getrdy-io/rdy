@@ -122,7 +122,7 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    ```sh
    dest=$(mktemp -d)
    PATH="$HOME/.cargo/bin:$PATH" RDY_INSTALL_DIR="$dest" sh -c \
-     "curl --proto '=https' --tlsv1.2 -sSf https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/install.sh | sh"
+     "curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/install.sh | sh"
    echo "exit $?"        # must be 0
    "$dest/rdy" version   # rdy 0.1.0-alpha.1
    ```

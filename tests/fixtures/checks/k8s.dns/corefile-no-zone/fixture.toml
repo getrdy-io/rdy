@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-corefile-no-zone"
+summary = "A Corefile with no kubernetes plugin line"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

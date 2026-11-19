@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/configmaps/coredns"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "configmaps \"coredns\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "coredns",
+      "kind": "configmaps"
+    },
+    "code": 404
+  }
+}

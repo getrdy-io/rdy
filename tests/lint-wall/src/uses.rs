@@ -493,9 +493,65 @@ fn colorchoice_write_global() {
     let _ = colorchoice::ColorChoice::write_global;
 }
 
+// ---- indicatif and console -----------------------------------------------------------------------
+// The live progress line draws on stderr only, through `rdy_cli::progress` (M1-142, SEC-60-1).
+
+fn indicatif_draw_target_stdout() {
+    let _ = indicatif::ProgressDrawTarget::stdout;
+}
+fn indicatif_draw_target_stdout_with_hz() {
+    let _ = indicatif::ProgressDrawTarget::stdout_with_hz;
+}
+fn indicatif_draw_target_stderr() {
+    let _ = indicatif::ProgressDrawTarget::stderr;
+}
+fn indicatif_draw_target_term() {
+    let _ = indicatif::ProgressDrawTarget::term;
+}
+fn indicatif_progress_bar_new() {
+    let _ = indicatif::ProgressBar::new;
+}
+fn indicatif_progress_bar_new_spinner() {
+    let _ = indicatif::ProgressBar::new_spinner;
+}
+fn indicatif_progress_bar_enable_steady_tick() {
+    let _ = indicatif::ProgressBar::enable_steady_tick;
+}
+fn indicatif_progress_bar_println() {
+    let _ = indicatif::ProgressBar::println::<&str>;
+}
+fn indicatif_progress_bar_suspend() {
+    let _ = indicatif::ProgressBar::suspend::<fn(), ()>;
+}
+fn indicatif_multi_progress_new() {
+    let _ = indicatif::MultiProgress::new;
+}
+fn indicatif_progress_iterator_progress() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress;
+}
+fn indicatif_progress_iterator_progress_count() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress_count;
+}
+fn indicatif_progress_iterator_progress_with_style() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress_with_style;
+}
+fn console_term_stdout() {
+    let _ = console::Term::stdout;
+}
+fn console_term_buffered_stdout() {
+    let _ = console::Term::buffered_stdout;
+}
+fn console_set_colors_enabled() {
+    let _ = console::set_colors_enabled;
+}
+fn console_set_colors_enabled_stderr() {
+    let _ = console::set_colors_enabled_stderr;
+}
+
 // ---- askama --------------------------------------------------------------------------------------
 // These print a value without escaping it. Only the `EmbeddedJson` marker of the HTML report may (M1-078).
 
+fn type_indicatif_multi_progress(_: Option<indicatif::MultiProgress>) {}
 fn type_askama_safe(_: Option<askama::filters::Safe<String>>) {}
 fn type_askama_unsafe(_: Option<askama::filters::Unsafe<String>>) {}
 fn type_askama_maybe_safe(_: Option<askama::filters::MaybeSafe<String>>) {}

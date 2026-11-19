@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-gke"
+summary = "GKE: the kube-dns Deployment found by label; no ConfigMap coredns is asked for"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

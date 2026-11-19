@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets",
+    "query": "labelSelector=k8s-app in (kube-dns,node-local-dns)&limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps is forbidden: User \"acme-installer\" cannot list resource \"daemonsets.apps\" in API group \"apps\" in the namespace \"kube-system\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

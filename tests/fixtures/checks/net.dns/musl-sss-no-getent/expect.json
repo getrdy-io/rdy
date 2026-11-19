@@ -1,0 +1,75 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "svc.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "1 of 1 names resolve",
+    "notes": [
+      "getent is not installed on this machine, so rdy asked its own resolver. That resolver does not follow nsswitch.conf (mDNS, sssd), so a name served that way can differ from what the product sees.",
+      "The `hosts:` line of `/etc/nsswitch.conf` lists `sss`: every lookup asks sssd first, and a stopped or slow sssd stalls them."
+    ],
+    "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "nsswitch_hosts": {
+          "dns": true,
+          "mdns_return_before_dns": false,
+          "sss": true
+        },
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.20"
+          ],
+          "addresses_total": 1,
+          "fallback": "getent is not installed",
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "svc.acme.test",
+          "nameservers": [
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.20"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 1,
+              "rcode": "NOERROR",
+              "status": "replied"
+            },
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.20"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 2,
+              "rcode": "NOERROR",
+              "status": "replied"
+            }
+          ],
+          "result": "found",
+          "source": "rdy_resolver"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
