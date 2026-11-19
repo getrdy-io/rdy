@@ -1,0 +1,61 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "gone.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`gone.acme.test` does not resolve: nameservers 1, 2 answered NXDOMAIN. Ask the DNS team for a conditional forwarder for `acme.test`, or add a temporary line to `/etc/hosts`.",
+    "level": "fail",
+    "message": "1 of 1 names do not resolve: `gone.acme.test` (not found)",
+    "notes": [],
+    "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "nsswitch_hosts": {
+          "dns": true,
+          "mdns_return_before_dns": false,
+          "sss": false
+        },
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
+      "names": [
+        {
+          "ms": 0,
+          "name": "gone.acme.test",
+          "nameservers": [
+            {
+              "aaaa_asked": false,
+              "addresses": [],
+              "addresses_total": 0,
+              "ms": 0,
+              "position": 1,
+              "rcode": "NXDOMAIN",
+              "status": "replied"
+            },
+            {
+              "aaaa_asked": false,
+              "addresses": [],
+              "addresses_total": 0,
+              "ms": 0,
+              "position": 2,
+              "rcode": "NXDOMAIN",
+              "status": "replied"
+            }
+          ],
+          "result": "not_found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

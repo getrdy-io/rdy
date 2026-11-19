@@ -85,18 +85,25 @@ fn plain(text: &str) -> String {
 
 /// Checks the place of the banner in `stderr` (colour codes removed): it opens the output, a blank
 /// line and the header follow, the header comes before the first check, and the title comes again
-/// directly above the verdict line, which is the last.
-fn assert_placed(stderr: &str, banner: &str, title: &str) {
+/// directly above the verdict line, which is the last. With `--quiet` (`quiet`) there is no header: a
+/// first problem follows the banner instead (07 section 2.8).
+fn assert_placed(stderr: &str, banner: &str, title: &str, quiet: bool) {
     let stderr = plain(stderr);
     let stderr = stderr.as_str();
-    assert!(stderr.starts_with(&format!("{banner}\nrdy ")), "{stderr}");
-    let header = stderr
-        .find("\nrdy 0.")
-        .unwrap_or_else(|| panic!("{stderr}"));
     let first_check = stderr
         .find("host.cpu")
         .unwrap_or_else(|| panic!("no check line: {stderr}"));
-    assert!(banner.len() <= header && header < first_check, "{stderr}");
+    if quiet {
+        assert!(stderr.starts_with(&format!("{banner}\n  ")), "{stderr}");
+        assert!(!stderr.contains("\nrdy 0."), "{stderr}");
+        assert!(banner.len() <= first_check, "{stderr}");
+    } else {
+        assert!(stderr.starts_with(&format!("{banner}\nrdy ")), "{stderr}");
+        let header = stderr
+            .find("\nrdy 0.")
+            .unwrap_or_else(|| panic!("{stderr}"));
+        assert!(banner.len() <= header && header < first_check, "{stderr}");
+    }
     assert_eq!(stderr.matches(title).count(), 2, "{stderr}");
     let lines: Vec<&str> = stderr.lines().collect();
     let last = lines.len() - 1;
@@ -162,7 +169,12 @@ fn run_each(args: &[&str], banner: &str, title: &str) -> Ran {
         let ran = call_with(hooks, &all);
         assert!(ran.code <= 2, "{}: {}", variant.name, ran.stderr);
         // Colour on or off, the banner and its place are the same.
-        assert_placed(&ran.stderr, banner, title);
+        assert_placed(
+            &ran.stderr,
+            banner,
+            title,
+            variant.extra.contains(&"--quiet"),
+        );
         if variant.name == "json" {
             json = Some(ran);
         }

@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/calico-system/daemonsets/calico-node"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"calico-node\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "calico-node",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

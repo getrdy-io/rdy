@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-no-allocatable"
+summary = "A node that reports no allocatable at all"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

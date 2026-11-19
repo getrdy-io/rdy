@@ -353,6 +353,17 @@ fn an_entry_is_stale_after_the_limit_and_not_before() {
     assert_eq!(catalog.stale("2027-04-29", 180).len(), 1);
     // A `today` that is not a date finds nothing rather than flagging every entry.
     assert!(catalog.stale("yesterday", 180).is_empty());
+    // An entry dated after today is stale: nobody read the page on a day that has not come.
+    assert_eq!(catalog.stale("2026-10-29", 180).len(), 1);
+    assert!(catalog.stale("2026-10-30", 180).is_empty());
+}
+
+#[test]
+fn parse_date_reads_real_dates_only() {
+    assert_eq!(parse_date("1970-01-02"), Some(1));
+    for bad in ["", "tomorrow", "2026-13-01", "2026-02-30", "20261117"] {
+        assert_eq!(parse_date(bad), None, "{bad:?}");
+    }
 }
 
 #[test]

@@ -1,0 +1,1 @@
+- The pinned-release install command now follows redirects (`-L`) and keeps every hop on https (`--proto-redir '=https'`). Without `-L`, curl saved the redirect page instead of `install.sh`.

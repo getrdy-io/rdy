@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-cut"
+summary = "A cut class list whose first page has no accepted class"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

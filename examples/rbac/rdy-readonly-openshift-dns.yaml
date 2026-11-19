@@ -1,0 +1,43 @@
+# OPTIONAL, OpenShift only: lets rdy read the cluster DNS, which the DNS operator runs in the namespace
+# openshift-dns. Apply it after rdy-readonly.yaml, which makes the service account it binds. It does
+# nothing on a cluster with no such namespace (the apply fails there: do not use it).
+#
+# k8s.dns lists the DaemonSets of openshift-dns (the DNS operator's dns-default) and reads the Service
+# dns-default by name. Nothing else of the namespace: no ConfigMap, no Secret. The pods come from the
+# cluster-wide pod list that rdy-readonly.yaml already grants. Without this file, k8s.dns on OpenShift
+# reports that it could not read the DNS workload and asks for these grants.
+#
+# The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
+# keeps the two in step.
+#
+# Use it:
+#   kubectl apply -f rdy-readonly-openshift-dns.yaml
+# Delete it with the roles when you are done:
+#   kubectl delete -f rdy-readonly-openshift-dns.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-openshift-dns
+  namespace: openshift-dns
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["dns-default"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-openshift-dns
+  namespace: openshift-dns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-openshift-dns
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system

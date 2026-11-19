@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-small"
+summary = "Three 4 vCPU nodes with 3920m and 14Gi allocatable"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

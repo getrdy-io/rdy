@@ -666,3 +666,52 @@ the corrections log of `11-backlog.md`.
   24. The merged M1-124, M1-169, M1-170, M1-174, M1-112, M1-101 and M1-182 move to weeks 13, 11, 10, 14, 8,
   20 and 21, so no week holds more than 15 h. M1-101's progress line
   gets PR #104. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-59, a SEC-22 leg for nameserver sockets, the real acme-platform ending, musl and `getent`,
+  and the open slow `/version` env clause.** From the M1-155 part 2 security review (point 7), the
+  M1-135, M1-154 and M1-185 builds, and the macOS arm64 runner outage of 2026-11-18. Correction-49 is PR
+  #85. M1-128's strace test has no net.dns run that opens the UDP and TCP nameserver sockets of M1-155's
+  direct lookups, because the facade reads the OS nameserver list itself. New M2-154 (1 h) runs net.dns
+  under strace in a mount namespace with a loopback `resolv.conf` and a loopback scripted DNS server,
+  and fails if no nameserver socket is traced. M1-135's row said the acme-platform transcript ends
+  `NOT READY: 3 required checks were not run`. The real output on the all-pass base ends `1 block, 0
+  warnings, 3 passed, 3 required checks not run, 1 optional check not run` and `NOT READY`, exit 2,
+  because net.egress blocks with no TLS server for `:443` in the env harness. The row now says so, and
+  the reason-line variant waits for M2-152. 07 2.7 and C.12 are other runs, and so is 10's README draft
+  sample (`10-devrel-and-launch.md`, about line 229, a host whose proxy reaches both endpoints). The
+  README has no acme-platform transcript yet, so none of them changes, and M1-137 pastes the M1-135
+  golden, not 10's sample. 03 net.dns listed Alpine as an image without
+  `getent`, but Alpine's `musl-utils` ships `/usr/bin/getent`, which resolves through musl. 03 now says
+  so, and the M1-154 fixture stays a minimal musl image without `getent`. ADR 0006 decision text (the
+  "scratch containers, Alpine" example, about line 44) is accepted and is not edited; 03's "musl images
+  and `getent`" paragraph supersedes that example. M1-185 proves the `timeouts`
+  slow `/version` case at family level only, because the env is M1-119's (PR #119, not merged). The
+  env-level clause stays open, and new core M1-187 (0.5 h, week 24) closes it after M1-119 and M1-185
+  merge; M1-138 depends on it. Week 24 holds 14.5 h. GitHub's macOS arm64 pool was down for hours; the
+  founder waits and ADR 0050 stays, as the runbook records. No 03 `###` heading or Appendix A row
+  changed, and no test-pinned text changed.
+- **Correction-60, the k8s skip after a probe timeout, the scheduler origin under a paused clock, the
+  per-check Service pin, and the replaced PR #62.** From the M1-187 review (PR #134), the security review
+  of PR #135 and the security reviews of M1-162 and M1-163. When the k8s family probe times out, the skip
+  prints "Set a kubeconfig, or pass --kube-context". A cluster was found but did not answer in 10 seconds,
+  so that text is wrong. 01 section 5.2 has one text for `missing_need`, cluster, and the capability's own
+  hint ("check that it is reachable") is never shown. New M2-155 (cli-ux, 1 h) shows that hint after a
+  timeout and gives 01 section 5.2 and 07 a second text; `skip_kind` and the result schema do not change.
+  `sched.rs` builds the scheduler origin from a std `Instant` through `Instant::from_std`, so under a
+  paused test clock real milliseconds come off check deadlines. That is test-only noise, in the class #135
+  fixed in `probe/sock.rs` and `probe/sock/nameserver.rs`. #135 is done (merged on main), and new M2-156
+  (rust-engineer, 0.5 h) moves the scheduler origin onto the deadlines' clock. M2-126 and correction-43
+  said the k8s.ingress Service list goes through `examples/rbac/rdy-readonly-target-namespace.yaml`.
+  M1-163's catch-up deletes that file, because the ClusterRole has granted cluster-wide `list services`
+  since M1-160, and its single `services` guard entry (k8s.admission, k8s.dns, k8s.ingress) has
+  `field_selector: NotRequired`. The correction-43 text above stays as history. M2-126 is rewritten into
+  the per-check pin: a new public `Probe::check_id()` returns the check's `CheckInfo.id`, not the result key, and `GuardLayer` stores it, `Allowed` gets
+  selector rules per citing check, `FieldSelector::Key` accepts only `=` and `==` (today `metadata.name!=x`
+  passes), and the k8s.ingress list is pinned to the family namespace. The k8s.nodes `pods` list sends two
+  `!=` terms, so its entry gets a rule that names them. The k8s.crds Deployment pin stays in the row. Exit
+  test on the kube mock: a list with no selector from k8s.admission is refused, and a k8s.ingress list in
+  another namespace is refused. ADR 0044's first implied ticket is folded into M2-126, so there is one
+  row, and its docs say that removing `services` from the ClusterRole makes k8s.admission and k8s.ingress
+  partial. M2-126 goes from 1.5 h to 2.5 h and depends on M1-162 too. M1-162's PR #62 holds an unsigned
+  merge commit, so #62 is replaced: M1-162 lands as a new PR from branch `m1/162-k8s-dns-2`. The runbook
+  gains a process lesson for that. No M1 ticket is added, widened or moved, and no calendar week changes.
+  No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.

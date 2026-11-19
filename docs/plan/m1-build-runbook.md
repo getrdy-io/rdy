@@ -618,6 +618,15 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     host.
   - M1-154's PR (correction-59): keep the fixture a minimal musl image without `getent`; 03 now says
     Alpine ships `getent` in `musl-utils`.
+  - Follow-ups that correction-60 gave ids:
+    - M2-155: after a k8s family probe timeout, the skip shows the `kube_context` capability's hint, escaped,
+      with its own message; 01 section 5.2 and 07 get a second `missing_need`, cluster text (M1-187 review).
+    - M2-156: the scheduler origin on the deadlines' clock, so a paused test clock loses no real time
+      (security review of PR #135).
+    - M2-126 (rewritten): the per-check `services` pin, with ADR 0044's first implied ticket folded in. The
+      k8s.nodes `pods` rule keeps its two `!=` terms when `FieldSelector::Key` narrows.
+  - M1-162 (correction-60): #62 is replaced by a new PR from `m1/162-k8s-dns-2`, one signed squash commit.
+    Where these notes say #62, read that PR.
   - #84 (M1-126) and #109 (M1-097) merged with "correction-49" in their progress lines. Change it to
     "correction-50" in the next bookkeeping PR, and in #119 (M1-119) before it merges.
   - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel

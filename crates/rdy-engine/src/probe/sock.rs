@@ -7,6 +7,9 @@
 //! - [`Probe::unix_get`] sends one `GET` over a unix socket and returns the status and the body. It
 //!   serves the Docker and Podman Engine API of `host.container_runtime`.
 //!
+//! A third family, [`Probe::nameserver_exchange`] (M1-155), sends one DNS query to a nameserver the
+//! facade reads from the OS itself. Its rules are in [`nameserver`].
+//!
 //! Both go in the order the rest of the facade does: the handle is checked, the policy is applied, the
 //! backend runs, and the entry is closed. A refused call never reaches the backend. There is one
 //! action-log entry per call.
@@ -51,7 +54,15 @@
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Component, Path};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// The remaining budget is measured on tokio's clock when tokio is in the build, the clock the backend's
+// timeout runs on. It is the real clock in a normal run. Under a paused test clock, a real-clock
+// measurement would take real milliseconds off a virtual limit and cut the call early.
+#[cfg(not(any(feature = "runtime", feature = "loopback")))]
+use std::time::Instant;
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+use tokio::time::Instant;
 
 use rdy_spec::Target;
 use rdy_spec::result::ActionKind;
@@ -63,10 +74,17 @@ use super::{Probe, ProbeError, RULE_NO_NETWORK, refuse, settle};
 use crate::check::{Os, PeerClass};
 use crate::family::HostSet;
 
+pub mod nameserver;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
+
+pub use nameserver::{
+    DnsTransport, MAX_DNS_QUERY, MAX_NAMESERVER_TCP_REPLY, MAX_NAMESERVER_UDP_REPLY,
+    MAX_NAMESERVERS, NAMESERVER_FILES, NAMESERVER_PORT, NAMESERVER_TIMEOUT, RULE_NS_ADDRESS,
+    RULE_NS_INDEX, RULE_NS_PAYLOAD, RULE_NS_UNDECLARED,
+};
 
 /// The most time one UDP exchange may take, name lookup included.
 pub const UDP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -124,6 +142,9 @@ pub struct UdpReply {
     pub truncated: bool,
     /// The address that answered.
     pub addr: IpAddr,
+    /// The message ID the facade put in the query it sent (`Probe::nameserver_exchange` picks a random
+    /// one and overwrites the caller's). `None` for a call that does not choose an ID.
+    pub query_id: Option<u16>,
 }
 
 impl UdpReply {
@@ -134,6 +155,7 @@ impl UdpReply {
             bytes,
             truncated: false,
             addr,
+            query_id: None,
         }
     }
 }
@@ -166,6 +188,8 @@ impl UnixResponse {
 #[derive(Debug, Default)]
 pub(super) struct Peers {
     hosts: OnceLock<HostSet>,
+    /// The OS nameserver list, read once by `nameserver_exchange` (M1-155).
+    pub(super) nameservers: OnceLock<Vec<IpAddr>>,
     #[cfg(test)]
     pub(super) timeout: OnceLock<Duration>,
 }
@@ -183,6 +207,8 @@ impl Peers {
 
     /// The first spec host equal to `host`, with its port, whatever the port. A lookup has no port of
     /// its own, so it takes the port of the entry that names the host.
+    ///
+    /// The network module and the nameserver exchange call it, so every build has it.
     pub(super) fn spec_host(&self, host: &Host) -> Option<(Host, u16)> {
         self.hosts.get().and_then(|hosts| {
             hosts

@@ -214,9 +214,10 @@ fn deny_entries() -> Vec<(String, Vec<String>)> {
 #[test]
 fn no_wrapper_is_a_check_crate_except_the_named_dev_dependency_exceptions() {
     // Reading deny.toml needs no cargo-deny, so this runs everywhere. A check crate in a wrapper list
-    // would let it depend on the banned crate. The two exceptions are the test-only dev-dependencies of
-    // rdy-checks-k8s that deny.toml explains.
+    // would let it depend on the banned crate. The exceptions are the test-only dev-dependencies of
+    // rdy-checks-k8s and the hickory-proto test oracle of rdy-checks-net (ADR 0052), which deny.toml explains.
     const EXCEPTIONS: &[(&str, &str)] = &[
+        ("hickory-proto", "rdy-checks-net"),
         ("tempfile", "rdy-checks-k8s"),
         ("tokio-rustls", "rdy-checks-k8s"),
     ];

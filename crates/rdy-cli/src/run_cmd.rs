@@ -34,9 +34,9 @@
 //! it is empty and exits 70 with no report. The run never sees it.
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095) and the kube flags
-//! (M1-107). `--quiet` and `--verbose` (M1-143) and the
-//! live progress line (M1-142) change the output later; this is the plain run, plus the static
-//! "Running N checks..." line of [`crate::static_line`] on a terminal.
+//! (M1-107). The live progress line (M1-142, [`crate::progress`]) is on stderr while the checks run and
+//! is cleared before the check list. `--quiet` and `--verbose` (M1-143) turn it off. `--verbose` prints
+//! an event line as each check ends (`events`).
 
 use std::io::Write;
 use std::sync::{Arc, Weak};
@@ -53,7 +53,8 @@ use rdy_engine::report::{HtmlPage, JsonError, render_page, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
-    CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
+    CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions,
+    Signature, SpecRef,
 };
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes};
 
@@ -61,12 +62,12 @@ use crate::cli::{COMMIT, ColorChoice, ProgressChoice, RunArgs, TARGET};
 use crate::error::{CliError, InternalKind, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::progress::{FIRST_FRAME, Progress, ProgressEnv, Target, frames, live_line_allowed};
 use crate::redaction;
 use crate::rig::Rig;
 use crate::spec_load::{self, Given};
-use crate::static_line::{Detail, Gate, StaticLine};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
-use crate::terminal::{View, banner, render};
+use crate::terminal::{Detail, View, banner, render};
 use crate::trust::{Layout, Vars};
 
 /// How the human output looks: decided once, from `--color`, the environment and the stream.
@@ -121,12 +122,10 @@ pub(crate) struct RunContext {
     pub(crate) color: ColorChoice,
     /// The `--progress` choice (and `RDY_PROGRESS`).
     pub(crate) progress: ProgressChoice,
-    /// `--quiet`.
-    pub(crate) quiet: bool,
-    /// `--verbose`.
-    pub(crate) verbose: bool,
     /// The watchdog and the write state, started before the runtime (M1-176).
     pub(crate) rig: Rig,
+    /// `--quiet` and `--verbose` (M1-143).
+    pub(crate) detail: Detail,
 }
 
 /// Runs the command and returns the exit code.
@@ -160,9 +159,8 @@ async fn execute(
         registry,
         color,
         progress,
-        quiet,
-        verbose,
         rig,
+        detail,
     } = cx;
     let look = Look::new(color, &hooks);
     // The watchdog was started before the runtime, from the first thing `main` did. The scheduler counts
@@ -181,7 +179,7 @@ async fn execute(
     let loaded = load_spec(args, &name, &privilege)?;
 
     // The banner comes before any check (01 section 4.7). The path is shown as typed, redacted first.
-    let out = Out::new(args, look, &name);
+    let out = Out::new(args, look, &name, detail);
     if let Some(text) = banner(
         &Signature::from(loaded.signature()),
         &out.spec,
@@ -219,8 +217,18 @@ async fn execute(
     );
     run_options.allow_unsigned = args.allow_unsigned;
     run_options.network = options.network;
-    // Recorded only. The flag does nothing until M1-107 builds the Kubernetes family.
     run_options.kube_context.clone_from(&args.kube_context);
+    // The Kubernetes family's probe reads these two flags, and says which cluster it is about to touch on
+    // stderr before its first request (ADR 0031 decision 4). The line is redacted like every other.
+    options.kubeconfig.clone_from(&args.kubeconfig);
+    options.kube_context.clone_from(&args.kube_context);
+    let announced: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let sink = Arc::clone(&announced);
+    options.announce = Some(rdy_engine::engine::Announce::new(move |line| {
+        sink.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(line.to_owned());
+    }));
 
     let engine = Engine::new(registry, hub);
     let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
@@ -240,7 +248,7 @@ async fn execute(
         let base = assemble(
             &loaded,
             args,
-            &privilege,
+            privilege.identity(),
             stand_in_host(),
             make_run(
                 run_id.clone(),
@@ -260,29 +268,57 @@ async fn execute(
         board
     });
 
-    // The static line (07 section 3, M1-088): after the banner and the folder, before the first probe,
-    // and cleared before anything else is written to stderr.
-    let gate = Gate::new(
+    // The live line (07 section 3, M1-142) starts after the banner and the folder, and it is cleared
+    // before anything else is written to stderr: right after the checks, and on any early return, since
+    // it clears itself when dropped. It replaces the static line of M1-088 (PC-54 in 13). `--quiet` and
+    // `--verbose` keep it off (07 section 3): the gate takes both as one flag.
+    let mut live = start_progress(
         progress,
-        Detail::from_flags(quiet, verbose),
-        hooks
-            .stderr_terminal
-            .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr())),
-        hooks
-            .style_env
-            .clone()
-            .unwrap_or_else(StyleEnv::from_process)
-            .term_dumb(),
+        detail != Detail::Normal,
+        &hooks,
+        plan.runnable().count(),
     );
-    let mut line = StaticLine::show(gate, plan.runnable().count(), stderr);
 
     let host = host_facts(&engine.hub().run_probe()).await;
     if let Some(board) = &board {
         board.set_host(host.clone());
     }
     options.board = board;
-    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
-    line.clear(stderr);
+    // `--verbose` prints one line as each check ends, live and on any stream (07 C.2). The call below
+    // is the engine's, through a wrapper that does that.
+    let mut engine = events::Narrated::new(engine, detail == Detail::Verbose, look, &mut options);
+    // The family's line is written after the poll that announced it and before the poll that can send the
+    // first request: the client is built on the blocking pool, so that poll returns first (ADR 0031
+    // decision 4). The stderr of the command is not `'static`, so the line goes through this buffer.
+    let executed = engine
+        .execute(
+            &loaded,
+            plan,
+            &privilege,
+            &options,
+            &mut *stderr,
+            &mut |stderr| {
+                if !announced
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_empty()
+                {
+                    live.clear();
+                }
+                print_announced(&announced, stderr);
+            },
+        )
+        .await;
+    live.clear();
+    // A family's probe ended the run: no check ran. No report is written for a run that did not start.
+    if let Some(fatal) = executed.fatal {
+        discard_if_empty(dir);
+        state.finish(crate::EXIT_INTERNAL);
+        return Err(CliError::Internal(InternalKind::FamilyFatal {
+            message: fatal.message,
+            hint: fatal.hint,
+        }));
+    }
 
     let finished_at = clock();
     let run = make_run(
@@ -292,7 +328,16 @@ async fn execute(
         origin.elapsed(),
         run_options,
     );
-    let mut report = assemble(&loaded, args, &privilege, host, run, executed.results);
+    let mut identity_privilege = privilege.identity();
+    identity_privilege.kube = executed.kube;
+    let mut report = assemble(
+        &loaded,
+        args,
+        identity_privilege,
+        host,
+        run,
+        executed.results,
+    );
     report.capabilities = executed.capabilities;
     executed.log.apply(&mut report);
     let counts = executed.counts;
@@ -370,6 +415,31 @@ async fn execute(
             ))
         }
     }
+}
+
+/// Starts the live progress line when the rules of 07 section 3 allow it, else a line that draws nothing.
+/// `off` is `--quiet` or `--verbose`.
+fn start_progress(choice: ProgressChoice, off: bool, hooks: &RunHooks, total: usize) -> Progress {
+    let env = hooks
+        .progress_env
+        .clone()
+        .unwrap_or_else(ProgressEnv::from_process);
+    let terminal = hooks
+        .stderr_terminal
+        .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
+    if !live_line_allowed(choice, off, &env, terminal) {
+        return Progress::off();
+    }
+    let target = hooks
+        .progress_capture
+        .clone()
+        .map_or(Target::Stderr, Target::Capture);
+    Progress::start_after(
+        hooks.progress_first_frame.unwrap_or(FIRST_FRAME),
+        total,
+        frames(&env),
+        target,
+    )
 }
 
 /// What `--jobs` came to.
@@ -471,7 +541,7 @@ fn make_run(
 fn assemble(
     loaded: &LoadedSpec,
     args: &RunArgs,
-    privilege: &Privilege,
+    identity: Identity,
     host: Host,
     run: Run,
     results: Vec<CheckResult>,
@@ -482,9 +552,27 @@ fn assemble(
         spec_ref(loaded, &args.spec),
         Signature::from(loaded.signature()),
         host,
-        privilege.identity(),
+        identity,
         results,
     )
+}
+
+/// Writes the lines a family announced since the last call, to stderr. The Kubernetes family announces the
+/// cluster line (context, server, user) once, before its first request. The text passes the redactor and
+/// the terminal escaper, and a failed write is not an error: the line is a courtesy, and the report says
+/// the same.
+fn print_announced(announced: &std::sync::Mutex<Vec<String>>, stderr: &mut dyn Write) {
+    let lines = std::mem::take(
+        &mut *announced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for line in lines {
+        let text = redaction::redact_text_then(&format!("Cluster: {line}"), |text| {
+            rdy_engine::text::escape_untrusted(text)
+        });
+        let _ = writeln!(stderr, "{text}");
+    }
 }
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
@@ -632,10 +720,12 @@ struct Out {
     kubeconfig: Option<String>,
     /// `--out-dir` was given (it decides the Windows note).
     out_dir_given: bool,
+    /// How much the text shows.
+    detail: Detail,
 }
 
 impl Out {
-    fn new(args: &RunArgs, look: Look, name: &str) -> Self {
+    fn new(args: &RunArgs, look: Look, name: &str, detail: Detail) -> Self {
         // The spec, the kubeconfig and the folder are typed by the user. They are redacted here and
         // escaped by the renderer.
         Self {
@@ -646,6 +736,7 @@ impl Out {
                 .as_ref()
                 .map(|path| redaction::redact_text(&path.display().to_string())),
             out_dir_given: args.out_dir.is_some(),
+            detail,
         }
     }
 
@@ -671,6 +762,7 @@ impl Out {
             kubeconfig: self.kubeconfig.as_deref(),
             styler: self.look.styler(),
             width: self.look.width,
+            detail: self.detail,
         };
         say(stderr, self.look, &render(&view));
     }
@@ -774,6 +866,8 @@ fn uuid_v4() -> Result<String, CliError> {
         e.concat()
     ))
 }
+
+mod events;
 
 #[cfg(test)]
 mod tests;

@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 183 | 404.5 |
-| M1, core | 155 | 344.5 |
+| M1, all | 184 | 405 |
+| M1, core | 156 | 345 |
 | M1, `core: no` (the cut list) | 28 | 60 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -129,7 +129,7 @@ and Dec 28 run at half capacity.
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-110, M1-111, M1-113 to M1-115, M1-182 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; no proxy password in host.container_runtime evidence |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120, M1-175 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
 | 23 | Apr 26 to May 2, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-125, M1-177, M1-185 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign`; the fixture envs serve a cluster |
-| 24 | May 3 to May 9, 2027 | 13 | 14 | 3 Host checks, HTML report; 6 Signing, `rdy verify`, 0.1.0 | M1-126, M1-127, M1-129 to M1-131, M1-186 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove`; the terminal report names missing grants |
+| 24 | May 3 to May 9, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 6 Signing, `rdy verify`, 0.1.0 | M1-126, M1-127, M1-129 to M1-131, M1-186, M1-187 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove`; the terminal report names missing grants; the timeouts env survives a slow cluster |
 | 25 | May 10 to May 16, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-128, M1-132, M1-134 to M1-139, M1-183 | **`v0.1.0`**: signing review closed; every spec read refuses a FIFO or device within 1 s; sign page; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 12.5 | Non-core, steps 2 and 3 | M1-140, M1-142, M1-144, M1-145, M1-172, M1-178 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |

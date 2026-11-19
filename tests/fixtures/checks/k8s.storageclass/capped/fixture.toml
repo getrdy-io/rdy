@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-storageclass-capped"
-summary = "The first page of the class list has no default and the server has more"
+summary = "The class list has no default on page one and the server fails on page two"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

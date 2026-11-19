@@ -27,6 +27,7 @@ use common::{is_child, run_child};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rdy_checks_k8s::client::{Env, KubeError, KubeOptions, Loaded, load};
 use rdy_engine::check::Os;
+use rdy_engine::probe::{NativeCall, NativeValue, SystemRoots};
 use rdy_engine::testing::{Replay, TestRun};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -39,6 +40,7 @@ const VERSION_JSON: &str = r#"{"major":"1","minor":"30","gitVersion":"v1.30.2","
 /// A CA, and a server certificate for 127.0.0.1 signed by it.
 struct Pki {
     ca_pem: String,
+    ca_der: Vec<u8>,
     server: TlsAcceptor,
 }
 
@@ -80,6 +82,7 @@ fn pki_dated(name: &str, leaf_name: &str, expired: bool) -> Pki {
     .expect("server config");
     Pki {
         ca_pem: ca.pem(),
+        ca_der: ca.der().to_vec(),
         server: TlsAcceptor::from(Arc::new(config)),
     }
 }
@@ -275,13 +278,55 @@ async fn without_a_ca_in_the_kubeconfig_only_the_bundled_roots_are_trusted() {
         matches!(&error, KubeError::Unreachable { cause, ca_set: false, .. } if cause.contains("UnknownIssuer")),
         "{error:?}"
     );
-    // No CA is set, so the hint says rdy trusts only its bundled roots (ADR 0031 decision 9).
+    // No CA is set, so the hint says rdy trusts the facade's roots, else the bundled ones (ADR 0031 decision 9).
     let hint = error.hint();
     assert!(
         hint.contains("names no certificate authority")
-            && hint.contains("not this machine's store")
+            && hint.contains("read from this machine's store")
             && hint.contains("certificate-authority"),
         "{hint}"
+    );
+}
+
+#[tokio::test]
+async fn without_a_ca_in_the_kubeconfig_the_client_trusts_a_root_only_the_facade_bundle_holds() {
+    // The CA is not in the kubeconfig and not in the bundled web roots. Only the facade's answer to
+    // `SystemRoots` (a fixture bundle here) has it, so a TLS session that completes shows that the client
+    // took its roots from the facade and from nowhere else (ADR 0031 decision 9).
+    let pki = pki("rdy facade-only ca");
+    let addr = serve(pki.server.clone()).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let text = format!(
+        "apiVersion: v1\nkind: Config\ncurrent-context: ctx\nclusters:\n- name: cl\n  cluster:\n    server: https://{addr}\ncontexts:\n- name: ctx\n  context:\n    cluster: cl\n    user: usr\nusers:\n- name: usr\n  user:\n    token: t\n"
+    );
+    let path = dir.path().join("kubeconfig");
+    std::fs::write(&path, text).expect("write kubeconfig");
+    let options = KubeOptions::new(Duration::from_secs(10)).kubeconfig(path);
+
+    // With the CA in the facade's bundle the session completes.
+    let replay = Replay::new().native(
+        NativeCall::SystemRoots,
+        NativeValue::SystemRoots(SystemRoots::from(vec![pki.ca_der.clone()])),
+    );
+    let probe = TestRun::new(replay).run_probe(Os::Linux);
+    let connected = load(&options, &Env::empty())
+        .await
+        .expect("load")
+        .connect(&probe, |_| {})
+        .await
+        .expect("the facade's roots are trusted");
+    assert_eq!(connected.server_version().git_version, "v1.30.2");
+
+    // With no answer from the facade the client has only the bundled roots, which do not hold it.
+    let error = load(&options, &Env::empty())
+        .await
+        .expect("load")
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect_err("the bundled roots do not hold this CA");
+    assert!(
+        matches!(&error, KubeError::Unreachable { cause, .. } if cause.contains("UnknownIssuer")),
+        "{error:?}"
     );
 }
 

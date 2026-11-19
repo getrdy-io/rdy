@@ -9,8 +9,8 @@
 //!    once under the root clippy.toml and once under each check crate's, through `CLIPPY_CONF_DIR`, and
 //!    expects every entry of that file to be reported and the run to fail.
 //!
-//! The kube entries are not proven here. Their use file is
-//! `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt` and M1-107 carries the proof (backlog correction-11).
+//! The kube entries are proven in `kube_wall.rs` (M1-107). Their use file is
+//! `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt`.
 //!
 //! OS: the Unix-only and Windows-only entries are proven on the legs where their paths exist, and
 //! `uses.rs` carries the `cfg` for each. Every other entry is proven on all five legs.

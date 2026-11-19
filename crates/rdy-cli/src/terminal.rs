@@ -12,9 +12,15 @@
 //! puts one blank line after it.
 //!
 //! **The check list** is sorted with [`group_by_bucket`], which reads the stored bucket and never
-//! recomputes it. Each entry is `  <STATUS> <key> <message>`, and a check with a fix has `fix from
-//! <source>: <fix>` on the lines below, under the message. Lines wrap at word boundaries to `width`
+//! recomputes it. Each entry is `  <STATUS> <key> <message>`, a check with missing grants has
+//! `missing grants: <grant>, <grant>` below it, and a check with a fix has `fix from
+//! <source>: <fix>` after that, on the lines below, under the message. Lines wrap at word boundaries to `width`
 //! with a hanging indent. A word wider than the line is not cut, so a path stays copyable.
+//!
+//! **Quiet and verbose** (07 section 2.8, M1-143). [`Detail`] is on the [`View`]. `Quiet` drops the header,
+//! the PASS and not-applicable entries, and the file list. `Verbose` adds a `needs` row to the header,
+//! `expected`, `observed` and `took` lines under each entry, and an `actions` and `took` block before the
+//! summary. [`event_line`] makes the line printed as each check finishes, before this text.
 //!
 //! **Untrusted text.** Everything that comes from the report (host and user names, the spec's
 //! product and file name, messages, fixes, keys) goes through [`untrusted`], so a control character
@@ -39,6 +45,8 @@ use rdy_spec::result::{
     TrustSource, Verdict, group_by_bucket, verdict,
 };
 
+use serde_json::{Map, Value};
+
 use crate::style::{Built, Role, Styler, display_width, pad_end, untrusted};
 
 #[cfg(test)]
@@ -52,6 +60,30 @@ const STATUS_WIDTH: usize = 7;
 const MAX_KEY_COLUMN: usize = 40;
 /// The words that name the source of a vendor fix that rdy cannot vouch for.
 const UNVERIFIED_SOURCE: [&str; 5] = ["the", "spec", "file", "(not", "verified):"];
+
+/// How much of the run the text shows (`--quiet`, nothing, `--verbose`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Detail {
+    /// `--quiet`: problems, the summary, the folder line and the verdict.
+    Quiet,
+    /// The default.
+    #[default]
+    Normal,
+    /// `--verbose`: what each check expected, saw and took.
+    Verbose,
+}
+
+impl Detail {
+    /// The detail for the two flags. clap refuses both at once, so `quiet` wins only as a safe default.
+    #[must_use]
+    pub fn from_flags(quiet: bool, verbose: bool) -> Self {
+        match (quiet, verbose) {
+            (true, _) => Self::Quiet,
+            (false, true) => Self::Verbose,
+            (false, false) => Self::Normal,
+        }
+    }
+}
 
 /// What [`render`] needs besides the report.
 #[derive(Debug, Clone)]
@@ -72,6 +104,8 @@ pub struct View<'a> {
     pub styler: Styler,
     /// The line width, 60 to 100 ([`crate::style::wrap_width`]).
     pub width: usize,
+    /// How much to show.
+    pub detail: Detail,
 }
 
 /// One piece of a wrapped line: text of the machine, a word of rdy's, or run-time text of rdy's.
@@ -248,13 +282,19 @@ fn fingerprint_short(fingerprint: &str) -> String {
 pub fn render(view: &View<'_>) -> String {
     let report = view.report;
     let styler = view.styler;
-    let mut blocks: Vec<String> = vec![header(view)];
+    let mut blocks: Vec<String> = Vec::new();
+    if view.detail != Detail::Quiet {
+        blocks.push(header(view));
+    }
     let list = check_list(view);
     if !list.is_empty() {
         blocks.push(list);
     }
     if let Some(tip) = root_tip(view) {
         blocks.push(tip);
+    }
+    if view.detail == Detail::Verbose {
+        blocks.push(totals(view));
     }
     blocks.push(format!("{}\n", summary_line(&report.checks)));
 
@@ -269,8 +309,10 @@ pub fn render(view: &View<'_>) -> String {
             '/'
         };
         let _ = writeln!(closing, "Report written to {folder}{separator}");
-        for file in view.files {
-            let _ = writeln!(closing, "  {}", untrusted(file));
+        if view.detail != Detail::Quiet {
+            for file in view.files {
+                let _ = writeln!(closing, "  {}", untrusted(file));
+            }
         }
         if let Some(note) = view.note {
             let _ = writeln!(closing, "{}", untrusted(note));
@@ -312,7 +354,78 @@ fn header(view: &View<'_>) -> String {
     if let Some(cluster) = cluster_value(view) {
         row("cluster", &cluster);
     }
+    if view.detail == Detail::Verbose
+        && let Some(needs) = needs_value(report)
+    {
+        row("needs", &needs);
+    }
     out
+}
+
+/// `network: available, root: not available`: what the run probed, in the order of the report.
+fn needs_value(report: &Report) -> Option<String> {
+    let parts: Vec<String> = report
+        .capabilities
+        .iter()
+        .map(|cap| {
+            let name = cap
+                .name
+                .as_deref()
+                .map(|name| format!(" {}", untrusted(name)))
+                .unwrap_or_default();
+            let state = if cap.available {
+                "available"
+            } else {
+                "not available"
+            };
+            format!("{}{name}: {state}", untrusted(cap.need.as_str()))
+        })
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+/// The `actions` and `took` rows of `--verbose`, printed before the summary.
+fn totals(view: &View<'_>) -> String {
+    let report = view.report;
+    let more = if report.actions_truncated {
+        ", more were dropped"
+    } else {
+        ""
+    };
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{} {} recorded{more}; the JSON report lists them",
+        pad_end("actions", LABEL_WIDTH),
+        report.actions.len()
+    );
+    let _ = writeln!(
+        out,
+        "{} {}",
+        pad_end("took", LABEL_WIDTH),
+        view.styler
+            .paint_built(Role::Dim, &Built::elapsed(report.run.duration_ms))
+    );
+    out
+}
+
+/// The line printed as a check finishes, such as `  .. finished host.memory (PASS, 1 ms)` (07 C.2).
+///
+/// `key` is the check key, already redacted by the caller. It is escaped here and never styled. The rest
+/// is rdy's own text, dim.
+#[must_use]
+pub fn event_line(key: &str, status: &Status, duration_ms: u64, styler: Styler) -> String {
+    let (word, _) = status_word(status);
+    format!(
+        "{}{}{}{}{}{}{}\n",
+        styler.paint(Role::Dim, "  .. finished "),
+        untrusted(key),
+        styler.paint(Role::Dim, " ("),
+        styler.paint(Role::Dim, word),
+        styler.paint(Role::Dim, ", "),
+        styler.paint_built(Role::Dim, &Built::elapsed(duration_ms)),
+        styler.paint(Role::Dim, ")"),
+    )
 }
 
 fn spec_value(view: &View<'_>) -> String {
@@ -490,13 +603,18 @@ fn status_word(status: &Status) -> (&'static str, Role) {
 /// The check list, or an empty string when there are no checks.
 fn check_list(view: &View<'_>) -> String {
     let groups = group_by_bucket(&view.report.checks);
+    // Quiet keeps the problems: a passed check and one that does not apply are not shown.
+    let shown = |bucket: &Bucket| {
+        view.detail != Detail::Quiet || !matches!(bucket, Bucket::Passed | Bucket::NotApplicable)
+    };
     let key_widths = groups
         .iter()
+        .filter(|group| shown(&group.bucket))
         .flat_map(|group| group.checks.iter())
         .map(|check| display_width(&untrusted(&check.key)));
     let key_column = key_widths.max().unwrap_or(0).min(MAX_KEY_COLUMN);
     let mut out = String::new();
-    for group in &groups {
+    for group in groups.iter().filter(|group| shown(&group.bucket)) {
         for check in &group.checks {
             entry(view, check, &group.bucket, key_column, &mut out);
         }
@@ -504,7 +622,8 @@ fn check_list(view: &View<'_>) -> String {
     out
 }
 
-/// One entry of the list: the status line and, when there is a fix, the fix line.
+/// One entry of the list: the status line, the missing grants line when the result has grants, and the
+/// fix line when there is a fix.
 fn entry(
     view: &View<'_>,
     check: &CheckResult,
@@ -535,6 +654,17 @@ fn entry(
         out.push_str(&wrap(&message, start, message_column, view.width, styler));
         out.push('\n');
     }
+    if let Some(grants) = grant_pieces(check, bucket) {
+        out.push_str(&" ".repeat(message_column));
+        out.push_str(&wrap(
+            &grants,
+            message_column,
+            message_column,
+            view.width,
+            styler,
+        ));
+        out.push('\n');
+    }
     if let Some(fix) = fix_pieces(view, check, bucket) {
         out.push_str(&" ".repeat(message_column));
         out.push_str(&wrap(
@@ -546,6 +676,97 @@ fn entry(
         ));
         out.push('\n');
     }
+    if view.detail == Detail::Verbose {
+        verbose_lines(view, check, message_column, out);
+    }
+}
+
+/// The width of a verbose label: `observed` and two spaces.
+const DETAIL_LABEL: usize = 10;
+
+/// `expected`, `observed` and `took` under an entry (07 C.2). Scalars are `key=value`, a list is
+/// `key=list(N)` and an object is `key=map(N)`. A check with no values shows no line for them.
+fn verbose_lines(view: &View<'_>, check: &CheckResult, column: usize, out: &mut String) {
+    let styler = view.styler;
+    let value_column = column + DETAIL_LABEL;
+    for (label, map) in [("expected", &check.expected), ("observed", &check.observed)] {
+        let Some(pieces) = map.as_ref().map(pairs).filter(|pieces| !pieces.is_empty()) else {
+            continue;
+        };
+        out.push_str(&" ".repeat(column));
+        out.push_str(&pad_end(label, DETAIL_LABEL));
+        out.push_str(&wrap(
+            &pieces,
+            value_column,
+            value_column,
+            view.width,
+            styler,
+        ));
+        out.push('\n');
+    }
+    out.push_str(&" ".repeat(column));
+    out.push_str(&pad_end("took", DETAIL_LABEL));
+    out.push_str(&styler.paint_built(Role::Dim, &Built::elapsed(check.duration_ms)));
+    out.push('\n');
+}
+
+/// The `key=value` pieces of a map of measured values, in key order. The JSON report writes these maps
+/// with sorted keys too (01 section 5.5), so the order does not depend on how `serde_json` was built.
+fn pairs(map: &Map<String, Value>) -> Vec<Piece> {
+    let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    entries
+        .into_iter()
+        .map(|(key, value)| {
+            let shown = match value {
+                Value::Null => "null".to_owned(),
+                Value::Bool(b) => b.to_string(),
+                Value::Number(n) => n.to_string(),
+                Value::String(text) => untrusted(text),
+                Value::Array(items) => format!("list({})", items.len()),
+                Value::Object(items) => format!("map({})", items.len()),
+            };
+            Piece::Plain(format!("{}={shown}", untrusted(key)))
+        })
+        .collect()
+}
+
+/// The most grants one entry lists. The rest are counted (`and N more`).
+const MAX_GRANTS_SHOWN: usize = 5;
+
+/// `missing grants: <grant>, <grant>` as pieces, or `None` when the result names no missing grant. The
+/// grants keep the check's order and each goes through the escaper. A list past
+/// [`MAX_GRANTS_SHOWN`] ends `and N more` (07 section 2.2). A check that does not apply gets none.
+fn grant_pieces(check: &CheckResult, bucket: &Bucket) -> Option<Vec<Piece>> {
+    let grants = check
+        .partial
+        .as_ref()
+        .map(|partial| partial.missing_grants.as_slice())
+        .filter(|grants| !grants.is_empty())?;
+    if *bucket == Bucket::NotApplicable || check.skip_kind == Some(SkipKind::NotApplicable) {
+        return None;
+    }
+    let shown = grants.len().min(MAX_GRANTS_SHOWN);
+    let more = grants.len() - shown;
+    let mut pieces = vec![
+        Piece::Fixed(Role::Label, "missing"),
+        Piece::Fixed(Role::Label, "grants:"),
+    ];
+    for (index, grant) in grants.iter().take(shown).enumerate() {
+        let mut parts = words(grant);
+        if (index + 1 < shown || more > 0)
+            && let Some(Piece::Plain(last)) = parts.last_mut()
+        {
+            last.push(',');
+        }
+        pieces.extend(parts);
+    }
+    if more > 0 {
+        pieces.push(Piece::Fixed(Role::Label, "and"));
+        pieces.push(Piece::Plain(more.to_string()));
+        pieces.push(Piece::Fixed(Role::Label, "more"));
+    }
+    Some(pieces)
 }
 
 /// `fix from <source>: <fix>` as pieces, or `None` when the check has no fix to show. A check that does

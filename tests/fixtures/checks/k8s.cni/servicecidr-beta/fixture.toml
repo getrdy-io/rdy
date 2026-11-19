@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-servicecidr-beta"
+summary = "A ServiceCIDR object at v1beta1 only (1.31 and 1.32)"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

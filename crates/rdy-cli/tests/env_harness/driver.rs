@@ -10,19 +10,27 @@
 //!
 //! The run plans for the OS it runs on, so the caller skips an environment of another OS (`main`).
 //!
-//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`. A fixture that sets
-//! `kube = true` gets no cluster until M1-107, because `rdy run` builds no Kubernetes client yet.
+//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`.
+//!
+//! The cluster (M1-185). An env whose `kube` cap is true serves its `api/` tree as a scripted cluster: the
+//! kube mock of `rdy-checks-k8s`, behind that crate's `testing` feature, stands where the kubeconfig and
+//! the socket would be, and the read-only guard stays in front of it. After the run the driver audits it
+//! (INV-14) against the report's action log and puts any violation in `EnvRun::violations`. An env whose
+//! `kube` cap is false gets the `k8s` family over an empty `Env` (`families::registry`), so a spec with a
+//! k8s check finds no kubeconfig and the check is skipped `missing_need`.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rdy_checks_k8s::testing::ScriptedCluster;
 use rdy_cli::RunHooks;
+use rdy_cli::style::StyleEnv;
 use rdy_engine::check::Os;
 use rdy_engine::probe::{NativeCall, NativeValue, UnameInfo};
 use rdy_engine::redact::{Redactor, TagKey};
 use rdy_engine::report::render_html;
-use rdy_engine::testing::{Fixture, Replay, TestRun, fixtures_dir, manifest_violations};
+use rdy_engine::testing::{Fixture, Replay, RunPins, TestRun, fixtures_dir, manifest_violations};
 use rdy_spec::result::Report;
 use serde_json::Value;
 
@@ -40,6 +48,9 @@ pub struct EnvRun {
     pub terminal: String,
     /// One line per refusal that shows a check went beyond its declared `CheckInfo`. Empty when none did.
     pub violations: Vec<String>,
+    /// `METHOD path?query` of every request the scripted cluster saw, in arrival order. Empty when the env
+    /// has no cluster.
+    pub kube_requests: Vec<String>,
 }
 
 /// The names of the environments under `<root>/envs` that carry a spec, in order. `root` is the fixtures
@@ -94,24 +105,14 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
         ));
     }
 
-    let pins = &manifest.run;
-    let mut hooks = RunHooks::default();
-    hooks.clock = Some(pinned_time(
-        pins.clock.as_deref().unwrap_or("2026-01-01T00:00:00Z"),
-    )?);
-    hooks.run_id = Some(
-        pins.run_id
-            .clone()
-            .unwrap_or_else(|| "00000000-0000-4000-8000-000000000000".to_owned()),
-    );
-    hooks.deadline = Some(Duration::from_millis(
-        pins.deadline_ms.unwrap_or(DEFAULT_DEADLINE_MS),
-    ));
-    hooks.families = Some(families::registry);
-    // The terminal text is a golden: no colour and one width, whatever runs the test.
-    hooks.stderr_terminal = Some(false);
-    hooks.stderr_columns = Some(100);
+    let hooks = hooks_for(&manifest.run)?;
 
+    let cluster = if manifest.caps.kube {
+        Some(ScriptedCluster::new(fixture.replay()).map_err(|e| format!("{name}: {e}"))?)
+    } else {
+        None
+    };
+    families::serve(cluster.clone());
     let machine = machine(&fixture, env);
     let jobs_arg = jobs.to_string();
     let out_arg = out_dir.map(|dir| dir.to_string_lossy().into_owned());
@@ -150,6 +151,7 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
             &mut err,
         ))
         .code();
+    families::serve(None);
     let stdout = String::from_utf8(out).map_err(|e| format!("{name}: stdout is not UTF-8: {e}"))?;
     let stderr = String::from_utf8(err).map_err(|e| format!("{name}: stderr is not UTF-8: {e}"))?;
     let report: Report = serde_json::from_str(&stdout)
@@ -161,7 +163,12 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
         ));
     }
 
-    let violations = violations(&report)?;
+    let mut violations = violations(&report)?;
+    let mut kube_requests = Vec::new();
+    if let Some(cluster) = &cluster {
+        violations.extend(cluster.audit(&report.actions));
+        kube_requests = cluster.requests();
+    }
     // Two things differ between machines and releases: where the checkout is, and the version of rdy.
     let version_line = format!("rdy {}", report.producer.version);
     let terminal: String = stderr
@@ -179,6 +186,81 @@ pub fn run_env_into(env: &str, jobs: usize, out_dir: Option<&Path>) -> Result<En
         report,
         terminal,
         violations,
+        kube_requests,
+    })
+}
+
+/// The hooks a user cannot reach, from a manifest's `[run]` table: the pinned clock, run id and deadline,
+/// the harness families, and a stderr that is no terminal and 100 columns wide.
+pub fn hooks_for(pins: &RunPins) -> Result<RunHooks, String> {
+    let mut hooks = RunHooks::default();
+    hooks.clock = Some(pinned_time(
+        pins.clock.as_deref().unwrap_or("2026-01-01T00:00:00Z"),
+    )?);
+    hooks.run_id = Some(
+        pins.run_id
+            .clone()
+            .unwrap_or_else(|| "00000000-0000-4000-8000-000000000000".to_owned()),
+    );
+    hooks.deadline = Some(Duration::from_millis(
+        pins.deadline_ms.unwrap_or(DEFAULT_DEADLINE_MS),
+    ));
+    hooks.families = Some(families::registry);
+    // The terminal text is a golden: no colour and one width, whatever runs the test. The variables are
+    // pinned too, so `CLICOLOR_FORCE` or `COLUMNS` in the developer's shell cannot reach a golden.
+    hooks.stderr_terminal = Some(false);
+    hooks.stderr_columns = Some(100);
+    hooks.style_env = Some(StyleEnv::default());
+    Ok(hooks)
+}
+
+/// What `rdy` did with one command line.
+pub struct Cli {
+    /// The exit code.
+    pub code: i32,
+    /// Standard output.
+    pub stdout: String,
+    /// Standard error, without colour.
+    pub stderr: String,
+}
+
+/// Runs `rdy <args>` in process on the machine of the environment `env`, with the same pinned hooks as
+/// `run_env`. The caller writes any file the arguments name. Nothing else is read from the real machine.
+/// An env whose `kube` cap is true serves its scripted cluster here too, as in `run_env`. The INV-14 audit
+/// needs the report's action log, so it runs in `run_env` over the same env, not here.
+pub fn run_cli(env: &str, args: &[&str]) -> Result<Cli, String> {
+    let root = fixtures_dir();
+    let name = format!("envs/{env}");
+    let fixture = Fixture::load(&root, &name).map_err(|e| format!("{name}: {e}"))?;
+    let hooks = hooks_for(&fixture.manifest().run)?;
+    let cluster = if fixture.manifest().caps.kube {
+        Some(ScriptedCluster::new(fixture.replay()).map_err(|e| format!("{name}: {e}"))?)
+    } else {
+        None
+    };
+    families::serve(cluster);
+    let machine = machine(&fixture, env);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .map_err(|e| format!("cannot build a runtime: {e}"))?;
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let argv = std::iter::once("rdy").chain(args.iter().copied());
+    let code = runtime
+        .block_on(rdy_cli::run(
+            argv,
+            Arc::new(machine),
+            hooks,
+            &mut out,
+            &mut err,
+        ))
+        .code();
+    families::serve(None);
+    Ok(Cli {
+        code: code.into(),
+        stdout: String::from_utf8(out).map_err(|e| format!("stdout is not UTF-8: {e}"))?,
+        stderr: String::from_utf8(err).map_err(|e| format!("stderr is not UTF-8: {e}"))?,
     })
 }
 

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-classes-cut-no-match"
+summary = "A cut class list where the first page has no class for the wanted controller"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

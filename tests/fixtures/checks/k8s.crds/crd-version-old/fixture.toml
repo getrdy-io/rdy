@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-version-old"
+summary = "The definitions are installed at v1beta1 only, and the spec needs v1"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

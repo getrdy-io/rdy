@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-scaler-helm"
+summary = "One node, and a Helm-named cluster autoscaler Deployment found by its label"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

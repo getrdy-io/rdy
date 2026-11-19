@@ -53,13 +53,25 @@
     },
     {
       "at_ms": 0,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "kube",
+      "method": "GET",
+      "outcome": "ok",
+      "path": "/version",
+      "seq": 6,
+      "status": 200,
+      "via_proxy": null
+    },
+    {
+      "at_ms": 0,
       "bytes": 192,
       "check": "host.os",
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/os-release",
-      "seq": 6,
+      "seq": 7,
       "truncated": false
     },
     {
@@ -69,7 +81,7 @@
       "duration_ms": 0,
       "kind": "native",
       "outcome": "ok",
-      "seq": 7
+      "seq": 8
     },
     {
       "at_ms": 0,
@@ -79,7 +91,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/kernel/osrelease",
-      "seq": 8,
+      "seq": 9,
       "truncated": false
     },
     {
@@ -90,7 +102,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/crypto/fips_enabled",
-      "seq": 9,
+      "seq": 10,
       "truncated": false
     },
     {
@@ -101,15 +113,6 @@
       "kind": "stat",
       "outcome": "ok",
       "path": "/run/systemd/system",
-      "seq": 10
-    },
-    {
-      "at_ms": 0,
-      "check": "host.os",
-      "duration_ms": 0,
-      "kind": "stat",
-      "outcome": "ok",
-      "path": "/.dockerenv",
       "seq": 11
     },
     {
@@ -118,8 +121,17 @@
       "duration_ms": 0,
       "kind": "stat",
       "outcome": "ok",
-      "path": "/run/.containerenv",
+      "path": "/.dockerenv",
       "seq": 12
+    },
+    {
+      "at_ms": 0,
+      "check": "host.os",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv",
+      "seq": 13
     },
     {
       "at_ms": 0,
@@ -128,7 +140,7 @@
       "kind": "env",
       "name": "KUBERNETES_SERVICE_HOST",
       "outcome": "ok",
-      "seq": 13
+      "seq": 14
     },
     {
       "at_ms": 0,
@@ -138,7 +150,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/meminfo",
-      "seq": 14,
+      "seq": 15,
       "truncated": false
     },
     {
@@ -149,7 +161,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/cgroup",
-      "seq": 15,
+      "seq": 16,
       "truncated": false
     },
     {
@@ -160,7 +172,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/mountinfo",
-      "seq": 16,
+      "seq": 17,
       "truncated": false
     },
     {
@@ -171,16 +183,6 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max",
-      "seq": 17
-    },
-    {
-      "at_ms": 0,
-      "check": "host.memory",
-      "duration_ms": 0,
-      "error": "not found. Fix: check that the file, directory or program exists on this machine",
-      "kind": "read",
-      "outcome": "failed",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max",
       "seq": 18
     },
     {
@@ -190,7 +192,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/system.slice/memory.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max",
       "seq": 19
     },
     {
@@ -200,7 +202,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/memory.max",
+      "path": "/sys/fs/cgroup/system.slice/memory.max",
       "seq": 20
     },
     {
@@ -210,7 +212,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max",
+      "path": "/sys/fs/cgroup/memory.max",
       "seq": 21
     },
     {
@@ -220,7 +222,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max",
       "seq": 22
     },
     {
@@ -230,7 +232,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/system.slice/memory.swap.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max",
       "seq": 23
     },
     {
@@ -240,8 +242,18 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read",
       "outcome": "failed",
-      "path": "/sys/fs/cgroup/memory.swap.max",
+      "path": "/sys/fs/cgroup/system.slice/memory.swap.max",
       "seq": 24
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/sys/fs/cgroup/memory.swap.max",
+      "seq": 25
     },
     {
       "at_ms": 0,
@@ -251,7 +263,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/cpuinfo",
-      "seq": 25,
+      "seq": 26,
       "truncated": false
     },
     {
@@ -262,7 +274,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/devices/system/cpu/online",
-      "seq": 26,
+      "seq": 27,
       "truncated": false
     },
     {
@@ -273,7 +285,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/status",
-      "seq": 27,
+      "seq": 28,
       "truncated": false
     },
     {
@@ -284,7 +296,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/cgroup",
-      "seq": 28,
+      "seq": 29,
       "truncated": false
     },
     {
@@ -295,17 +307,6 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/mountinfo",
-      "seq": 29,
-      "truncated": false
-    },
-    {
-      "at_ms": 0,
-      "bytes": 11,
-      "check": "host.cpu",
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
       "seq": 30,
       "truncated": false
     },
@@ -316,7 +317,7 @@
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
       "seq": 31,
       "truncated": false
     },
@@ -327,8 +328,19 @@
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
       "seq": 32,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 11,
+      "check": "host.cpu",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "seq": 33,
       "truncated": false
     },
     {
@@ -339,7 +351,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/sys/fs/cgroup/cpu.max",
-      "seq": 33
+      "seq": 34
     },
     {
       "api": "uname",
@@ -348,7 +360,7 @@
       "duration_ms": 0,
       "kind": "native",
       "outcome": "ok",
-      "seq": 34
+      "seq": 35
     },
     {
       "api": "statvfs",
@@ -358,7 +370,7 @@
       "kind": "native",
       "outcome": "ok",
       "path": "/var/lib/acme",
-      "seq": 35
+      "seq": 36
     },
     {
       "at_ms": 0,
@@ -368,7 +380,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/mountinfo",
-      "seq": 36,
+      "seq": 37,
       "truncated": false
     },
     {
@@ -378,7 +390,7 @@
       "duration_ms": 0,
       "kind": "native",
       "outcome": "ok",
-      "seq": 37
+      "seq": 38
     },
     {
       "at_ms": 0,
@@ -388,7 +400,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/os-release",
-      "seq": 38,
+      "seq": 39,
       "truncated": false
     },
     {
@@ -399,7 +411,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/modules",
-      "seq": 39,
+      "seq": 40,
       "truncated": false
     },
     {
@@ -410,7 +422,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.dep",
-      "seq": 40,
+      "seq": 41,
       "truncated": false
     },
     {
@@ -421,7 +433,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/lib/modules/5.14.0-362.el9.x86_64/modules.builtin",
-      "seq": 41,
+      "seq": 42,
       "truncated": false
     },
     {
@@ -432,7 +444,7 @@
       "kind": "stat",
       "outcome": "ok",
       "path": "/sys/kernel/btf/vmlinux",
-      "seq": 42
+      "seq": 43
     },
     {
       "at_ms": 0,
@@ -442,7 +454,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/cgroup",
-      "seq": 43,
+      "seq": 44,
       "truncated": false
     },
     {
@@ -453,7 +465,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/self/mountinfo",
-      "seq": 44,
+      "seq": 45,
       "truncated": false
     },
     {
@@ -464,17 +476,6 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/fs/cgroup/cgroup.controllers",
-      "seq": 45,
-      "truncated": false
-    },
-    {
-      "at_ms": 0,
-      "bytes": 19,
-      "check": "host.cgroups",
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "path": "/sys/fs/cgroup/cgroup.subtree_control",
       "seq": 46,
       "truncated": false
     },
@@ -485,8 +486,19 @@
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers",
+      "path": "/sys/fs/cgroup/cgroup.subtree_control",
       "seq": 47,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 19,
+      "check": "host.cgroups",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers",
+      "seq": 48,
       "truncated": false
     },
     {
@@ -497,7 +509,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control",
-      "seq": 48,
+      "seq": 49,
       "truncated": false
     },
     {
@@ -508,7 +520,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/cgroups",
-      "seq": 49,
+      "seq": 50,
       "truncated": false
     },
     {
@@ -519,7 +531,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/cmdline",
-      "seq": 50,
+      "seq": 51,
       "truncated": false
     },
     {
@@ -530,7 +542,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/os-release",
-      "seq": 51,
+      "seq": 52,
       "truncated": false
     },
     {
@@ -541,7 +553,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/proc/device-tree/model",
-      "seq": 52
+      "seq": 53
     },
     {
       "at_ms": 0,
@@ -551,7 +563,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/kernel/shmmax",
-      "seq": 53,
+      "seq": 54,
       "truncated": false
     },
     {
@@ -562,7 +574,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/net/ipv4/ip_forward",
-      "seq": 54,
+      "seq": 55,
       "truncated": false
     },
     {
@@ -573,7 +585,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/net/ipv4/tcp_rmem",
-      "seq": 55,
+      "seq": 56,
       "truncated": false
     },
     {
@@ -584,7 +596,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/vm/max_map_count",
-      "seq": 56,
+      "seq": 57,
       "truncated": false
     },
     {
@@ -595,16 +607,6 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/etc/sysctl.d",
-      "seq": 57
-    },
-    {
-      "at_ms": 0,
-      "check": "host.sysctl",
-      "duration_ms": 0,
-      "error": "not found. Fix: check that the file, directory or program exists on this machine",
-      "kind": "read_dir",
-      "outcome": "failed",
-      "path": "/run/sysctl.d",
       "seq": 58
     },
     {
@@ -614,8 +616,18 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read_dir",
       "outcome": "failed",
-      "path": "/usr/local/lib/sysctl.d",
+      "path": "/run/sysctl.d",
       "seq": 59
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/usr/local/lib/sysctl.d",
+      "seq": 60
     },
     {
       "at_ms": 0,
@@ -625,7 +637,7 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/usr/lib/sysctl.d",
-      "seq": 60
+      "seq": 61
     },
     {
       "at_ms": 0,
@@ -635,7 +647,7 @@
       "kind": "read_dir",
       "outcome": "failed",
       "path": "/lib/sysctl.d",
-      "seq": 61
+      "seq": 62
     },
     {
       "at_ms": 0,
@@ -645,7 +657,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/usr/lib/sysctl.d/50-acme-net.conf",
-      "seq": 62,
+      "seq": 63,
       "truncated": false
     },
     {
@@ -656,7 +668,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/sysctl.d/90-acme.conf",
-      "seq": 63,
+      "seq": 64,
       "truncated": false
     },
     {
@@ -667,7 +679,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/etc/sysctl.conf",
-      "seq": 64
+      "seq": 65
     },
     {
       "at_ms": 0,
@@ -677,7 +689,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/systemd/system.conf",
-      "seq": 65,
+      "seq": 66,
       "truncated": false
     },
     {
@@ -688,16 +700,6 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/etc/systemd/system.conf.d",
-      "seq": 66
-    },
-    {
-      "at_ms": 0,
-      "check": "host.sysctl",
-      "duration_ms": 0,
-      "error": "not found. Fix: check that the file, directory or program exists on this machine",
-      "kind": "read_dir",
-      "outcome": "failed",
-      "path": "/run/systemd/system.conf.d",
       "seq": 67
     },
     {
@@ -707,7 +709,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read_dir",
       "outcome": "failed",
-      "path": "/usr/local/lib/systemd/system.conf.d",
+      "path": "/run/systemd/system.conf.d",
       "seq": 68
     },
     {
@@ -717,7 +719,7 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read_dir",
       "outcome": "failed",
-      "path": "/usr/lib/systemd/system.conf.d",
+      "path": "/usr/local/lib/systemd/system.conf.d",
       "seq": 69
     },
     {
@@ -727,8 +729,18 @@
       "error": "not found. Fix: check that the file, directory or program exists on this machine",
       "kind": "read_dir",
       "outcome": "failed",
-      "path": "/lib/systemd/system.conf.d",
+      "path": "/usr/lib/systemd/system.conf.d",
       "seq": 70
+    },
+    {
+      "at_ms": 0,
+      "check": "host.sysctl",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read_dir",
+      "outcome": "failed",
+      "path": "/lib/systemd/system.conf.d",
+      "seq": 71
     },
     {
       "at_ms": 0,
@@ -738,7 +750,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/systemd/system.conf.d/10-acme.conf",
-      "seq": 71,
+      "seq": 72,
       "truncated": false
     },
     {
@@ -749,7 +761,7 @@
       "kind": "native",
       "outcome": "ok",
       "resource": "nofile",
-      "seq": 72
+      "seq": 73
     },
     {
       "at_ms": 0,
@@ -759,7 +771,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/fs/nr_open",
-      "seq": 73,
+      "seq": 74,
       "truncated": false
     },
     {
@@ -770,7 +782,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/fs/file-max",
-      "seq": 74,
+      "seq": 75,
       "truncated": false
     },
     {
@@ -781,7 +793,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/fs/selinux/enforce",
-      "seq": 75,
+      "seq": 76,
       "truncated": false
     },
     {
@@ -792,7 +804,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/selinux/config",
-      "seq": 76,
+      "seq": 77,
       "truncated": false
     },
     {
@@ -803,7 +815,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/var/log/audit/audit.log",
-      "seq": 77,
+      "seq": 78,
       "truncated": false
     },
     {
@@ -814,7 +826,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/sys/module/apparmor/parameters/enabled",
-      "seq": 78
+      "seq": 79
     },
     {
       "at_ms": 0,
@@ -826,7 +838,7 @@
       "outcome": "failed",
       "port": 123,
       "proto": "udp",
-      "seq": 79
+      "seq": 80
     },
     {
       "argv": [
@@ -846,7 +858,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "timedatectl",
-      "seq": 80,
+      "seq": 81,
       "stdout_bytes": 45,
       "truncated": false
     },
@@ -864,7 +876,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "chronyc",
-      "seq": 81,
+      "seq": 82,
       "stdout_bytes": 127,
       "truncated": false
     },
@@ -876,7 +888,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/tcp",
-      "seq": 82,
+      "seq": 83,
       "truncated": false
     },
     {
@@ -887,7 +899,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/tcp6",
-      "seq": 83,
+      "seq": 84,
       "truncated": false
     },
     {
@@ -898,7 +910,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/udp",
-      "seq": 84,
+      "seq": 85,
       "truncated": false
     },
     {
@@ -909,7 +921,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/udp6",
-      "seq": 85,
+      "seq": 86,
       "truncated": false
     },
     {
@@ -920,7 +932,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/net/ipv4/ip_local_port_range",
-      "seq": 86,
+      "seq": 87,
       "truncated": false
     },
     {
@@ -931,7 +943,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/sys/net/ipv4/ip_local_reserved_ports",
-      "seq": 87,
+      "seq": 88,
       "truncated": false
     },
     {
@@ -941,15 +953,6 @@
       "kind": "read_link",
       "outcome": "ok",
       "path": "/proc/self/ns/net",
-      "seq": 88
-    },
-    {
-      "at_ms": 0,
-      "check": "host.ports",
-      "duration_ms": 0,
-      "kind": "stat",
-      "outcome": "ok",
-      "path": "/.dockerenv",
       "seq": 89
     },
     {
@@ -958,8 +961,17 @@
       "duration_ms": 0,
       "kind": "stat",
       "outcome": "ok",
-      "path": "/run/.containerenv",
+      "path": "/.dockerenv",
       "seq": 90
+    },
+    {
+      "at_ms": 0,
+      "check": "host.ports",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/.containerenv",
+      "seq": 91
     },
     {
       "at_ms": 0,
@@ -968,7 +980,7 @@
       "kind": "env",
       "name": "KUBERNETES_SERVICE_HOST",
       "outcome": "ok",
-      "seq": 91
+      "seq": 92
     },
     {
       "at_ms": 0,
@@ -978,7 +990,7 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/proc",
-      "seq": 92
+      "seq": 93
     },
     {
       "at_ms": 0,
@@ -988,17 +1000,6 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/1/comm",
-      "seq": 93,
-      "truncated": false
-    },
-    {
-      "at_ms": 0,
-      "bytes": 5,
-      "check": "host.security_agents",
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "path": "/proc/612/comm",
       "seq": 94,
       "truncated": false
     },
@@ -1009,7 +1010,7 @@
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/proc/640/comm",
+      "path": "/proc/612/comm",
       "seq": 95,
       "truncated": false
     },
@@ -1020,8 +1021,19 @@
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "path": "/proc/733/comm",
+      "path": "/proc/640/comm",
       "seq": 96,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 5,
+      "check": "host.security_agents",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/733/comm",
+      "seq": 97,
       "truncated": false
     },
     {
@@ -1032,7 +1044,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/901/comm",
-      "seq": 97,
+      "seq": 98,
       "truncated": false
     },
     {
@@ -1043,7 +1055,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/902/comm",
-      "seq": 98,
+      "seq": 99,
       "truncated": false
     },
     {
@@ -1054,7 +1066,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/var/lib/kubelet/config.yaml",
-      "seq": 99,
+      "seq": 100,
       "truncated": false
     },
     {
@@ -1064,7 +1076,7 @@
       "kind": "env",
       "name": "XDG_RUNTIME_DIR",
       "outcome": "ok",
-      "seq": 100
+      "seq": 101
     },
     {
       "at_ms": 0,
@@ -1074,7 +1086,7 @@
       "kind": "stat",
       "outcome": "ok",
       "path": "/run/containerd/containerd.sock",
-      "seq": 101
+      "seq": 102
     },
     {
       "argv": [
@@ -1088,7 +1100,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "containerd",
-      "seq": 102,
+      "seq": 103,
       "stdout_bytes": 93,
       "truncated": false
     },
@@ -1100,7 +1112,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/etc/containerd/config.toml",
-      "seq": 103,
+      "seq": 104,
       "truncated": false
     },
     {
@@ -1111,7 +1123,7 @@
       "kind": "read_dir",
       "outcome": "failed",
       "path": "/etc/systemd/system/containerd.service.d",
-      "seq": 104
+      "seq": 105
     },
     {
       "at_ms": 0,
@@ -1121,7 +1133,7 @@
       "kind": "stat",
       "outcome": "ok",
       "path": "/run/firewalld",
-      "seq": 105
+      "seq": 106
     },
     {
       "argv": [
@@ -1135,7 +1147,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "firewall-cmd",
-      "seq": 106,
+      "seq": 107,
       "stdout_bytes": 8,
       "truncated": false
     },
@@ -1151,7 +1163,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "firewall-cmd",
-      "seq": 107,
+      "seq": 108,
       "stdout_bytes": 55,
       "truncated": false
     },
@@ -1163,7 +1175,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/route",
-      "seq": 108,
+      "seq": 109,
       "truncated": false
     },
     {
@@ -1174,7 +1186,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/ipv6_route",
-      "seq": 109,
+      "seq": 110,
       "truncated": false
     },
     {
@@ -1190,7 +1202,7 @@
       "kind": "exec",
       "outcome": "ok",
       "program": "firewall-cmd",
-      "seq": 110,
+      "seq": 111,
       "stdout_bytes": 248,
       "truncated": false
     },
@@ -1202,7 +1214,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/etc/firewalld/services/ssh.xml",
-      "seq": 111
+      "seq": 112
     },
     {
       "at_ms": 0,
@@ -1212,7 +1224,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/usr/lib/firewalld/services/ssh.xml",
-      "seq": 112,
+      "seq": 113,
       "truncated": false
     },
     {
@@ -1223,7 +1235,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/etc/firewalld/direct.xml",
-      "seq": 113
+      "seq": 114
     },
     {
       "at_ms": 0,
@@ -1233,7 +1245,7 @@
       "kind": "read",
       "outcome": "failed",
       "path": "/etc/ufw/ufw.conf",
-      "seq": 114
+      "seq": 115
     },
     {
       "answers": 1,
@@ -1243,7 +1255,7 @@
       "host": "web.acme.test",
       "kind": "lookup",
       "outcome": "ok",
-      "seq": 115
+      "seq": 116
     },
     {
       "addr": "192.0.2.1",
@@ -1254,7 +1266,7 @@
       "kind": "connect",
       "outcome": "ok",
       "port": 8080,
-      "seq": 116,
+      "seq": 117,
       "via_proxy": null
     },
     {
@@ -1265,7 +1277,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/route",
-      "seq": 117,
+      "seq": 118,
       "truncated": false
     },
     {
@@ -1276,7 +1288,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/ipv6_route",
-      "seq": 118,
+      "seq": 119,
       "truncated": false
     },
     {
@@ -1287,7 +1299,7 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/sys/class/net",
-      "seq": 119
+      "seq": 120
     },
     {
       "at_ms": 0,
@@ -1297,7 +1309,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/mtu",
-      "seq": 120,
+      "seq": 121,
       "truncated": false
     },
     {
@@ -1308,7 +1320,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/operstate",
-      "seq": 121,
+      "seq": 122,
       "truncated": false
     },
     {
@@ -1319,8 +1331,44 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/type",
-      "seq": 122,
+      "seq": 123,
       "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "k8s.version",
+      "duration_ms": 0,
+      "kind": "kube",
+      "method": "GET",
+      "outcome": "ok",
+      "path": "/apis",
+      "seq": 124,
+      "status": 200,
+      "via_proxy": null
+    },
+    {
+      "at_ms": 0,
+      "check": "k8s.version",
+      "duration_ms": 0,
+      "kind": "kube",
+      "method": "POST",
+      "outcome": "ok",
+      "path": "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+      "seq": 125,
+      "status": 201,
+      "via_proxy": null
+    },
+    {
+      "at_ms": 0,
+      "check": "k8s.version",
+      "duration_ms": 0,
+      "kind": "kube",
+      "method": "GET",
+      "outcome": "ok",
+      "path": "/api/v1/nodes",
+      "seq": 126,
+      "status": 200,
+      "via_proxy": null
     }
   ],
   "actions_dropped": {},
@@ -1340,6 +1388,13 @@
       "hint": null,
       "name": null,
       "need": "network"
+    },
+    {
+      "available": true,
+      "detail": "acme-fixture, https://k8s.acme.test:6443, user acme-reader",
+      "hint": null,
+      "name": null,
+      "need": "kube_context"
     }
   ],
   "checks": [
@@ -2126,6 +2181,45 @@
       "started_ms": 0,
       "status": "pass",
       "truncated": false
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "max": "1.31",
+        "min": "1.27",
+        "over_max": "warn"
+      },
+      "family": "k8s",
+      "fix": null,
+      "fix_source": null,
+      "id": "k8s.version",
+      "key": "k8s.version",
+      "message": "Server v1.29.4, 1.27 to 1.31 needed",
+      "name": null,
+      "needs": [
+        {
+          "hard": true,
+          "met": true,
+          "name": null,
+          "need": "kube_context"
+        }
+      ],
+      "notes": [],
+      "observed": {
+        "distribution": "vanilla",
+        "git_version": "v1.29.4",
+        "kubelet_minors": [
+          "1.29"
+        ],
+        "kubernetes": "1.29.4",
+        "nodes_read": 3
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
     }
   ],
   "complete": true,
@@ -2146,7 +2240,14 @@
   "identity": {
     "elevated": true,
     "euid": 0,
-    "kube": null,
+    "kube": {
+      "context": "acme-fixture",
+      "exec_plugin": null,
+      "insecure_tls": false,
+      "server": "https://k8s.acme.test:6443",
+      "user": "acme-reader",
+      "user_verified": false
+    },
     "user": null
   },
   "interrupted": false,
@@ -2194,8 +2295,8 @@
     "file_name": "spec.yaml",
     "product": "acme-platform",
     "serial": null,
-    "sha256": "5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6",
-    "size_bytes": 1672,
+    "sha256": "6fc76fd59ed798faf72764992f3e4cf5dff7d53ebffd7c1a598922b7589cd284",
+    "size_bytes": 1804,
     "version": ">=1.0"
   },
   "summary": {
@@ -2203,11 +2304,11 @@
     "error": 0,
     "not_applicable": 0,
     "optional_not_run": 0,
-    "pass": 15,
+    "pass": 16,
     "required_not_run": 0,
     "skipped": 0,
     "timeout": 0,
-    "total": 15,
+    "total": 16,
     "warn": 0
   },
   "verdict": "ready",

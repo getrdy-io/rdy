@@ -1,0 +1,16 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "nodes"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "evaluationError": "webhook authorizer timed out"
+      }
+    }
+  ]
+}

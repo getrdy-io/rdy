@@ -224,13 +224,25 @@ another OS with a line on stderr. Every M1 environment is a Linux machine, so th
 and macOS and Windows skip them. M2-130 adds a `RunHooks` OS override, `None` in the shipped binary, and then
 every environment runs on all five legs (correction-48).
 
+An environment may hold a cluster (M1-185). When its `kube` cap is true, the harness serves the env's `api/`
+tree as a scripted cluster: the kube mock of `rdy-checks-k8s`, behind that crate's `testing` feature, stands
+where the kubeconfig and the socket would be. The read-only guard stays in front of it, so a request the guard
+refuses never reaches the files, and after the run the harness audits it (INV-14: every request the mock saw
+passes the guard's rules and pairs with one sent entry of the run's action log, cited by the check that sent it,
+and the files answered every request). A violation fails the env. A `base` env's `api/` files are replaced by
+path like any other file, so a child env changes one answer by writing the same file name. An env whose `kube`
+cap is false has no cluster and no kubeconfig, so its k8s checks are skipped `missing_need`. The `testing`
+feature is a dev-dependency feature of `rdy`: a release build with it does not compile, and CI checks that the
+binary's feature graph does not hold it. `scripts/gen-k8s-env-fixtures.py` writes the trees of `all-pass`,
+`warnings-only` and `all-block` (`--check` fails on drift).
+
 | Env | Milestone | Story | Verdict, exit |
 | --- | --- | --- | --- |
 | `all-pass` | M1 | RHEL 9 VM, 32 GiB nominal showing 31.3 GiB, xfs, direct egress, vanilla three-node cluster (the cluster from M1-185) | `ready`, 0 |
 | `warnings-only` | M1 | Swap on, port inside the ephemeral range, one `NO_PROXY` gap, no default StorageClass (M1-185) | `ready_with_warnings`, 1 |
 | `all-block` | M1 | 8 GiB RAM, disk full, 6443 held, egress refused, TLS interception (M2-152), cluster too old, RBAC denied (M1-185) | `not_ready`, 2 |
 | `no-privileges` | M1 | Not root, audit log unreadable, no kubeconfig: partial results and `missing_need` skips | `not_ready`, 2 |
-| `timeouts` | M1 | A black-hole endpoint and a hung `statvfs`; M1-185 adds a slow `/version` while the cluster client is built (correction-50, correction-58) | `not_ready`, 2 |
+| `timeouts` | M1 | A black-hole endpoint and a hung `statvfs`; M1-187 adds a slow `/version` while the cluster client is built, from M1-185's `_kube/slow-version` tree (correction-50, correction-58, correction-59) | `not_ready`, 2 |
 | `net-airgapped` | M2 (M2-153), first to add back | No default route, internal DNS only, public endpoints refused, mirror reachable; runs `acme-airgap-host.yaml` | per spec |
 | `host-ubuntu2204-container` | M2 | `memory.max` 8 GiB on a 64 GiB host, `cpu.max` quota, overlayfs, `noexec` tmpfs | per spec |
 | `net-corp-proxy` | M2 | 407 Basic proxy, CONNECT ok, `NO_PROXY` gap, private-CA interception | `not_ready`, 2 |

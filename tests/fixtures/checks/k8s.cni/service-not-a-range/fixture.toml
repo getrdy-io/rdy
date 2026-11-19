@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-service-not-a-range"
+summary = "kubeadm-config holds a service subnet that is not a range"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true
