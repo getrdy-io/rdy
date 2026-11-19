@@ -42,9 +42,9 @@ and nothing else: a signature that does not match is still refused. Each run tha
 banner first and again above the verdict, and marks the reports. The rest of this page uses it.
 
 The next two runs come from synthetic test machines recorded in the test suite. They are not from a
-live host, and the spec files `not-ready.yaml` and `ready.yaml` are test fixtures, not files in
-`examples/`. Your output will differ. Problems come first, each with its fix under it. Passing checks
-come last.
+live host or cluster, and the spec files `not-ready.yaml` and `ready.yaml` are test fixtures, not
+files in `examples/`. Your output will differ. Problems come first, each with its fix under it.
+Passing checks come last.
 
 ```console skip=page-test transcript=tests/fixtures/readme/run-not-ready.txt
 $ rdy run not-ready.yaml --allow-unsigned --no-report
@@ -54,11 +54,13 @@ The spec decides which files rdy reads and which hosts it contacts.
 Run it only if you wrote it yourself or got it from the vendor in a way you trust.
 Every report from this run is marked UNSIGNED SPEC.
 
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
 rdy <version>
 spec    acme-platform >=1.0   (not-ready.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
 host    all-block.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
 
   BLOCK    host.memory             7.8 GiB found, 32 GiB needed; only 6.6 GiB available, 16 GiB
                                    wanted, the box is busy
@@ -77,6 +79,17 @@ user    uid 0 (root)
                                    listens there, or a firewall rejects it. Check the port in the
                                    spec, and ask the network team to allow tcp/8080 to web.acme.test
                                    from this machine.
+  BLOCK    k8s.version             Server v1.24.9 is older than the 1.27 minimum
+                                   fix from the spec file (not verified): Upgrade the cluster to
+                                   Kubernetes 1.27 or newer.
+  BLOCK    k8s.rbac                The kubeconfig identity cannot `create namespaces`: not allowed
+                                   fix from the spec file (not verified): Run the install with an
+                                   identity that can create namespaces.
+  WARN     k8s.storageclass        not verified: could not read the CSINode list
+                                   missing grants: list csinodes (storage.k8s.io)
+                                   fix from rdy: Ask the cluster admin to grant this identity: list
+                                   csinodes (storage.k8s.io). Check each with `kubectl auth can-i
+                                   list csinodes.storage.k8s.io`.
   PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
   PASS     host.cpu                8 vCPUs found, 8 needed
   PASS     host.kernel             Kernel `5.14.0-362.el9.x86_64` meets the minimum of 5.4. All 3
@@ -97,7 +110,7 @@ user    uid 0 (root)
   PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
   PASS     net.mtu                 `eth0` has MTU 1500.
 
-4 blocks, 0 warnings, 11 passed
+6 blocks, 1 warning, 11 passed
 
 WARNING: UNSIGNED SPEC
 NOT READY
@@ -105,7 +118,8 @@ $ echo $?
 2
 ```
 
-The team resizes the disk, frees the port and opens the firewall rule. They run it again.
+The team adds RAM, resizes the disk, frees the port and opens the firewall rule. They upgrade the
+cluster and grant the install identity what it lacked. They run it again.
 
 ```console skip=page-test transcript=tests/fixtures/readme/run-ready.txt
 $ rdy run ready.yaml --allow-unsigned --no-report
@@ -115,11 +129,13 @@ The spec decides which files rdy reads and which hosts it contacts.
 Run it only if you wrote it yourself or got it from the vendor in a way you trust.
 Every report from this run is marked UNSIGNED SPEC.
 
+Cluster: acme-fixture, https://k8s.acme.test:6443, user acme-reader
 rdy <version>
 spec    acme-platform >=1.0   (ready.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
 host    all-pass.example   rhel 9.3   x86_64
 user    uid 0 (root)
+cluster acme-fixture, https://k8s.acme.test:6443, user acme-reader
 
   PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
   PASS     host.memory             31.3 GiB found, 32 GiB needed, inside the 5% tolerance
@@ -145,8 +161,9 @@ user    uid 0 (root)
   PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
   PASS     net.egress              1 of 1 endpoints reachable
   PASS     net.mtu                 `eth0` has MTU 1500.
+  PASS     k8s.version             Server v1.29.4, 1.27 to 1.31 needed
 
-0 blocks, 0 warnings, 15 passed
+0 blocks, 0 warnings, 16 passed
 
 WARNING: UNSIGNED SPEC
 READY
