@@ -151,15 +151,28 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
 /// is read from the checks' own `started_ms + duration_ms`, which come from the paused tokio clock, before
 /// the golden normaliser zeroes them (`run.duration_ms` is wall clock and proves nothing here). No real
 /// sleep and no real socket is involved, so a slow runner cannot change the result. At `jobs = 1` the
-/// checks run one after the other, so virtual time is the sum (5 s, then the black hole's 3 s). At
-/// `jobs = 8` both start at once.
+/// checks run one after the other, so virtual time is the sum (10 s for the cluster probe, then 5 s, then the
+/// black hole's 3 s). At `jobs = 8` both start at once, after the probe.
+///
+/// M1-187: the env also holds a cluster whose `/version` does not answer while the cluster client is
+/// built (`api/version.json`, `delay_ms` of 10 minutes). The engine cuts the family probe at
+/// `FAMILY_PROBE_LIMIT` (10 s) and leaves the `kube_context` need unmet, so `k8s.version` is skipped
+/// `missing_need` in the `required_not_run` bucket and never starts a request of its own. Every check
+/// starts after the probe, so the run ends inside `deadline_ms` only because the limit is shorter than
+/// the 10 minute delay. What is proven: the one `GET /version` was dropped at the limit and logged as
+/// `timeout`, and nothing else asked the cluster. The mock's delay is a tokio sleep, so this does not
+/// by itself show that no worker thread was blocked (the family-level test in rdy-checks-k8s does that
+/// on a one-thread runtime). The INV-14 audit (`run.violations`) passes.
 #[test]
 fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestResult {
-    use rdy_spec::result::Status;
+    use rdy_spec::result::{Bucket, SkipKind, Status};
     if Fixture::load(&fixtures_dir(), "envs/timeouts")?.os() != current_os() {
         eprintln!("env_harness: skipping timeouts: it is a Linux machine");
         return Ok(());
     }
+    let probe_ms = u64::try_from(rdy_engine::family::FAMILY_PROBE_LIMIT.as_millis())?;
+    // `started_ms` loses the real gap before the scheduler's origin, so allow 100 ms below the limit.
+    let probe_low = probe_ms - 100;
     for jobs in [1, 8] {
         let run = driver::run_env("timeouts", jobs)?;
         let report = &run.report;
@@ -192,6 +205,47 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             egress.message
         );
         assert!(egress.message.contains("blackhole"), "{}", egress.message);
+        // M1-187: the cluster client is built before any check runs, and the `/version` never answers, so
+        // the engine cuts the family probe at its limit. No check starts before that. The request was
+        // dropped at the limit and logged as `timeout`; it was the only one.
+        assert_eq!(run.kube_requests, ["GET /version"], "jobs {jobs}");
+        let actions = serde_json::to_value(&report.actions)?;
+        let kube_actions: Vec<_> = actions
+            .as_array()
+            .ok_or("actions is not an array")?
+            .iter()
+            .filter(|a| a.get("kind").and_then(|k| k.as_str()) == Some("kube"))
+            .collect();
+        assert_eq!(kube_actions.len(), 1, "jobs {jobs}: {kube_actions:?}");
+        assert_eq!(kube_actions[0]["path"], "/version", "jobs {jobs}");
+        assert_eq!(kube_actions[0]["outcome"], "timeout", "jobs {jobs}");
+        let version = check("k8s.version")?;
+        assert_eq!(version.status, Status::Skipped, "jobs {jobs}");
+        assert_eq!(
+            version.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "jobs {jobs}"
+        );
+        assert_eq!(
+            version.bucket,
+            Bucket::RequiredNotRun,
+            "jobs {jobs}: {}",
+            version.message
+        );
+        assert!(
+            version
+                .needs
+                .iter()
+                .any(|n| n.need == rdy_spec::result::Need::KubeContext && !n.met),
+            "jobs {jobs}: {:?}",
+            version.needs
+        );
+        assert_eq!(version.duration_ms, 0, "jobs {jobs}: the check never ran");
+        assert!(
+            run.violations.is_empty(),
+            "jobs {jobs}: INV-14 audit: {:?}",
+            run.violations
+        );
         let end = report
             .checks
             .iter()
@@ -200,16 +254,27 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             .unwrap_or(0);
         let deadline = report.run.options.deadline_ms;
         assert!(
-            (5000..=deadline).contains(&end),
+            (probe_low + 5000..=deadline).contains(&end),
             "jobs {jobs}: the checks ended at {end} ms of virtual time, deadline_ms is {deadline}"
         );
+        // Every check starts after the probe limit.
+        assert!(
+            (probe_low..=probe_ms + 100).contains(&disk.started_ms),
+            "jobs {jobs}: host.disk started at {} ms",
+            disk.started_ms
+        );
         // The jobs differ: one at a time the black hole waits behind the hung statvfs, eight at once both
-        // start together. Not asserted against 5000: the scheduler's origin is a real instant.
+        // start together.
         if jobs == 1 {
-            assert!(egress.started_ms > 0, "jobs 1: net.egress started at 0 ms");
+            assert!(
+                egress.started_ms >= disk.started_ms + disk.duration_ms,
+                "jobs 1: net.egress started at {} ms, host.disk ended at {} ms",
+                egress.started_ms,
+                disk.started_ms + disk.duration_ms
+            );
         } else {
             assert!(
-                disk.started_ms < 100 && egress.started_ms < 100,
+                (probe_low..=probe_ms + 100).contains(&egress.started_ms),
                 "jobs {jobs}: started at {} and {} ms",
                 disk.started_ms,
                 egress.started_ms

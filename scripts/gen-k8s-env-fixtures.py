@@ -12,6 +12,8 @@ hashes. No byte came from a real cluster.
 - `warnings-only` (base `all-pass`): adds two storage classes and neither is the default.
 - `all-block` (base `all-pass`): a cluster on 1.24.9 (too old for the spec), an identity that may not
   create namespaces, and a default class on a CSI driver whose `CSINode` list is refused.
+- `timeouts` (M1-187): a `/version` that answers after 10 minutes and nothing else, the same tree as
+  `checks/_kube/slow-version`, so the cluster client's build ends at the engine's family limit.
 
 `--check` writes nothing and fails when a committed file differs from what the script would write, or when
 an `api/` folder holds a file the script did not write (the mock serves every `api/*.json`, so a stale file
@@ -26,7 +28,7 @@ ARGS = [a for a in sys.argv[1:] if a != "--check"]
 CHECK = "--check" in sys.argv[1:]
 ROOT = ARGS[0] if ARGS else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(ROOT, "tests/fixtures/envs")
-ENVS = ["all-pass", "warnings-only", "all-block"]
+ENVS = ["all-pass", "warnings-only", "all-block", "timeouts"]
 DIFFERENT = []
 WRITTEN = set()
 
@@ -70,16 +72,20 @@ def listing(kind, api_version, items):
     return {"apiVersion": api_version, "kind": kind, "metadata": {"resourceVersion": "1000"}, "items": items}
 
 
-def put(env, file, path, body, code=200, query="", method="GET"):
+def put(env, file, path, body, code=200, query="", method="GET", delay_ms=0):
     request = {"method": method, "path": path}
     if query:
         request["query"] = query
-    write(env, f"{file}.json", {"request": request, "status": code, "body": body})
+    entry = {"request": request, "status": code}
+    if delay_ms:
+        entry["delay_ms"] = delay_ms
+    entry["body"] = body
+    write(env, f"{file}.json", entry)
 
 
-def version(env, git):
+def version(env, git, delay_ms=0):
     minor = git.lstrip("v").split(".")[1]
-    put(env, "version", "/version", {
+    put(env, "version", "/version", delay_ms=delay_ms, body={
         "major": "1",
         "minor": minor,
         "gitVersion": git,
@@ -211,6 +217,9 @@ put(env, "csinodes", "/apis/storage.k8s.io/v1/csinodes", status(
 put(env, "csidrivers", "/apis/storage.k8s.io/v1/csidrivers", listing("CSIDriverList", "storage.k8s.io/v1", [
     {"metadata": {"name": EBS}, "spec": {"attachRequired": True, "podInfoOnMount": False}},
 ]), query="limit=500")
+
+# timeouts: a /version that does not answer while the cluster client is built (10 minutes of virtual time).
+version("timeouts", "v1.29.4", delay_ms=600000)
 
 # A file under an env's api/ folder that this script did not write.
 STALE = []
