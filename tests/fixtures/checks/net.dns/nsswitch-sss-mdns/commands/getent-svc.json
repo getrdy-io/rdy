@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/usr/bin/getent",
+    "ahosts",
+    "--",
+    "svc.cluster.local"
+  ],
+  "stdout": "192.0.2.20      STREAM svc.cluster.local\n192.0.2.20      DGRAM\n192.0.2.20      RAW\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

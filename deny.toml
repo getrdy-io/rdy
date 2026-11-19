@@ -89,7 +89,8 @@ deny = [
     { crate = "which", reason = "02 lint wall: a program is resolved by the command table" },
     { crate = "ureq", reason = "02 lint wall: HTTP goes through the probe facade" },
     { crate = "hickory-resolver", reason = "02 lint wall: DNS goes through the probe facade" },
-    { crate = "hickory-proto", reason = "02 lint wall: DNS goes through the probe facade" },
+    # hickory-proto is the test oracle of the net.dns codec (ADR 0052). deny cannot tell a dev-dependency from a normal one, so rdy-checks-net is a wrapper, and tests/lint-wall/tests/deps_allowlist.rs fails if it is anything but a dev-dependency there.
+    { crate = "hickory-proto", wrappers = ["rdy-checks-net"], reason = "02 lint wall: DNS goes through the probe facade; the test oracle of the net.dns codec, dev only (ADR 0052)" },
     { crate = "hickory-client", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "hickory-net", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "nix", wrappers = ["rexpect"], reason = "02 lint wall: rexpect drives the prompt tests (dev only); no check crate" },
@@ -117,6 +118,14 @@ crate = "askama"
 exact = true
 allow = ["alloc", "derive", "std"]
 reason = "05 dependency record: no json or urlencode filter, no askama.toml; scripts/check-html-escapes.sh checks the manifests too"
+
+# hickory-proto is only a test oracle (ADR 0052), built with no features. `exact` fails the build on any feature a
+# later change turns on.
+[[bans.features]]
+crate = "hickory-proto"
+exact = true
+allow = []
+reason = "ADR 0052: test oracle only; no std, no dnssec, no mdns"
 
 [sources]
 unknown-registry = "deny"

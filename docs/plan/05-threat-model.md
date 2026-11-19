@@ -111,11 +111,19 @@ ADR 0010 stays as a second line.
   on purpose, because a spec may name a server there. Decision on `168.63.129.16`, the Azure host-services
   address (WireServer and the virtual DNS address): refused. Its HTTP side serves the VM agent's extension
   settings and certificates, which is the same class of secret as the metadata service, and no spec host
-  has a reason to be it. It is also the `resolv.conf` nameserver on every Azure VM, so one narrow door is
-  planned (02 "Network", 03 `net.dns`, backlog M1-155): the `SystemResolver` peer class may reach it on
-  port 53 (UDP and TCP) and only when the address came from the OS nameserver list. A spec host on any
-  port, and ports 80 and 32526 (the WireServer ports), stay refused. Until that class exists, the
-  `net.dns` direct lookup of such a nameserver reports Skipped, "nameserver in a refused range". Name
+  has a reason to be it. It is also the `resolv.conf` nameserver on every Azure VM, so one narrow door was
+  built in M1-155 (02 "Network", 03 `net.dns`, ADR 0051): `Probe::nameserver_exchange` may reach it on
+  port 53 (UDP and TCP) and only when the exact IPv4 address came from the OS nameserver list, which the
+  facade reads itself, so a check passes an index and never an address (INV-11). A spec host on any
+  port, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay refused, each
+  with a test. Any other nameserver in a refused range (the GCE metadata address 169.254.169.254, for
+  one) is refused with "nameserver in a refused range"; the check marks that nameserver's row skipped with those words and the result is partial (the check is not skipped, and the system answer is still reported). The payload must be
+  one plain DNS query of type A, AAAA, CNAME or SOA and class IN, ending right after the question (or a
+  bare OPT record), and its name must be one of the check's spec hosts or the configured proxy's name,
+  made of letters, digits, `-` and `_` only. So the door cannot carry other bytes to port 53 (SEC-155-1).
+  The facade's read guard names `/etc/resolv.conf` and the exact files it may link to, in
+  `/run/systemd/resolve`, `/run/resolvconf` and `/run/NetworkManager`, and no other file (SEC-155-2,
+  SEC-155-3). Name
   lookups through the system resolver (`lookup`, `getaddrinfo`, `getent`) work on an Azure VM today,
   because the OS makes that connection, not the facade. Cost today: a spec that names that address as an
   endpoint or NTP server is refused with the address rule's text. Residual: a name server on the
