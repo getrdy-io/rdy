@@ -663,7 +663,9 @@ pub(crate) mod hits {
     use std::cell::RefCell;
     use std::collections::BTreeSet;
 
-    use crate::client::guard::{ALLOWED, Allowed};
+    #[cfg(test)]
+    use crate::client::guard::ALLOWED;
+    use crate::client::guard::Allowed;
 
     thread_local! {
         static HITS: RefCell<BTreeSet<(String, String)>> = const { RefCell::new(BTreeSet::new()) };
@@ -677,12 +679,14 @@ pub(crate) mod hits {
         HITS.with(|hits| hits.borrow_mut().insert((key(entry), check.to_owned())));
     }
 
-    /// Forgets this thread's hits.
+    /// Forgets this thread's hits. Only the crate's own pair tests read the hits.
+    #[cfg(test)]
     pub(crate) fn clear() {
         HITS.with(|hits| hits.borrow_mut().clear());
     }
 
     /// The `ALLOWED` entries that cite `check` and that no run on this thread has read under it.
+    #[cfg(test)]
     pub(crate) fn unhit(check: &str) -> Vec<String> {
         HITS.with(|hits| {
             let hits = hits.borrow();
