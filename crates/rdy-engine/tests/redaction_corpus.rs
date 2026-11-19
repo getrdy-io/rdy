@@ -88,7 +88,14 @@ const CLAIMS: &[(&str, &[&str])] = &[
     ("api_key_header", &["header", "x_auth_token"]),
     (
         "url_userinfo",
-        &["proxy", "dsn", "percent_encoded", "token_userinfo"],
+        &[
+            "proxy",
+            "dsn",
+            "percent_encoded",
+            "token_userinfo",
+            "proxy_env",
+            "proxy_json",
+        ],
     ),
     ("aws_secret_access_key", &["env", "ini", "json"]),
     ("aws_session_token", &["json", "ini", "env", "header"]),
@@ -153,6 +160,16 @@ const MATCHES: &[(&str, &str, Claim)] = &[
         "url_userinfo",
         "scheme://token@host",
         Claim::Forms(&["token_userinfo"]),
+    ),
+    (
+        "url_userinfo",
+        "*_proxy=user:pass@host",
+        Claim::Forms(&["proxy_env"]),
+    ),
+    (
+        "url_userinfo",
+        "\"http-proxy\": \"user:pass@host\"",
+        Claim::Forms(&["proxy_json"]),
     ),
     (
         "auth_header",
@@ -259,6 +276,8 @@ const MATCHES: &[(&str, &str, Claim)] = &[
         Claim::Forms(&["text"]),
     ),
     ("jwt", "eyJ...", Claim::Forms(&["text"])),
+    ("jwt", "k8s-aws-v1.<token>", Claim::Forms(&["text"])),
+    ("jwt", "ya29.<token>", Claim::Forms(&["text"])),
     ("secret_by_key", "pass", Claim::Forms(&["stem_pass"])),
     ("secret_by_key", "secret", Claim::Forms(&["stem_secret"])),
     ("secret_by_key", "token", Claim::Forms(&["stem_token"])),

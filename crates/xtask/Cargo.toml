@@ -29,6 +29,8 @@ rdy = { path = "../rdy-cli", version = "0.1.0-alpha.0" }
 # `agents-stale` reads the catalog this crate embeds (M1-173).
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", default-features = false }
+# The Kubernetes page prints the API reads of each check from the guard's ALLOWED table (09 section 6).
+rdy-checks-k8s = { path = "../rdy-checks-k8s", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0", features = ["schema"] }
 # Writes each example as YAML, and reads it back to check that it says the same thing.
 serde-saphyr = { workspace = true, features = ["serialize", "deserialize"] }

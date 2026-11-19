@@ -374,8 +374,8 @@ ADR 0002: a detached minisign signature in `<spec file>.minisig`, or the file na
 
 Exactly this form, no trailing whitespace or CR; anything else is refused (ADR 0002 decision 1). The
 `rdy-spec-v1` prefix is the domain separation: a signature the same key made for something else carries a
-different comment. A `signed_at` more than 24 hours in the future gives a warning, not a refusal. The
-untrusted comment line is never read.
+different comment. From M2-032, a `signed_at` more than 24 hours in the future gives a warning, not a
+refusal; 0.1.x (M1) does not compare `signed_at` with the clock. The untrusted comment line is never read.
 
 ### 4.3 The trust store
 
@@ -488,7 +488,10 @@ was given and opening `<spec>.minisig` returned not-found. Permission denied, a 
 symlink, an empty file, or a `--sig` path that does not exist all exit 64 (`spec_signature_invalid`, or
 `usage` for `--sig`), even with the flag. Any signature that is present but does not verify against a key
 pinned for the product, or given with `--key`, exits 64 even with the flag (ADR 0002 decision 7),
-including a valid signature by an unpinned key. An unsigned spec containing `custom.exec` exits 64 from M4
+including a valid signature by an unpinned key. `--key` needs a signature: a `--key` run of a spec with no
+signature exits 64 (`spec_unsigned`) even with `--allow-unsigned`, with its own first line, `error: a key was
+given, but acme-platform.yaml has no signature. rdy looked for acme-platform.yaml.minisig`, and a fix that
+does not point at the unsigned page. An unsigned spec containing `custom.exec` exits 64 from M4
 (ADR 0005). Expired specs are refused regardless. **No hint, fix line or error message ever names
 `--allow-unsigned` or `--key`** (threat model T2); the flags are documented on
 `https://docs.getrdy.io/unsigned`. The banner and its `sig` header line may name the flag that allowed the
@@ -529,13 +532,18 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 | --- | --- | --- | --- |
 | `spec_unreadable` | the spec file is missing, not a regular file, or unreadable | `error: cannot read acme-platfrom.yaml: no such file` | `fix: check the file name and the folder you are in` (07 C.6) |
 | `spec_unsigned` | no sidecar, no flag | `error: no signature found at acme-platform.yaml.minisig` | `fix: ask the vendor for acme-platform.yaml.minisig and put it next to the spec.` and `If you wrote this spec yourself, see https://docs.getrdy.io/unsigned` |
-| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` (Windows in M1, where `rdy trust add` is not supported: `fix: see https://docs.getrdy.io/unsigned`, ADR 0027) |
+| `spec_unsigned`, `--key` | no sidecar, `--key` given (refused even with `--allow-unsigned`, 4.7) | `error: a key was given, but acme-platform.yaml has no signature. rdy looked for acme-platform.yaml.minisig` | `fix: ask the vendor for acme-platform.yaml.minisig and put it next to the spec, then run again` |
+| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05, which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` (Windows in M1, where `rdy trust add` is not supported: `fix: see https://docs.getrdy.io/unsigned`, ADR 0027) |
 | `spec_signature_invalid`, tampered | bytes or comment do not verify | `error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.` | `fix: get a fresh copy and its .minisig from the vendor. Do not run this file.` |
 | `spec_signature_invalid`, form | legacy `Ed`, malformed sidecar or comment, unreadable sidecar | `error: the signature on acme-platform.yaml is not in the form rdy accepts.` | same fix |
 | `spec_signature_invalid`, product | comment or metadata product differs | `error: acme-platform.yaml is signed for product 'acme-edge', but the spec says 'acme-platform'.` | same fix |
 | any of the above, file has CRLF | | adds `The file has Windows line endings. If it went through Git or email, ask for the original.` | |
 | `spec_expired` | `metadata.expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
 | `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows in M1: `fix: ask an administrator to remove <path>. rdy cannot check who can change a trust store on Windows yet, so it reads none there. To check a spec meanwhile, see https://docs.getrdy.io/unsigned`, ADR 0027; from M2-105: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
+
+The `spec_key_unknown` line shows the key id and no fingerprint, because the sidecar carries only the key
+id. Its fix tells the user to compare the fingerprint the vendor publishes, not the key id, because a key id
+can be forged.
 
 `spec_unreadable`, `spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list
 under ADR 0007's additive rule. One more ErrorOutput code is not about spec loading: `interrupted`
@@ -868,13 +876,16 @@ humanised (`total_bytes` becomes "total"), `_bytes` values print as sizes, `_ms`
 **Text safety.** Every string from the spec or host is HTML-escaped by askama, control characters
 stripped. No string from data becomes a link; `contact` and URLs show as text.
 
-**Size.** Hard cap 5 MiB, typical under 300 KiB. Past the cap the action table is cut to the rows that
-fit and ends with the "N more entries" line; checks are never cut.
+**Size.** Hard cap 5 MiB, typical under 300 KiB. Checks are never cut. Past the cap the action table loses
+rows first and ends with the "N more entries" line. Then Found and Needed lines go, and each check that lost
+lines ends with "N more lines are in the embedded JSON." (07 D.4).
 
 **Print and dark mode.** `prefers-color-scheme` drives dark mode on screen, with `<meta
 name="color-scheme" content="light dark">` so it applies before first paint. `@media print` sets
-`color-scheme: light`, black text on white, no backgrounds, whatever the screen theme. The banner is a
-`position: fixed` block in print so it repeats on every page. Page breaks come only before Passed, the
+`color-scheme: light`, black text on white, no backgrounds, whatever the screen theme. In print the full
+banners stay in the page flow and print once, at the top of page one. When a banner is shown, every printed
+page also carries its title in the top page margin, as fixed text that rdy writes. Nothing covers the first
+lines of a page (07 D.3). Page breaks come only before Passed, the
 capabilities section and the action log, so the verdict, the blocks and the required checks not run share
 page one. Exit test: rendered with dark preferred and print media, text contrast is at least 4.5 to 1.
 

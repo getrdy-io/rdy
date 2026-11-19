@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "/usr/bin/timedatectl",
+    "show",
+    "-p",
+    "NTPSynchronized",
+    "-p",
+    "NTP",
+    "-p",
+    "Timezone"
+  ],
+  "stdout": "Timezone=Etc/UTC\nNTP=yes\nNTPSynchronized=yes\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

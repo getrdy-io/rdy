@@ -3,7 +3,8 @@
 //! Discovery says which groups the API server serves. It does not say whether a policy is enforced, whether
 //! the engine's webhook is up, or which namespaces a policy matches, and it cannot tell a running engine
 //! from the CRDs that an uninstall left behind. So a group is evidence that an engine is installed, and the
-//! text says so. The policies themselves are read by the M1-late half of this check (M1-160).
+//! text says so. The policies themselves are read by `policies`, which lists only the kinds that the discovery
+//! showed (M1-160).
 //!
 //! The categories, from each project's own documentation:
 //!
@@ -18,7 +19,7 @@
 //!   `templates.gatekeeper.sh` (`ConstraintTemplate`) and `constraints.gatekeeper.sh`, where each template
 //!   creates one constraint kind. A constraint with `enforcementAction: deny` (the default) rejects.
 //! - **What Kubernetes itself ships**: Pod Security admission (the namespace labels, read by this check),
-//!   `ValidatingAdmissionPolicy` and the webhook configurations (M1-160).
+//!   `ValidatingAdmissionPolicy` and the webhook configurations (`vap` and `webhooks`, M1-160).
 //! - **A distribution's own gate**: OpenShift serves `security.openshift.io`, whose
 //!   `SecurityContextConstraints` decide whether a pod is admitted.
 
@@ -41,7 +42,9 @@ pub(super) const ENGINES: &[(&str, &[&str])] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FoundGroup {
     pub(super) group: &'static str,
-    /// The group version discovery read, when it was read.
+    /// The group's preferred version, which is the one `kinds` was read from (the `v1` read of
+    /// `kyverno.io` adds its kinds but does not change this). `None` when the group listed no version, so
+    /// nothing was read.
     pub(super) version: Option<String>,
     /// The kinds that version serves, sorted, subresources left out, at most [`MAX_KINDS`]. Empty when
     /// the group version could not be read.
@@ -52,6 +55,8 @@ pub(super) struct FoundGroup {
     /// list was cut. `None` when a read that could have said failed (forbidden, a status, no time left),
     /// which the fix text treats as "maybe": it shows the command. Only `kyverno.io` is asked.
     pub(super) legacy_policies: Option<bool>,
+    /// The policy lists this group calls for (M1-160), found before the kinds were cut.
+    pub(super) lists: Vec<super::policies::PolicyList>,
 }
 
 /// One group of `GET /apis`.
@@ -102,7 +107,7 @@ const MAX_KIND_LEN: usize = 63;
 
 /// True when `kind` has the shape of a real Kubernetes kind: a letter, then letters and digits, at most
 /// [`MAX_KIND_LEN`] characters.
-fn is_kind_shaped(kind: &str) -> bool {
+pub(super) fn is_kind_shaped(kind: &str) -> bool {
     kind.len() <= MAX_KIND_LEN
         && kind.starts_with(|c: char| c.is_ascii_alphabetic())
         && kind.bytes().all(|b| b.is_ascii_alphanumeric())

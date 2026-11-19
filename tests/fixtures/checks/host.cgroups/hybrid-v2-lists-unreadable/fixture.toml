@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-hybrid-v2-lists-unreadable"
+summary = "Hybrid layout, the v2 controller lists are unreadable, pids has hierarchy 0: unconfirmed, not missing"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

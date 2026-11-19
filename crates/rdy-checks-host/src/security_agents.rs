@@ -221,7 +221,11 @@ impl SecurityAgents {
                 unknown_allow.join(", ")
             ));
         }
-        if let Some(partial) = scan.partial() {
+        // A forbidden process that was seen is certain. A hidden or cut list only weakens absence, so a
+        // positive hit carries no `partial` and no limited-view advice.
+        if blocked.is_empty()
+            && let Some(partial) = scan.partial()
+        {
             finding = finding.with_partial(partial);
         }
         if level != Level::Pass {
@@ -324,6 +328,10 @@ fn fix(blocked: &[&Hit<'_>], flagged: &[&Hit<'_>], unknown_forbid: &[&str], scan
             "Update rdy, or fix the id in the spec. Run rdy spec lint to see the known ids."
                 .to_owned(),
         );
+    }
+    // A positive hit needs none of this: what was seen is certain.
+    if !blocked.is_empty() {
+        return sentences.join(" ");
     }
     // `limited` (not root) cannot be true with `gap` (root), so it comes first. `gap` and `cut` can both
     // be true, and each has its own fix, so both are said.

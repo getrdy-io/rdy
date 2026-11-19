@@ -80,14 +80,18 @@ pub use native::{
     MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
     Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
+pub use no_proxy::{
+    Exemption, MAX_ENTRIES as MAX_NO_PROXY_ENTRIES, MAX_ENTRY_CHARS, MAX_LIST_BYTES, NoProxy,
+};
 pub use policy::{RULE_FD_TARGET, ReadGuard, Refused};
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
 pub use proxy::{
-    DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
-    ProxyUrlError,
+    ALL_PROXY_ENV, DEFAULT_PROXY_PORT, EnvConflict, MAX_CONNECT_HEAD, NO_PROXY_ENV, NetFailure,
+    PROXY_ENV, ProxyChallenge, ProxyEnvError, ProxyError, ProxyUrl, ProxyUrlError, env_conflicts,
 };
 
+pub use addr::is_unusable_peer;
 pub use attempt::AttemptOutcome;
 pub use trust::{NoRoots, TrustFailure};
 
@@ -102,6 +106,7 @@ mod log;
 mod native;
 #[cfg(any(feature = "runtime", feature = "loopback"))]
 pub mod net;
+mod no_proxy;
 mod policy;
 mod proxy;
 #[cfg(any(test, feature = "testing"))]
@@ -125,6 +130,11 @@ pub const MAX_DIR_ENTRIES: usize = 65_536;
 
 /// The rule of a command the check did not declare in `CheckInfo::commands`.
 pub const RULE_COMMAND_UNDECLARED: &str = "command not declared by the check";
+
+/// The rule of a network call or a network command while `--no-network` is set (SEC-01). The facade
+/// refuses it before any lookup or socket, whatever the check declared. The engine reads a check that
+/// ends on this refusal as skipped, `missing_need` for the `network` need.
+pub const RULE_NO_NETWORK: &str = "the run was started with --no-network";
 
 /// The rule of an environment name the check did not declare for that command.
 pub const RULE_ENV_UNDECLARED: &str = "environment name not declared by the check";
@@ -168,9 +178,10 @@ pub enum ProbeError {
         "permission denied. Fix: run rdy as a user who may read it, or accept the limited result"
     )]
     PermissionDenied,
-    /// Nothing listens at the address: the socket file is there and the service behind it is not.
+    /// Nothing listens at the address (TCP, UDP or TLS), or, for a Unix socket, the file is there and
+    /// the service behind it is not.
     #[error(
-        "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run"
+        "connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run"
     )]
     ConnectionRefused,
     /// The call ran out of time.
@@ -280,6 +291,12 @@ impl ProbeError {
             | Self::Net(_)
             | Self::Io(_) => ActionOutcome::Failed,
         }
+    }
+
+    /// Whether this is the refusal of a network call under `--no-network` ([`RULE_NO_NETWORK`]).
+    #[must_use]
+    pub fn is_no_network(&self) -> bool {
+        matches!(self, Self::Denied { rule, .. } if *rule == RULE_NO_NETWORK)
     }
 
     fn denied(rule: &'static str, what: impl Into<String>) -> Self {
@@ -616,6 +633,21 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
     }
 
+    /// Sends one DNS query to the nameserver at `to` over `transport` and reads one reply of at most
+    /// `max_reply` bytes within `timeout`. Over TCP the backend adds and strips the two byte length
+    /// prefix. The probe has already applied the admission rules (M1-155). The provided body refuses.
+    fn dns_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        transport: sock::DnsTransport,
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        let _ = (to, payload, transport, max_reply, timeout);
+        Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
+    }
+
     /// Sends `GET path` over the unix socket at `socket` and reads the reply within `timeout`. The
     /// probe has already checked the socket, the method and the path against the policy. The provided
     /// body refuses.
@@ -679,6 +711,15 @@ pub struct ProbeHub {
     log: ActionLog,
     /// The run's proxy, set once before the checks start. Clones of the hub share it.
     proxy: Arc<OnceLock<ProxyUrl>>,
+    /// The environment variable the proxy was read from, when it came from `set_proxy_from_env`.
+    proxy_source: Arc<OnceLock<&'static str>>,
+    /// The `NO_PROXY` list of the process environment and the variable it came from (M1-098).
+    no_proxy: Arc<OnceLock<(NoProxy, &'static str)>>,
+    /// The proxy variables that are set in two spellings that differ (M1-098).
+    env_conflicts: Arc<OnceLock<Vec<EnvConflict>>>,
+    /// Whether sockets are allowed. `false` is `--no-network`: the facade refuses every lookup, TCP,
+    /// UDP and network command. A new hub starts with `false`. Clones of the hub share it.
+    network: Arc<AtomicBool>,
     /// Set when a check's probe is opened. After that the proxy can no longer be set.
     checks_started: Arc<AtomicBool>,
     /// The trust stores of the TLS calls, built once per run.
@@ -688,6 +729,10 @@ pub struct ProbeHub {
     /// only (feature `testing`), through `ProbeHub::pin_clock`.
     #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
     clock: Arc<std::sync::Mutex<Option<Duration>>>,
+    /// Certificates (DER) that the bundled public set also holds, so a test can play a public chain with a
+    /// generated CA. Set by tests only (feature `testing`), through `ProbeHub::trust_as_public`.
+    #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+    extra_public: Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -697,19 +742,36 @@ impl fmt::Debug for ProbeHub {
 }
 
 impl ProbeHub {
-    /// A hub over `backend`. Every string in the log passes `redactor`.
+    /// A hub over `backend`. Every string in the log passes `redactor`. The network starts forbidden:
+    /// call [`ProbeHub::set_network`] to allow it.
     #[must_use]
     pub fn new(backend: Arc<dyn Backend>, redactor: Redactor) -> Self {
         Self {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
+            proxy_source: Arc::new(OnceLock::new()),
+            no_proxy: Arc::new(OnceLock::new()),
+            env_conflicts: Arc::new(OnceLock::new()),
+            network: Arc::new(AtomicBool::new(false)),
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
             tls: Arc::default(),
             #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
             clock: Arc::default(),
+            #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+            extra_public: Arc::default(),
         }
+    }
+
+    /// Allows or forbids the network for the whole run (`--no-network` is `false`). A new hub starts
+    /// with the network forbidden (fail closed), so every caller allows it on purpose: the engine from
+    /// `RunOptions::network`, the binary from the command, a test with `set_network(true)`. With `false`, every lookup,
+    /// TCP, TLS, HTTP and UDP call and every command that opens an internet or packet socket is refused
+    /// with [`RULE_NO_NETWORK`] before anything is opened. A unix socket call is local and is not
+    /// affected. The engine sets it from `RunOptions::network` before the first check.
+    pub fn set_network(&self, allowed: bool) {
+        self.network.store(allowed, Ordering::SeqCst);
     }
 
     /// Shows paths under `home` as `~/...` in the log. Call it before the first probe is made: it
@@ -749,6 +811,13 @@ impl ProbeHub {
     )]
     pub(crate) fn check_probe(&self, key: &str, os: Os, info: Option<&'static CheckInfo>) -> Probe {
         self.probe(Some(key.to_owned()), os, info)
+    }
+
+    /// A handle that can only add to the known-secret set. A family's probe gets this and not the hub, so
+    /// it cannot change the network option or the proxy of the run (M1-107).
+    #[must_use]
+    pub fn secret_sink(&self) -> SecretSink {
+        SecretSink(self.clone())
     }
 
     /// Adds a secret to the run-scoped known-secret set (ADR 0015 decision 3). Every string the log, the
@@ -876,6 +945,139 @@ impl ProbeHub {
     /// [`ProbeHub::set_proxy`]. No error holds any part of the text.
     pub fn set_proxy_text(&self, text: &str) -> Result<(), ProxyError> {
         self.set_proxy(ProxyUrl::parse(text)?)
+    }
+
+    /// Reads the proxy for this run from the process environment and sets it as
+    /// [`ProbeHub::set_proxy_text`] does (M1-097). The first variable of [`PROXY_ENV`] that is set to a
+    /// non-blank value wins, in that order: `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`.
+    /// A run has one proxy, so `HTTP_PROXY` serves `https` calls too when it is the only one set.
+    /// It reads `NO_PROXY` (else `no_proxy`) too, as [`NoProxy`] (M1-098), so `Probe::route_for` can send
+    /// an exempt host direct, and it records which proxy variables are set in two spellings that differ
+    /// ([`env_conflicts`]). `ALL_PROXY` and a PAC file are not read here: `net.proxy` reports them.
+    ///
+    /// The run calls this right after [`ProbeHub::new`], before `Privilege::snapshot` and before
+    /// anything is printed or written, so the password is in the known-secret set before any string
+    /// that could hold it exists. It reads the backend directly, because the read belongs to the run
+    /// and not to a check. When a proxy or `NO_PROXY` variable is set it records the eight names (never a
+    /// value) as one run-level `env` entry; with none set it records nothing. That entry is a set-up entry: it does not
+    /// count for the `TooLate` rule of [`ProbeHub::set_proxy`].
+    ///
+    /// Every other variable that is set and parses has its password added to the known-secret set too,
+    /// whether or not it is the one used; one the set refuses is an error for that variable.
+    ///
+    /// Returns the name of the variable the proxy came from, or `None` when none is set.
+    ///
+    /// # Errors
+    ///
+    /// [`ProxyEnvError`] names the variable and holds the [`ProxyError`]. No error holds any part of the
+    /// value.
+    pub fn set_proxy_from_env(&self) -> Result<Option<&'static str>, ProxyEnvError> {
+        let read = |names: &[&'static str]| -> Vec<(&'static str, String)> {
+            names
+                .iter()
+                .filter_map(|name| {
+                    self.backend
+                        .env(name)
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| (*name, value))
+                })
+                .collect()
+        };
+        let set = read(&PROXY_ENV);
+        let listed = read(&NO_PROXY_ENV);
+        // `ALL_PROXY` is not used by a run, but `net.proxy` reports it, so its password is hidden too.
+        let all = read(&ALL_PROXY_ENV);
+        // A run with none of the variables writes no entry, so its log is the same as before.
+        if set.is_empty() && listed.is_empty() && all.is_empty() {
+            return Ok(None);
+        }
+        // The `NO_PROXY` list holds no secret and the conflicts hold names only, so both are kept
+        // before the proxy is parsed: a refused proxy still leaves them for a run that goes on.
+        if let Some((var, value)) = listed.first() {
+            let _ = self.no_proxy.set((NoProxy::parse(value), *var));
+        }
+        let _ = self
+            .env_conflicts
+            .set(env_conflicts(|name| self.backend.env(name)));
+        let mut fields = Map::new();
+        let names: Vec<&str> = PROXY_ENV
+            .iter()
+            .chain(&ALL_PROXY_ENV)
+            .chain(&NO_PROXY_ENV)
+            .copied()
+            .collect();
+        fields.insert("name".to_owned(), cut_names(&names).into());
+        let setup = self.log.begin_setup(ActionKind::Env, fields);
+        let Some((var, value)) = set.first().cloned() else {
+            let refused = self.hide_secrets_of(&all);
+            setup.finish(if refused.is_some() {
+                ActionOutcome::Failed
+            } else {
+                ActionOutcome::Ok
+            });
+            return match refused {
+                Some(var) => Err(ProxyEnvError {
+                    var,
+                    error: ProxyError::SecretRefused,
+                }),
+                None => Ok(None),
+            };
+        };
+        let mut result = self
+            .set_proxy_text(&value)
+            .map(|()| Some(var))
+            .map_err(|error| ProxyEnvError { var, error });
+        if result.is_ok() {
+            let _ = self.proxy_source.set(var);
+        }
+        // Every other variable that is set may reach output too (`net.proxy` reports them), so the
+        // secrets of each one that parses go into the set as well. One that does not parse is left
+        // alone: only the variable the run uses is an error. A refusal is an error for its variable, and it
+        // replaces a parse error of the chosen one, because the run may go on (`--no-network`) and the
+        // password must not stay unhidden.
+        for (other, text) in set.iter().skip(1).chain(all.iter()) {
+            if text == &value {
+                continue;
+            }
+            if let Ok(parsed) = ProxyUrl::parse(text) {
+                let mut accepted = true;
+                for secret in parsed.secrets() {
+                    accepted &= self.add_known_secret(&secret);
+                }
+                let replaceable = match &result {
+                    Ok(_) => true,
+                    Err(first) => matches!(first.error, ProxyError::Url(_)),
+                };
+                if !accepted && replaceable {
+                    result = Err(ProxyEnvError {
+                        var: other,
+                        error: ProxyError::SecretRefused,
+                    });
+                }
+            }
+        }
+        setup.finish(if result.is_ok() {
+            ActionOutcome::Ok
+        } else {
+            ActionOutcome::Failed
+        });
+        result
+    }
+
+    /// Adds the secrets of each proxy URL in `vars` that parses to the known-secret set. Returns the
+    /// first variable whose secret the set refused, after trying them all.
+    fn hide_secrets_of(&self, vars: &[(&'static str, String)]) -> Option<&'static str> {
+        let mut refused = None;
+        for (var, text) in vars {
+            if let Ok(parsed) = ProxyUrl::parse(text) {
+                for secret in parsed.secrets() {
+                    if !self.add_known_secret(&secret) {
+                        refused.get_or_insert(*var);
+                    }
+                }
+            }
+        }
+        refused
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The
@@ -1025,6 +1227,26 @@ impl fmt::Debug for Probe {
     }
 }
 
+/// The one thing a family's probe may do to the run's hub: add a known secret. It is a clone of the hub
+/// that offers a single method, so the network option, the proxy and the log stay out of reach.
+#[derive(Clone)]
+pub struct SecretSink(ProbeHub);
+
+impl SecretSink {
+    /// Adds `secret` to the run's known-secret set. `false` when the set refused it (too short, too long or
+    /// no room): the caller treats that as fatal. Never log the value.
+    #[must_use]
+    pub fn add(&self, secret: &str) -> bool {
+        self.0.add_known_secret(secret)
+    }
+}
+
+impl fmt::Debug for SecretSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretSink(..)")
+    }
+}
+
 /// A call that passed the handle checks and the read denylist.
 struct Gate<'a> {
     hub: &'a ProbeHub,
@@ -1135,6 +1357,66 @@ impl Probe {
         );
         let (_, entry) = self.begin(ActionKind::Kube, fields, path)?;
         Ok(KubeCall { entry })
+    }
+
+    /// Records that the run itself read `path`: the kubeconfig and the files it names, which the
+    /// kube client reads on its own (ADR 0031 decision 2). One `read` entry with `check: null`, outcome
+    /// `ok`, and the path as the log shows it. It reads nothing. A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_read(&self, path: &Path) -> Result<(), ProbeError> {
+        let what = self.hub.as_ref().map_or_else(
+            || path.to_string_lossy().into_owned(),
+            |hub| hub.log.display_path(path),
+        );
+        let mut fields = Map::new();
+        fields.insert("path".to_owned(), what.clone().into());
+        let (_, entry) = self.begin(ActionKind::Read, fields, &what)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, &what));
+        }
+        entry.finish(ActionOutcome::Ok);
+        Ok(())
+    }
+
+    /// Records a program that a library will run for the run, with `program` as the resolved path and
+    /// `argv` as the arguments (both pass the redactor with the rest of the log). One `exec` entry with
+    /// `check: null`, the `outcome` you give (the real end of the plugin) and `form` `delegated`: rdy does not start the process and does not
+    /// see its output (the kube credential plugin, 02 "The action log"). A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_exec(
+        &self,
+        program: &str,
+        argv: &[String],
+        outcome: ActionOutcome,
+    ) -> Result<(), ProbeError> {
+        // The program as the log shows it: a path under the home directory is `~/...` (S8).
+        let shown = self.hub.as_ref().map_or_else(
+            || program.to_owned(),
+            |hub| hub.log.display_path(Path::new(program)),
+        );
+        let mut fields = Map::new();
+        fields.insert("program".to_owned(), shown.into());
+        fields.insert(
+            "argv".to_owned(),
+            Value::Array(argv.iter().cloned().map(Value::String).collect()),
+        );
+        let (_, mut entry) = self.begin(ActionKind::Exec, fields, program)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, program));
+        }
+        entry.set("form", "delegated");
+        entry.set(
+            "note",
+            "run by the kube client, output not captured, may run again on token refresh",
+        );
+        entry.finish(outcome);
+        Ok(())
     }
 
     /// The OS this probe's command table and privilege snapshot are read for.
@@ -1440,6 +1722,13 @@ impl Probe {
         })
     }
 
+    /// Whether the run forbids the network (`--no-network`).
+    pub(crate) fn offline(&self) -> bool {
+        self.hub
+            .as_ref()
+            .is_some_and(|hub| !hub.network.load(Ordering::SeqCst))
+    }
+
     /// Applies the check's declaration to `cmd`, then the command table. Returns the command and the
     /// id of the table form it matched.
     fn admit(&self, cmd: Cmd) -> Result<(Cmd, &'static str), ProbeError> {
@@ -1465,6 +1754,9 @@ impl Probe {
             None => cmd,
         };
         let listed = table::validate_for(self.scope.os, &cmd)?;
+        if listed.entry.network && self.offline() {
+            return Err(ProbeError::denied(RULE_NO_NETWORK, cmd.program()));
+        }
         Ok((cmd, listed.form.id))
     }
 

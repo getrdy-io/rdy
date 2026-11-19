@@ -1,0 +1,8 @@
+22 1 253:0 / / rw,relatime shared:1 - xfs /dev/mapper/rl-root rw,seclabel
+23 22 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+24 22 253:1 / /var rw,relatime shared:5 - ext4 /dev/mapper/rl-var rw
+25 22 0:30 / /tmp rw,nosuid,nodev,noexec,relatime shared:6 - tmpfs tmpfs rw,size=4194304k
+26 22 0:41 / /home rw,relatime shared:7 - nfs4 nfs.acme.example:/export/home rw,vers=4.2,hard,proto=tcp
+27 22 253:2 / /mnt/acme\040data rw,relatime shared:8 - xfs /dev/mapper/rl-acme rw,seclabel
+28 22 253:2 /releases /mnt/acme rw,nodev,relatime shared:9 - xfs /dev/mapper/rl-acme rw,seclabel
+29 22 0:45 / /mnt/nfs rw,relatime shared:10 - nfs4 nfs.acme.example:/export/data rw,vers=4.2,hard,proto=tcp

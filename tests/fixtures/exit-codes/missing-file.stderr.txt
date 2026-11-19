@@ -1,0 +1,2 @@
+error: cannot read no-such-spec.yaml: no such file
+fix: check the file name and the folder you are in

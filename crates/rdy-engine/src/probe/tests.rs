@@ -25,7 +25,9 @@ fn redactor() -> Redactor {
 }
 
 fn hub(replay: Replay) -> ProbeHub {
-    ProbeHub::new(Arc::new(replay), redactor())
+    let hub = ProbeHub::new(Arc::new(replay), redactor());
+    hub.set_network(true);
+    hub
 }
 
 fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
@@ -384,6 +386,65 @@ mod denylist {
                 assert_eq!(refused.rule, RULE_MACHINE_ID_FILE);
             }
         }
+    }
+
+    #[test]
+    fn a_declared_sys_class_admits_only_the_attribute_files_of_its_class_devices() {
+        // SEC-28-1: `/sys/class/net/eth0` is a link into `/sys/devices`, and declaring it must not open
+        // the rest of `/sys/devices`.
+        let guard = ReadGuard::new(Os::Linux, Some(&["/sys/class/net"]));
+        for real in [
+            "/sys/devices/pci0000:00/0000:00:03.0/net/eth0/mtu",
+            "/sys/devices/virtual/net/lo/operstate",
+            "/sys/devices/platform/vmbus_0/net/eth0/type",
+        ] {
+            assert_eq!(guard.admit_real(Path::new(real)), Ok(()), "{real}");
+        }
+        for real in [
+            "/sys/devices/virtual/dmi/id/board_asset_tag",
+            "/sys/devices/pci0000:00/0000:00:03.0/net/eth0/device/vpd",
+            "/sys/devices/pci0000:00/0000:00:03.0/vpd",
+            "/sys/devices/pci0000:00/0000:00:1f.2/ata1/host0/target0:0:0/0:0:0:0/wwid",
+            "/sys/devices/pci0000:00/0000:00:03.0/net/eth0/queues/rx-0/rps_cpus",
+            "/sys/devices/net/eth0/mtu/extra",
+            "/sys/devices/net/mtu",
+            "/devices/pci0000:00/net/eth0/mtu",
+            "/sys/block/sda/device/serial",
+        ] {
+            assert!(guard.admit_real(Path::new(real)).is_err(), "{real}");
+        }
+        // As text the prefix decides, so `/sys/devices` is outside the declaration.
+        assert!(guard.admit(Path::new("/sys/class/net/eth0/mtu")).is_ok());
+        for text in [
+            "/sys/devices/virtual/dmi/id/board_asset_tag",
+            "/sys/devices/pci0000:00/0000:00:03.0/net/eth0/mtu",
+        ] {
+            assert_eq!(
+                guard.admit(Path::new(text)),
+                Err(RULE_OUTSIDE_READS),
+                "{text}"
+            );
+        }
+        // Another class is not opened by `net`, and nothing opens a real path with no declaration.
+        let other = ReadGuard::new(Os::Linux, Some(&["/sys/class/dmi"]));
+        assert!(
+            other
+                .admit_real(Path::new(
+                    "/sys/devices/pci0000:00/0000:00:03.0/net/eth0/mtu"
+                ))
+                .is_err()
+        );
+        let none = ReadGuard::new(Os::Linux, Some(&["/proc/net/route"]));
+        assert!(
+            none.admit_real(Path::new("/sys/devices/virtual/net/lo/mtu"))
+                .is_err()
+        );
+        // The denylist still applies to a path of that shape.
+        assert!(
+            ReadGuard::new(Os::Linux, Some(&["/sys/class/dmi"]))
+                .admit_real(Path::new("/sys/devices/virtual/dmi/id/product_serial"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -933,7 +994,9 @@ mod commands {
     fn recording_hub() -> (ProbeHub, Arc<Recorder>) {
         let recorder = Arc::new(Recorder::default());
         let backend: Arc<dyn Backend> = recorder.clone();
-        (ProbeHub::new(backend, redactor()), recorder)
+        let hub = ProbeHub::new(backend, redactor());
+        hub.set_network(true);
+        (hub, recorder)
     }
 
     #[tokio::test]
@@ -1267,6 +1330,7 @@ mod commands {
     #[tokio::test(start_paused = true)]
     async fn a_command_dropped_before_it_finished_is_logged_as_a_timeout() {
         let hub = ProbeHub::new(Arc::new(Hanging), redactor());
+        hub.set_network(true);
         let probe = hub.check_probe("net.dns", Os::Linux, None);
         let outcome =
             tokio::time::timeout(Duration::from_secs(1), probe.exec(getent("acme.example"))).await;

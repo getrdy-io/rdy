@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "gone.acme.example",
+      "192.0.2.11:1123"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized, 250 ms ahead of `192.0.2.11:1123`.",
+    "notes": [
+      "`gone.acme.example`: the name did not resolve.",
+      "`192.0.2.11:1123`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "not installed",
+      "ntp_enabled": true,
+      "offset_seconds": -0.25,
+      "offset_source": "sntp",
+      "reference": "192.0.2.11:1123",
+      "servers": [
+        {
+          "detail": "the name did not resolve",
+          "result": "failed",
+          "server": "gone.acme.example"
+        },
+        {
+          "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
+          "offset_seconds": -0.25,
+          "result": "ok",
+          "server": "192.0.2.11:1123",
+          "stratum": 2
+        }
+      ],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null
+  }
+}

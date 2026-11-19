@@ -42,18 +42,18 @@ mod tests;
 
 use rules::SELF_SUBJECT_REVIEW_PATH;
 pub(super) use rules::impersonation_allowed;
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "testing")))]
 use rules::log_path;
 pub use rules::{
-    ALLOWED, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only, RULE_BODY,
-    RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE,
-    RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR,
-    RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
+    ALLOWED, ANY_RESOURCE, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only,
+    RULE_BODY, RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED,
+    RULE_PATH_SHAPE, RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS,
+    RULE_SELECTOR, RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
 pub(super) use rules::{BodyView, judge};
 use rules::{bad_header, is_group, is_version};
 // What the mock harness (`client::mock`) needs to judge the requests it recorded the way the guard does.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(super) use rules::{Target, decode_query_value, log_path, target_of};
 
 use super::impersonate::{AddImpersonation, ImpersonationError};
@@ -322,6 +322,26 @@ impl Service<Request<Body>> for RawService {
     }
 }
 
+/// The service of a client that has no connection: every request fails at once with `NotConnected`, and
+/// nothing is sent. A check that needs the cluster never runs without one (the need gate skips it), so
+/// this is what a bug would meet, not a path of a run.
+#[derive(Clone, Copy)]
+struct Unconnected;
+
+impl Service<Request<Body>> for Unconnected {
+    type Response = Response<Body>;
+    type Error = std::io::Error;
+    type Future = std::future::Ready<Result<Response<Body>, std::io::Error>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _: Request<Body>) -> Self::Future {
+        ready(Err(std::io::Error::from(std::io::ErrorKind::NotConnected)))
+    }
+}
+
 /// The only client type checks get. Every request it sends passed the guard and wrote one `kube` entry
 /// to the action log of the probe it was made with (INV-14).
 ///
@@ -370,6 +390,12 @@ impl ReadOnlyClient {
         via_proxy: Option<&str>,
     ) -> Result<Self, ImpersonationError> {
         Self::over_as(RawService(raw.clone()), probe, user, via_proxy)
+    }
+
+    /// A client with no connection under it. Every request is refused by the guard or fails with
+    /// `NotConnected`. Needs a running tokio runtime.
+    pub(crate) fn unconnected(probe: &Probe) -> Self {
+        Self::over(Unconnected, probe, None)
     }
 
     /// Puts the guard in front of `inner`: the one place a client is built. Production passes the raw
@@ -436,6 +462,17 @@ impl ReadOnlyClient {
         K::DynamicType: Default,
     {
         kube::Api::all(self.client.clone())
+    }
+
+    /// An API handle for a cluster-scoped resource that is known only at run time, such as a Gatekeeper
+    /// constraint kind. The guard judges every request it makes like any other, so the group, version and
+    /// plural name must name an [`ALLOWED`] entry or the request is refused.
+    #[must_use]
+    pub fn all_dynamic(
+        &self,
+        resource: &kube::core::ApiResource,
+    ) -> kube::Api<kube::core::DynamicObject> {
+        kube::Api::all_with(self.client.clone(), resource)
     }
 
     /// An API handle for a namespaced resource in `namespace`.

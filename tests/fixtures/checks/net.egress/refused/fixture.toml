@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-refused"
+summary = "A host whose port is closed"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

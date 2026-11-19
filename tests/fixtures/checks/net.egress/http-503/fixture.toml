@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-http-503"
+summary = "A URL whose server answers 503"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

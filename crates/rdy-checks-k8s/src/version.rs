@@ -7,14 +7,16 @@
 //! - `GET /apis`, the group list: the OpenShift group `config.openshift.io`, and which group versions exist;
 //! - on OpenShift, `GET` of the `ClusterVersion` named `version`, because the vendor's minimum is an
 //!   OpenShift version while the API server says Kubernetes;
-//! - the first page (500) of the node list: `spec.providerID`, a few labels and `kubeletVersion`, for the
-//!   distribution (AKS has no version suffix) and for the kubelet skew;
+//! - the node list, after one `SelfSubjectAccessReview` for `list nodes` (a denied review sends no list
+//!   request at all): `spec.providerID`, a few labels and `kubeletVersion`, for the distribution (AKS has no
+//!   version suffix) and for the kubelet skew. The list is read page by page with the paging helper
+//!   (`client::list`), up to its cap;
 //! - `GET /apis/<group>/<version>` (or `/api/v1`) for each API the spec lists.
 //!
 //! Only the version is required to answer. Anything else the identity may not read, or that is cut short, is
 //! not evaluated and makes the result partial (03, "Degrade rule"): a `ClusterVersion` for `openshift_min`
 //! (grant `get`), an API that discovery cannot judge, the node list (grant `list nodes`) and a node list
-//! longer than one page. A partial result never blocks on what it could not read.
+//! longer than the paging cap. A partial result never blocks on what it could not read.
 //!
 //! How the spec's bounds apply:
 //!
@@ -37,8 +39,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::authorization::v1::{
+    ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
+};
 use k8s_openapi::api::core::v1::Node;
-use kube::api::ListParams;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use kube::api::{ListParams, PostParams};
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Level,
     Need, OsSupport, Partial, PeerClass, Support,
@@ -48,6 +54,7 @@ use rdy_spec::check::{ApiRef, K8sVersion, OverMax};
 use serde_json::{Map, Value, json};
 
 use crate::client::guard::RULE_PATH_SHAPE;
+use crate::client::list::{MAX_ITEMS, list_all};
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
 
@@ -63,9 +70,6 @@ mod unit_tests;
 
 use openshift::ClusterVersion;
 use server::{Distro, NodeFacts, Reported, compare, detect, dotted, parse_openshift};
-
-/// The nodes `k8s.version` reads. A cluster with more has its kubelet skew judged on the first page.
-const NODE_PAGE: u32 = 500;
 
 /// The longest text from the server that goes into a sentence, in characters.
 const SHOWN: usize = 64;
@@ -311,21 +315,20 @@ impl VersionCheck {
         } else {
             None
         };
-        let nodes = read(
-            &mapper,
-            client
-                .all::<Node>()
-                .list(&ListParams::default().limit(NODE_PAGE))
-                .await,
-            |list| {
-                let more = list
-                    .metadata
-                    .continue_
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty());
-                (list.items.iter().map(NodeFacts::from_node).collect(), more)
-            },
-        )?;
+        // A denied review is the answer: no list request is sent. A review that cannot be asked (the server
+        // does not serve it, or refuses it) leaves the list to say, as it always did.
+        let nodes = if may_list_nodes(&client).await == Some(false) {
+            Read::Forbidden
+        } else {
+            read(
+                &mapper,
+                list_all(&client.all::<Node>(), &ListParams::default()).await,
+                |listed| {
+                    let facts = listed.items.iter().map(NodeFacts::from_node).collect();
+                    (facts, listed.partial)
+                },
+            )?
+        };
         let apis = match &self.params.apis {
             Some(wanted) => served(&mapper, &client, ctx, &groups, wanted).await?,
             None => Vec::new(),
@@ -340,6 +343,40 @@ impl VersionCheck {
             apis,
         })
     }
+}
+
+/// Whether the identity may `list nodes`, by one `SelfSubjectAccessReview`. `None` when the review could
+/// not say: the request failed, or the server sent no status.
+async fn may_list_nodes(client: &ReadOnlyClient) -> Option<bool> {
+    let review = SelfSubjectAccessReview {
+        metadata: ObjectMeta::default(),
+        spec: SelfSubjectAccessReviewSpec {
+            resource_attributes: Some(ResourceAttributes {
+                verb: Some("list".to_owned()),
+                resource: Some("nodes".to_owned()),
+                ..ResourceAttributes::default()
+            }),
+            non_resource_attributes: None,
+        },
+        status: None,
+    };
+    let done = client
+        .all::<SelfSubjectAccessReview>()
+        .create(&PostParams::default(), &review)
+        .await
+        .ok()?;
+    let status = done.status?;
+    // `allowed: false` with `denied: true` is a definite no. With an evaluation error and no denial the
+    // authorizer could not decide (a webhook that failed), so the list itself is left to say (K1).
+    let undecided = status.denied != Some(true)
+        && status
+            .evaluation_error
+            .as_deref()
+            .is_some_and(|error| !error.is_empty());
+    if !status.allowed && undecided {
+        return None;
+    }
+    Some(status.allowed)
 }
 
 /// `GET /apis`: the group names and their versions.
@@ -612,7 +649,7 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
         });
     }
 
-    // Kubelet skew. A node list the identity may not read, or that is cut at one page, is a part that was not
+    // Kubelet skew. A node list the identity may not read, or that is cut at the paging cap, is a part that was not
     // evaluated: partial, as 03 says for every forbidden or capped source. The skew only warns, so nothing
     // here ever blocks.
     match &facts.nodes {
@@ -622,7 +659,7 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
             }
             if *more {
                 unverified.push(format!(
-                    "kubelet skew was judged on the first {NODE_PAGE} nodes only, the rest are not evaluated"
+                    "kubelet skew was judged on the first {MAX_ITEMS} nodes only, the rest are not evaluated"
                 ));
             }
         }

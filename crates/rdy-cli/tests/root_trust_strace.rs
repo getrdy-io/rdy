@@ -6,12 +6,9 @@
 //! call log. Any call that mentions the fixture home fails the test, whatever the call is (open, stat,
 //! readlink, access).
 //!
-//! The child is this test binary itself, run with `--ignored --exact` on the probe below. The CLI does
-//! not call the trust store yet (M1-126), so the library call is what a root `rdy run` will make.
-//!
-//! The child is the test harness, not the `rdy` binary, so this proves INV-04 for the library call only.
-//! The same check on the real binary (`rdy verify` on a signed fixture) moves to M1-126, which wires the
-//! command to the store.
+//! The child is this test binary itself, run with `--ignored --exact` on the probe below. That proves
+//! INV-04 for the library call. The last test runs the real `rdy verify` on the signed fixture under the
+//! same `strace` and the same hostile environment (M1-126), so the binary is held to it too.
 //!
 //! A second test is the control: the same probe, with a layout for a normal user, must show the home in
 //! the log. Without it, an empty log would pass for the wrong reason (a broken `strace` command line).
@@ -207,6 +204,72 @@ fn root_run_opens_no_path_under_sudo_users_home() {
     );
 }
 
+/// The real binary: `rdy verify` on the signed fixture, as root, with the home of a user who is not
+/// there set in `HOME`, `XDG_CONFIG_HOME` and `SUDO_USER`. The spec has a sidecar, so the loader reads the
+/// trust store, and the store lookup must show only the system path.
+#[test]
+fn root_verify_binary_opens_no_path_under_sudo_users_home() {
+    if !root_or_skip() || !strace_or_skip() {
+        return;
+    }
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let signed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
+    let spec = signed.join("acme-platform.yaml");
+    let out = Command::new("strace")
+        .arg("-f")
+        .arg("-y")
+        .args(["-s", "512"])
+        .arg("-o")
+        .arg(fixture.log())
+        .arg("--")
+        .arg(env!("CARGO_BIN_EXE_rdy"))
+        .arg("verify")
+        .arg(&spec)
+        .args(["--color", "never"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("TERM")
+        .env("SUDO_USER", "alice")
+        .env("SUDO_UID", "1000")
+        .output()
+        .expect("strace could not be started; the root job installs it (apt-get install strace)");
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    // No key is pinned in a fresh root store, so the signed fixture is refused with exit 64. What
+    // matters is where the loader looked.
+    assert_eq!(out.status.code(), Some(64), "{err}");
+    assert!(err.contains("which you have not trusted"), "{err}");
+    assert!(
+        err.contains("As root, rdy reads only /etc/rdy/trust.yaml."),
+        "{err}"
+    );
+    let log = fs::read_to_string(fixture.log()).expect("strace log");
+    assert!(
+        log.contains("/etc/rdy"),
+        "the log does not show the system store lookup:\n{log}"
+    );
+    let hits = mentions(&log, &home);
+    assert!(
+        hits.is_empty(),
+        "a root `rdy verify` touched a path under the user's home:\n{}",
+        hits.join("\n")
+    );
+    for needle in ACCOUNT_LOOKUPS {
+        let lookups: Vec<&str> = log.lines().filter(|l| l.contains(needle)).collect();
+        assert!(
+            lookups.is_empty(),
+            "a root `rdy verify` looked up an account ({needle}):\n{}",
+            lookups.join("\n")
+        );
+    }
+    let config: Vec<&str> = log.lines().filter(|l| l.contains(".config/rdy")).collect();
+    assert!(
+        config.is_empty(),
+        "a root `rdy verify` looked for a user config folder:\n{}",
+        config.join("\n")
+    );
+}
+
 #[test]
 fn root_control_a_user_layout_does_show_the_home_in_the_log() {
     if !root_or_skip() || !strace_or_skip() {
@@ -218,5 +281,52 @@ fn root_control_a_user_layout_does_show_the_home_in_the_log() {
     assert!(
         !hits.is_empty(),
         "the control run never touched the user's store, so the strace check above proves nothing:\n{log}"
+    );
+}
+
+/// A `--key` run reads no trust store (ADR 0027), so under `strace` the log has no `/etc/rdy` and nothing
+/// under the fixture home.
+#[test]
+fn root_verify_with_key_reads_no_trust_store() {
+    if !root_or_skip() || !strace_or_skip() {
+        return;
+    }
+    let fixture = Fixture::new();
+    let home = fixture.home();
+    let signed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
+    let out = Command::new("strace")
+        .arg("-f")
+        .arg("-y")
+        .args(["-s", "512"])
+        .arg("-o")
+        .arg(fixture.log())
+        .arg("--")
+        .arg(env!("CARGO_BIN_EXE_rdy"))
+        .arg("verify")
+        .arg(signed.join("acme-platform.yaml"))
+        .arg("--key")
+        .arg(signed.join("acme-platform.pub"))
+        .args(["--color", "never"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("TERM")
+        .env("SUDO_USER", "alice")
+        .env("SUDO_UID", "1000")
+        .output()
+        .expect("strace could not be started; the root job installs it (apt-get install strace)");
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    let log = fs::read_to_string(fixture.log()).expect("strace log");
+    let store: Vec<&str> = log.lines().filter(|l| l.contains("/etc/rdy")).collect();
+    assert!(
+        store.is_empty(),
+        "a --key run looked at /etc/rdy:\n{}",
+        store.join("\n")
+    );
+    let hits = mentions(&log, &home);
+    assert!(
+        hits.is_empty(),
+        "a --key run touched the fixture home:\n{}",
+        hits.join("\n")
     );
 }

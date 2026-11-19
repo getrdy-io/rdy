@@ -1,0 +1,486 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurations",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingWebhookConfigurationList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingWebhookConfiguration",
+        "metadata": {
+          "name": "acme-validating"
+        },
+        "webhooks": [
+          {
+            "name": "w0.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks0",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w1.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks1",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w2.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks2",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w3.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks3",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w4.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks4",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w5.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks5",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w6.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks6",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w7.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks7",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w8.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks8",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "w9.acme-hooks.example",
+            "clientConfig": {
+              "service": {
+                "namespace": "acme-hooks",
+                "name": "hooks9",
+                "path": "/validate",
+                "port": 443
+              },
+              "caBundle": "Zm9vYmFy"
+            },
+            "rules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ],
+                "scope": "Namespaced"
+              }
+            ],
+            "admissionReviewVersions": [
+              "v1"
+            ],
+            "sideEffects": "None",
+            "timeoutSeconds": 10,
+            "failurePolicy": "Fail",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "NotIn",
+                  "values": [
+                    "kube-system"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

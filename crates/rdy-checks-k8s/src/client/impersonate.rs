@@ -44,6 +44,9 @@ pub enum ImpersonationError {
     /// that type cannot send a wrong header.
     #[error("the `as` value cannot be written as an Impersonate-User header value")]
     BadValue,
+    /// There is no connection to the cluster, so there is nothing to impersonate on (M1-107).
+    #[error("there is no connection to the cluster, so the `as` user cannot be used")]
+    NotConnected,
 }
 
 impl ImpersonationError {
@@ -53,6 +56,9 @@ impl ImpersonationError {
         match self {
             Self::Conflict => {
                 "Use a kubeconfig whose user does not set `as`, `as-uid`, `as-groups` or `as-user-extra` (see `kubectl config view --minify`), or remove `as:` from the k8s.rbac entry of the spec. rdy does not stack two impersonations: the server would see two Impersonate-User headers."
+            }
+            Self::NotConnected => {
+                "rdy has no connection to the cluster. Fix the kubeconfig or the network first (k8s.access says what is wrong), then run rdy again."
             }
             Self::BadValue => {
                 "Use a service account name made of letters, digits, `-` and `.`, as in system:serviceaccount:<namespace>:<name>. If it already is one, this is a bug in rdy: report it."

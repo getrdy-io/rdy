@@ -323,6 +323,65 @@ pub enum ProxyError {
     TooLate,
 }
 
+/// The environment variables [`ProbeHub::set_proxy_from_env`](crate::probe::ProbeHub::set_proxy_from_env)
+/// reads, in the order it tries them. Both cases are read, as tools do, and upper case wins.
+pub const PROXY_ENV: [&str; 4] = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+
+/// The environment variables that carry the `NO_PROXY` list, in the order `ProbeHub::set_proxy_from_env`
+/// tries them. Upper case wins, as in Go. Neither name is secret.
+pub const NO_PROXY_ENV: [&str; 2] = ["NO_PROXY", "no_proxy"];
+
+/// The `ALL_PROXY` variables. A run does not use them (curl does, for every scheme), but `net.proxy`
+/// reports them, so `ProbeHub::set_proxy_from_env` hides the password of one that parses.
+pub const ALL_PROXY_ENV: [&str; 2] = ["ALL_PROXY", "all_proxy"];
+
+/// Two spellings of one proxy setting that are both set and differ. Tools do not agree on which wins
+/// (curl and Python read the lower-case name first, Go the upper-case one), so the product may use another
+/// value than rdy does. It holds the names and never a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnvConflict {
+    /// The upper-case name, such as `HTTPS_PROXY`.
+    pub upper: &'static str,
+    /// The lower-case name, such as `https_proxy`.
+    pub lower: &'static str,
+}
+
+/// The name pairs `env_conflicts` compares.
+const CONFLICT_PAIRS: [(&str, &str); 3] = [
+    ("HTTPS_PROXY", "https_proxy"),
+    ("HTTP_PROXY", "http_proxy"),
+    ("NO_PROXY", "no_proxy"),
+];
+
+/// The pairs of proxy variables that are both set to non-blank values and differ. `get` returns the value
+/// of a name. Values are compared after trimming and are never kept.
+#[must_use]
+pub fn env_conflicts(get: impl Fn(&str) -> Option<String>) -> Vec<EnvConflict> {
+    let value = |name: &str| {
+        get(name)
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    CONFLICT_PAIRS
+        .iter()
+        .filter_map(|&(upper, lower)| {
+            let (a, b) = (value(upper)?, value(lower)?);
+            (a != b).then_some(EnvConflict { upper, lower })
+        })
+        .collect()
+}
+
+/// The proxy of the process environment could not be set for the run. It names the variable and never
+/// holds any part of its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{var}: {error}")]
+pub struct ProxyEnvError {
+    /// The variable that held the proxy URL, one of [`PROXY_ENV`].
+    pub var: &'static str,
+    /// Why it could not be used.
+    pub error: ProxyError,
+}
+
 /// What a proxy asked for in a `Proxy-Authenticate` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -372,8 +431,8 @@ pub enum NetFailure {
         /// The `host:port` that was asked for.
         target: String,
     },
-    /// The proxy answered 407 to `CONNECT`.
-    #[error("the proxy answered 407 to CONNECT {target}. Fix: {}", fix_407(*.challenge, *.sent_credentials))]
+    /// The proxy answered 407 to `CONNECT`, or to the absolute-form request of a plain `http://` call.
+    #[error("the proxy answered 407 for {target}. Fix: {}", fix_407(*.challenge, *.sent_credentials))]
     ProxyAuthRequired {
         /// The `host:port` that was asked for.
         target: String,
@@ -557,16 +616,23 @@ pub(crate) fn parse_connect_head(head: &[u8]) -> Result<ConnectReply, &'static s
         .flatten()
         .filter(|status| (100..=599).contains(status))
         .ok_or("no status code")?;
-    // Every header counts, and so does every comma-separated challenge in one. Basic wins when it is
-    // offered, because it is the only scheme rdy can answer; else the first scheme seen is the hint.
+    let values = lines.filter_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("proxy-authenticate")
+            .then_some(value)
+    });
+    let challenge = challenge_of(values);
+    Ok(ConnectReply { status, challenge })
+}
+
+/// What a set of `Proxy-Authenticate` values offers. Every header counts, and so does every
+/// comma-separated challenge in one. Basic wins when it is offered, because it is the only scheme rdy
+/// can answer; else the first scheme seen is the hint. No value is [`ProxyChallenge::None`].
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+pub(crate) fn challenge_of<'a>(values: impl IntoIterator<Item = &'a str>) -> ProxyChallenge {
     let mut challenge = ProxyChallenge::None;
-    for line in lines {
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        if !name.trim().eq_ignore_ascii_case("proxy-authenticate") {
-            continue;
-        }
+    for value in values {
         let mut offered = false;
         for part in value.split(',') {
             let scheme = part.split_whitespace().next().unwrap_or_default();
@@ -586,7 +652,7 @@ pub(crate) fn parse_connect_head(head: &[u8]) -> Result<ConnectReply, &'static s
             challenge = prefer(challenge, ProxyChallenge::Other);
         }
     }
-    Ok(ConnectReply { status, challenge })
+    challenge
 }
 
 /// The challenge to report when `seen` joins `have`: Basic beats everything, a known scheme beats

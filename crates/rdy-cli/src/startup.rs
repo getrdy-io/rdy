@@ -25,6 +25,27 @@ use rdy_engine::privilege::{Privilege, PrivilegeError};
 use crate::error::{CliError, InternalKind, emit, escape_untrusted};
 use crate::redaction;
 
+/// Turns core dumps off for the whole process (M1-058, security review S3): the core-file size limit
+/// goes to 0 on every Unix. A signal can end the process through the 1 s abort fallback of the exit
+/// (SIGABRT), and a core file would hold the redaction key, passwords and report text. Best effort: a
+/// failure is ignored, since nothing useful can be done and the process is no worse off.
+///
+/// The process is not marked not dumpable here. The privilege gate (INV-10) treats a refused
+/// `/proc/self/auxv` as a setuid or file-capability start, and the kernel refuses it to a non-root user
+/// once the flag is off, so every run would fail. The flag belongs after the gate's snapshot, in the
+/// bundle and upload commands (M2-060).
+pub fn harden_process() {
+    #[cfg(unix)]
+    {
+        use rustix::process::{Resource, Rlimit, setrlimit};
+        let zero = Rlimit {
+            current: Some(0),
+            maximum: Some(0),
+        };
+        let _ = setrlimit(Resource::Core, zero);
+    }
+}
+
 /// Maps a privilege snapshot to the error of INV-10, or hands the snapshot back when it is clean.
 ///
 /// A snapshot that could not be taken is an error too: without it rdy cannot show that the binary

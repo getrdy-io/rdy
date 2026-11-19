@@ -1,0 +1,45 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "The proxy `http://proxy.acme.test:3128` from HTTPS_PROXY is reachable, and NO_PROXY and the daemons agree with it.",
+    "notes": [],
+    "observed": {
+      "conflicts": [],
+      "daemons": [],
+      "no_proxy": {
+        "entries": 1,
+        "set": true,
+        "truncated": false,
+        "var": "NO_PROXY"
+      },
+      "no_proxy_coverage": [],
+      "os": "macos",
+      "reach": {
+        "ms": 0,
+        "proxy": "http://proxy.acme.test:3128",
+        "state": "connected"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,5 @@
+$ rdy run examples/specs/acme-quickstart.yaml
+error: no signature found at examples/specs/acme-quickstart.yaml.minisig
+fix: ask the vendor for examples/specs/acme-quickstart.yaml.minisig and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned
+$ echo $?
+64

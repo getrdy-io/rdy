@@ -195,8 +195,7 @@ fn mkfifo(path: &std::path::Path) {
 }
 
 /// Runs `rdy spec sign <fifo> --secret-key <fifo>` on its own thread and gives the exit code if the
-/// call returns within `limit`. `spec sign` opens its spec path, so on a FIFO with no writer it blocks
-/// for ever. A call that never returns leaves its thread blocked in `open`; the test process ends it.
+/// call returns within `limit`.
 #[cfg(unix)]
 fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Option<ExitCode> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -208,13 +207,13 @@ fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Optio
     rx.recv_timeout(limit).ok()
 }
 
-/// A spec path that is a FIFO with no writer: opening it blocks for ever. The gate must refuse first,
-/// so `run` returns. The control shows the FIFO does block: with no privilege the same call does not
-/// return. Without it, a command that refused a FIFO before opening it would pass this test for the wrong
-/// reason (`spec lint` does that).
+/// A spec path that is a FIFO with no writer. The gate must refuse first, so `rdy spec sign` returns
+/// exit 70 without opening the path. The control is the exit code: since M1-183 every spec read refuses a FIFO
+/// without blocking, so an unprivileged call returns 64 (`spec_unreadable`) where the gate returns 70.
+/// A command that opened the path before the gate would give 64 here, not 70.
 #[cfg(unix)]
 #[test]
-fn a_refused_run_never_opens_the_spec_path() {
+fn a_refused_spec_sign_never_opens_the_spec_path() {
     use std::time::Duration;
 
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
@@ -222,14 +221,15 @@ fn a_refused_run_never_opens_the_spec_path() {
     mkfifo(&fifo);
     let path = fifo.to_string_lossy().into_owned();
 
-    let blocked = sign_a_fifo(common::unprivileged(), &path, Duration::from_secs(2));
+    let control = sign_a_fifo(common::unprivileged(), &path, Duration::from_secs(10));
     assert_eq!(
-        blocked, None,
-        "the control returned, so `spec sign` does not block on a FIFO and this test proves nothing"
+        control,
+        Some(ExitCode::Usage),
+        "an ordinary call refuses the FIFO as an unreadable spec"
     );
 
     let code = sign_a_fifo(privileged(), &path, Duration::from_secs(10))
-        .unwrap_or_else(|| panic!("run did not return: the spec path was opened"));
+        .unwrap_or_else(|| panic!("spec sign did not return: the spec path was opened"));
     assert_eq!(code, ExitCode::Internal);
 }
 
@@ -251,7 +251,7 @@ fn a_spec_with_65_hosts_is_a_lint_error_with_the_fix_hint() {
         assert_eq!(ran.code, ExitCode::Blockers, "{name}: {}", ran.stderr);
         assert!(ran.stdout.is_empty(), "{name}: {}", ran.stdout);
         assert!(
-            ran.stderr.contains("65 endpoints. The limit is 64"),
+            ran.stderr.contains("65 endpoints. The limit is 64."),
             "{name}: {}",
             ran.stderr
         );

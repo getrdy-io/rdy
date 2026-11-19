@@ -1,0 +1,12 @@
+schema = 1
+name = "net-egress-not-http"
+summary = "A port that answers something that is not HTTP"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.egress"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -68,7 +68,9 @@ fn runtime() -> &'static CheckInfo {
 }
 
 fn hub(backend: impl crate::probe::Backend) -> ProbeHub {
-    ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([3; 32])))
+    let hub = ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([3; 32])));
+    hub.set_network(true);
+    hub
 }
 
 fn target(text: &str) -> Target {
@@ -502,7 +504,24 @@ async fn unix_get_within_can_only_shorten_the_limit() {
         .expect_err("too slow for the short limit");
     assert_eq!(error, ProbeError::Timeout);
     assert_eq!(started.elapsed(), Duration::from_secs(1));
-    // A longer `within` than the facade limit is cut to the facade limit, and a reply inside it arrives.
+    // A longer `within` than the facade limit is cut to the facade limit. The reply of this daemon
+    // comes after `UNIX_TIMEOUT`, so only a cut limit ends the call (at `UNIX_TIMEOUT`, not at 600 s).
+    let hub = self::hub(Replay::new().unix_get_after(
+        DOCKER,
+        "/version",
+        200,
+        "{}",
+        UNIX_TIMEOUT + Duration::from_secs(5),
+    ));
+    let long = self::probe(&hub, runtime(), Os::Linux, &[]);
+    let started = tokio::time::Instant::now();
+    let error = long
+        .unix_get_within(Path::new(DOCKER), "/version", Duration::from_secs(600))
+        .await
+        .expect_err("the reply is later than the facade limit");
+    assert_eq!(error, ProbeError::Timeout);
+    assert_eq!(started.elapsed(), UNIX_TIMEOUT);
+    // A longer `within` still lets a reply inside the facade limit through.
     let reply = probe
         .unix_get_within(Path::new(DOCKER), "/version", Duration::from_secs(600))
         .await
@@ -521,9 +540,17 @@ async fn unix_get_within_can_only_shorten_the_limit() {
 }
 
 #[test]
-fn a_refused_connection_has_its_own_error_kind() {
+fn from_io_maps_connection_refused_to_its_own_variant_with_a_hint_for_every_transport() {
     let error = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
-    assert_eq!(ProbeError::from_io(&error), ProbeError::ConnectionRefused);
+    let mapped = ProbeError::from_io(&error);
+    assert_eq!(mapped, ProbeError::ConnectionRefused);
+    // The hint serves a TCP, UDP or TLS peer as well as a Unix socket.
+    let text = mapped.to_string();
+    assert!(
+        text.contains("listening on that address and port"),
+        "{text}"
+    );
+    assert!(text.contains("For a Unix socket"), "{text}");
 }
 
 #[tokio::test]

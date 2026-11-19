@@ -76,6 +76,12 @@ const DOCS_PAGE: &str = "docs/src/content/docs/reference/spec/index.md";
 const RESULT_PAGE: &str = "docs/src/content/docs/reference/result/index.md";
 const SPEC_INTRO: &str = "docs/intro/reference-spec.md";
 const RESULT_INTRO: &str = "docs/intro/reference-result.md";
+/// The hand-written intros of the check family pages (docs/plan/09-docs-site.md, section 6).
+const FAMILY_INTROS: [&str; 3] = [
+    "docs/intro/checks-host.md",
+    "docs/intro/checks-network.md",
+    "docs/intro/checks-kubernetes.md",
+];
 
 /// The committed text of a file in this repo, read at test time.
 fn committed(relative: &str) -> Result<String> {
@@ -83,7 +89,7 @@ fn committed(relative: &str) -> Result<String> {
     Ok(fs::read_to_string(root.join(relative))?)
 }
 
-/// A temporary repo with the schema files written, as `cargo xtask schema` leaves them, and the two
+/// A temporary repo with the schema files written, as `cargo xtask schema` leaves them, and the
 /// hand-written intros copied in. The docs pages render from those files, so every docs test starts here.
 fn repo_with_schema() -> Result<Repo> {
     let repo = Repo::new()?;
@@ -93,6 +99,9 @@ fn repo_with_schema() -> Result<Repo> {
     }
     repo.write(SPEC_INTRO, committed(SPEC_INTRO)?)?;
     repo.write(RESULT_INTRO, committed(RESULT_INTRO)?)?;
+    for intro in FAMILY_INTROS {
+        repo.write(intro, committed(intro)?)?;
+    }
     Ok(repo)
 }
 
@@ -104,6 +113,31 @@ fn docs_writes_the_spec_and_result_reference_pages() -> Result<()> {
     let result = repo.path().join(RESULT_PAGE);
     assert!(result.is_file());
     assert!(fs::read_to_string(&result)?.contains("Always `Report`."));
+    Ok(())
+}
+
+#[test]
+fn docs_writes_one_family_page_per_family_with_a_section_per_check() -> Result<()> {
+    // docs/plan/09-docs-site.md, section 6: one page per family, one H2 per check, and each Remediation
+    // block is the registry string. The unit tests compare the strings; this runs the binary.
+    let repo = repo_with_schema()?;
+    assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
+    for (slug, id) in [
+        ("host", "host.cpu"),
+        ("network", "net.egress"),
+        ("kubernetes", "k8s.version"),
+    ] {
+        let page = fs::read_to_string(
+            repo.path()
+                .join(format!("docs/src/content/docs/checks/{slug}.md")),
+        )?;
+        assert!(
+            page.contains(&format!("## `{id}` ")),
+            "{slug} has no section for {id}"
+        );
+    }
+    let check = xtask(repo.path(), &["docs", "--check"])?;
+    assert_eq!(code(&check), Some(0), "{}", stderr(&check));
     Ok(())
 }
 

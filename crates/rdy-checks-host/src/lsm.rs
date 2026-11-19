@@ -791,6 +791,35 @@ fn ausearch_since(window_secs: u64) -> &'static str {
     }
 }
 
+/// The note about denials that were logged in permissive mode, with the count of the others when
+/// SELinux enforces now. It never says "1 of the denials were".
+fn permissive_note(mode: SelinuxMode, permissive: usize, total: usize) -> String {
+    let (was, it) = if permissive == 1 {
+        ("was", "it was")
+    } else {
+        ("were", "they were")
+    };
+    let of = if permissive == total {
+        format!("All {permissive} denials")
+    } else {
+        format!("{permissive} of the {total} denials",)
+    };
+    let of = if permissive == 1 && total == 1 {
+        "The 1 denial".to_owned()
+    } else {
+        of
+    };
+    let mut text = format!("{of} {was} logged in permissive mode, so {it} not blocked.");
+    let others = total.saturating_sub(permissive);
+    if mode == SelinuxMode::Enforcing && others > 0 {
+        text.push_str(&format!(
+            " The other {others} {} blocked.",
+            if others == 1 { "was" } else { "were" }
+        ));
+    }
+    text
+}
+
 fn judge_denials(
     rule: &SelinuxRule,
     mode: SelinuxMode,
@@ -831,10 +860,8 @@ fn judge_denials(
                 ));
             }
             if scan.permissive > 0 {
-                part.notes.push(format!(
-                    "{} of the denials were logged in permissive mode, so they were not blocked.",
-                    scan.permissive
-                ));
+                part.notes
+                    .push(permissive_note(mode, scan.permissive, scan.total));
             }
             if scan.total > rule.denials_max {
                 let level = if scan.watched_total > 0 {

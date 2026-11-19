@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-no-proxy-gap"
+summary = "NO_PROXY lists only localhost, and the spec requires more"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = true
+kube = false
