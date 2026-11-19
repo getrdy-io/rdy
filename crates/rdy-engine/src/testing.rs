@@ -65,6 +65,14 @@ use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
+/// Waits `delay` on the tokio clock. Under a paused clock the wait costs no real time, and it uses no thread,
+/// so a single-thread runtime is never blocked by it. A scripted server that answers late (the `delay_ms` of
+/// a recorded API response) uses it, so a crate that may not depend on tokio can still wait.
+#[cfg(feature = "runtime")]
+pub async fn sleep(delay: std::time::Duration) {
+    tokio::time::sleep(delay).await;
+}
+
 /// The shared fixtures directory, `tests/fixtures` at the repo root (08 section 1). It resolves from
 /// this crate's manifest directory, so it works from any crate of the workspace and not from a
 /// crates.io tarball, which does not ship the fixtures.

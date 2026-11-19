@@ -163,7 +163,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <header>
 <h1><span class="visually-hidden">Verdict: </span><span class="verdict-warnings">READY with warnings</span></h1>
 <p>For <bdi>acme-platform</bdi> <bdi>&#62;=1.0</bdi>, on <bdi>warnings-only.example</bdi></p>
-<p class="summary">0 blocks, 2 warnings, 13 passed</p>
+<p class="summary">0 blocks, 3 warnings, 14 passed</p>
 <p class="no-blocks">No blocks.</p>
 <p>Run <bdi>2026-11-02 09:00:00 UTC</bdi> with rdy <bdi>&#60;version&#62;</bdi> (root)</p>
 <p class="next">What to do next: Nothing blocks the install. Read the warnings. To share this result, send the .json file from the same folder.</p>
@@ -174,8 +174,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <nav aria-label="Sections">
 <p class="label">Jump to:</p>
 <ul>
-<li><a href="#warnings">Warnings and optional checks not run (2)</a></li>
-<li><a href="#passed">Passed (13)</a></li>
+<li><a href="#warnings">Warnings and optional checks not run (3)</a></li>
+<li><a href="#passed">Passed (14)</a></li>
 <li><a href="#capabilities">What rdy could use on this machine</a></li>
 <li><a href="#details">Run and spec details</a></li>
 <li><a href="#actions">What rdy read and contacted</a></li>
@@ -242,6 +242,27 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </dl>
 </div>
 <p>Requires: root (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-warn" id="check-16">
+<h3><span class="status">WARN</span> <span class="id"><bdi>k8s.storageclass</bdi></span></h3>
+<p class="text"><bdi>No default storage class. The cluster has: acme-fast, acme-slow</bdi></p>
+<p class="text"><span class="label">From the spec file (not verified):</span> <bdi>Mark one StorageClass as the default.</bdi></p>
+<p class="text"><span class="label">More from rdy:</span> <bdi>Mark one class as the default: `kubectl patch storageclass acme-fast -p &#39;{&#34;metadata&#34;:{&#34;annotations&#34;:{&#34;storageclass.kubernetes.io/is-default-class&#34;:&#34;true&#34;}}}&#39;`.</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Classes complete</bdi></dt>
+<dd><bdi>yes</bdi></dd>
+<dt><bdi>Classes read</bdi></dt>
+<dd><bdi>2</bdi></dd>
+<dt><bdi>Default classes</bdi></dt>
+<dd><bdi>none</bdi></dd>
+<dt><bdi>Server minor</bdi></dt>
+<dd><bdi>1.29</bdi></dd>
+</dl>
+</div>
+<p>Requires: a Kubernetes context (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
 </section>
@@ -755,6 +776,38 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </div>
 <p class="muted">Took 0 ms</p>
 </article>
+<article class="check status-pass" id="check-15">
+<h3><span class="status">PASS</span> <span class="id"><bdi>k8s.version</bdi></span></h3>
+<p class="text"><bdi>Server v1.29.4, 1.27 to 1.31 needed</bdi></p>
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+<dt><bdi>Distribution</bdi></dt>
+<dd><bdi>vanilla</bdi></dd>
+<dt><bdi>Git version</bdi></dt>
+<dd><bdi>v1.29.4</bdi></dd>
+<dt><bdi>Kubelet minors</bdi></dt>
+<dd><bdi>1.29</bdi></dd>
+<dt><bdi>Kubernetes</bdi></dt>
+<dd><bdi>1.29.4</bdi></dd>
+<dt><bdi>Nodes read</bdi></dt>
+<dd><bdi>3</bdi></dd>
+</dl>
+</div>
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+<dt><bdi>Max</bdi></dt>
+<dd><bdi>1.31</bdi></dd>
+<dt><bdi>Min</bdi></dt>
+<dd><bdi>1.27</bdi></dd>
+<dt><bdi>Over max</bdi></dt>
+<dd><bdi>warn</bdi></dd>
+</dl>
+</div>
+<p>Requires: a Kubernetes context (available)</p>
+<p class="muted">Took 0 ms</p>
+</article>
 </section>
 <section aria-labelledby="capabilities">
 <h2 id="capabilities">What rdy could use on this machine</h2>
@@ -766,6 +819,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tbody>
 <tr><th scope="row"><bdi>root</bdi></th><td>available</td><td><bdi>uid 0</bdi></td><td><bdi></bdi></td></tr>
 <tr><th scope="row"><bdi>network access</bdi></th><td>available</td><td><bdi></bdi></td><td><bdi></bdi></td></tr>
+<tr><th scope="row"><bdi>a Kubernetes context</bdi></th><td>available</td><td><bdi>acme-fixture, https://k8s.acme.test:6443, user acme-reader</bdi></td><td><bdi></bdi></td></tr>
 </tbody>
 </table>
 </section>
@@ -791,7 +845,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dt>Spec file</dt>
 <dd><bdi>spec.yaml</bdi></dd>
 <dt>Spec SHA-256</dt>
-<dd><bdi>02f829fbd25cd2e0a95cec50e41f4036b059fa382850746d1c4c451a9d67f7bf</bdi></dd>
+<dd><bdi>1ef919754e63e4b093e1e5b52dba245125131bd9ef6f1f2331650f6a95187da3</bdi></dd>
 <dt>Signature</dt>
 <dd><bdi>Not signed</bdi></dd>
 <dt>Hostname</dt>
@@ -804,6 +858,16 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dd><bdi>x86_64</bdi></dd>
 <dt>Running as</dt>
 <dd><bdi>root</bdi></dd>
+<dt>Kubernetes context</dt>
+<dd><bdi>acme-fixture</bdi></dd>
+<dt>Kubernetes server</dt>
+<dd><bdi>https://k8s.acme.test:6443</bdi></dd>
+<dt>Kubernetes user</dt>
+<dd><bdi>acme-reader</bdi></dd>
+<dt>Kubernetes user confirmed by the cluster</dt>
+<dd><bdi>no</bdi></dd>
+<dt>TLS certificate checks</dt>
+<dd><bdi>on</bdi></dd>
 </dl>
 </section>
 <section aria-labelledby="actions">
@@ -819,123 +883,128 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">3</th><td>the run itself</td><td>Made a system call</td><td><bdi>hostname</bdi></td><td>Done</td></tr>
 <tr><th scope="row">4</th><td>the run itself</td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
 <tr><th scope="row">5</th><td>the run itself</td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
-<tr><th scope="row">6</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
-<tr><th scope="row">7</th><td><bdi>host.os</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
-<tr><th scope="row">8</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/osrelease</bdi></td><td>Done, 22 bytes</td></tr>
-<tr><th scope="row">9</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/crypto/fips_enabled</bdi></td><td>Done, 2 bytes</td></tr>
-<tr><th scope="row">10</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/systemd/system</bdi></td><td>Done, 0 bytes</td></tr>
-<tr><th scope="row">11</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
-<tr><th scope="row">12</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
-<tr><th scope="row">13</th><td><bdi>host.os</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
-<tr><th scope="row">14</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 442 bytes</td></tr>
-<tr><th scope="row">15</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">16</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
-<tr><th scope="row">17</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">18</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">19</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">20</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">21</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">22</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">23</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">24</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">25</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td><td>Done, 8160 bytes</td></tr>
-<tr><th scope="row">26</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/devices/system/cpu/online</bdi></td><td>Done, 4 bytes</td></tr>
-<tr><th scope="row">27</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/status</bdi></td><td>Done, 172 bytes</td></tr>
-<tr><th scope="row">28</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">29</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
-<tr><th scope="row">30</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
-<tr><th scope="row">31</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
-<tr><th scope="row">32</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
-<tr><th scope="row">33</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">34</th><td><bdi>host.cpu</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
-<tr><th scope="row">35</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib/acme</bdi></td><td>Done</td></tr>
-<tr><th scope="row">36</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
-<tr><th scope="row">37</th><td><bdi>host.kernel</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
-<tr><th scope="row">38</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
-<tr><th scope="row">39</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/proc/modules</bdi></td><td>Done, 208 bytes</td></tr>
-<tr><th scope="row">40</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.dep</bdi></td><td>Done, 454 bytes</td></tr>
-<tr><th scope="row">41</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.builtin</bdi></td><td>Done, 59 bytes</td></tr>
-<tr><th scope="row">42</th><td><bdi>host.kernel</bdi></td><td>Looked at a path</td><td><bdi>/sys/kernel/btf/vmlinux</bdi></td><td>Done, 26 bytes</td></tr>
-<tr><th scope="row">43</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">44</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
-<tr><th scope="row">45</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.controllers</bdi></td><td>Done, 44 bytes</td></tr>
-<tr><th scope="row">46</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.subtree_control</bdi></td><td>Done, 19 bytes</td></tr>
-<tr><th scope="row">47</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers</bdi></td><td>Done, 19 bytes</td></tr>
-<tr><th scope="row">48</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control</bdi></td><td>Done, 1 bytes</td></tr>
-<tr><th scope="row">49</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cgroups</bdi></td><td>Done, 226 bytes</td></tr>
-<tr><th scope="row">50</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cmdline</bdi></td><td>Done, 143 bytes</td></tr>
-<tr><th scope="row">51</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
-<tr><th scope="row">52</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/device-tree/model</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">53</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/shmmax</bdi></td><td>Done, 21 bytes</td></tr>
-<tr><th scope="row">54</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_forward</bdi></td><td>Done, 2 bytes</td></tr>
-<tr><th scope="row">55</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/tcp_rmem</bdi></td><td>Done, 20 bytes</td></tr>
-<tr><th scope="row">56</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/vm/max_map_count</bdi></td><td>Done, 6 bytes</td></tr>
-<tr><th scope="row">57</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
-<tr><th scope="row">58</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">59</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">60</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
-<tr><th scope="row">61</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">62</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/usr/lib/sysctl.d/50-acme-net.conf</bdi></td><td>Done, 78 bytes</td></tr>
-<tr><th scope="row">63</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.d/90-acme.conf</bdi></td><td>Done, 92 bytes</td></tr>
-<tr><th scope="row">64</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">65</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf</bdi></td><td>Done, 31 bytes</td></tr>
-<tr><th scope="row">66</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system.conf.d</bdi></td><td>Done, 1 entries</td></tr>
-<tr><th scope="row">67</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">68</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">69</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">70</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">71</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf.d/10-acme.conf</bdi></td><td>Done, 37 bytes</td></tr>
-<tr><th scope="row">72</th><td><bdi>host.sysctl</bdi></td><td>Made a system call</td><td><bdi>rlimit</bdi></td><td>Done</td></tr>
-<tr><th scope="row">73</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/nr_open</bdi></td><td>Done, 8 bytes</td></tr>
-<tr><th scope="row">74</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/file-max</bdi></td><td>Done, 20 bytes</td></tr>
-<tr><th scope="row">75</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/fs/selinux/enforce</bdi></td><td>Done, 1 bytes</td></tr>
-<tr><th scope="row">76</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/etc/selinux/config</bdi></td><td>Done, 53 bytes</td></tr>
-<tr><th scope="row">77</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/var/log/audit/audit.log</bdi></td><td>Done, 1070 bytes</td></tr>
-<tr><th scope="row">78</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/module/apparmor/parameters/enabled</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">79</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run</bdi></td></tr>
-<tr><th scope="row">80</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>timedatectl</bdi> <bdi>show</bdi> <bdi>-p</bdi> <bdi>NTPSynchronized</bdi> <bdi>-p</bdi> <bdi>NTP</bdi> <bdi>-p</bdi> <bdi>Timezone</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">81</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>chronyc</bdi> <bdi>-n</bdi> <bdi>-c</bdi> <bdi>tracking</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">82</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp</bdi></td><td>Done, 484 bytes</td></tr>
-<tr><th scope="row">83</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp6</bdi></td><td>Done, 322 bytes</td></tr>
-<tr><th scope="row">84</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp</bdi></td><td>Done, 245 bytes</td></tr>
-<tr><th scope="row">85</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp6</bdi></td><td>Done, 163 bytes</td></tr>
-<tr><th scope="row">86</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_port_range</bdi></td><td>Done, 12 bytes</td></tr>
-<tr><th scope="row">87</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_reserved_ports</bdi></td><td>Done, 1 bytes</td></tr>
-<tr><th scope="row">88</th><td><bdi>host.ports</bdi></td><td>Read where a link points</td><td><bdi>/proc/self/ns/net</bdi></td><td>Done</td></tr>
-<tr><th scope="row">89</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
-<tr><th scope="row">90</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
-<tr><th scope="row">91</th><td><bdi>host.ports</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
-<tr><th scope="row">92</th><td><bdi>host.security_agents</bdi></td><td>Listed a folder</td><td><bdi>/proc</bdi></td><td>Done, 14 entries</td></tr>
-<tr><th scope="row">93</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/1/comm</bdi></td><td>Done, 8 bytes</td></tr>
-<tr><th scope="row">94</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/612/comm</bdi></td><td>Done, 5 bytes</td></tr>
-<tr><th scope="row">95</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/640/comm</bdi></td><td>Done, 5 bytes</td></tr>
-<tr><th scope="row">96</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/733/comm</bdi></td><td>Done, 5 bytes</td></tr>
-<tr><th scope="row">97</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/901/comm</bdi></td><td>Done, 11 bytes</td></tr>
-<tr><th scope="row">98</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/902/comm</bdi></td><td>Done, 8 bytes</td></tr>
-<tr><th scope="row">99</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/var/lib/kubelet/config.yaml</bdi></td><td>Done, 120 bytes</td></tr>
-<tr><th scope="row">100</th><td><bdi>host.container_runtime</bdi></td><td>Checked an environment variable name</td><td><bdi>XDG_RUNTIME_DIR</bdi></td><td>Done</td></tr>
-<tr><th scope="row">101</th><td><bdi>host.container_runtime</bdi></td><td>Looked at a path</td><td><bdi>/run/containerd/containerd.sock</bdi></td><td>Done, 0 bytes</td></tr>
-<tr><th scope="row">102</th><td><bdi>host.container_runtime</bdi></td><td>Ran a command</td><td><bdi>containerd</bdi> <bdi>--version</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">103</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/etc/containerd/config.toml</bdi></td><td>Done, 536 bytes</td></tr>
-<tr><th scope="row">104</th><td><bdi>host.container_runtime</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system/containerd.service.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">105</th><td><bdi>host.firewall</bdi></td><td>Looked at a path</td><td><bdi>/run/firewalld</bdi></td><td>Done, 0 bytes</td></tr>
-<tr><th scope="row">106</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--state</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">107</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--get-active-zones</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">108</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
-<tr><th scope="row">109</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
-<tr><th scope="row">110</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--list-all</bdi> <bdi>--zone=public</bdi></td><td>Done, exit code 0</td></tr>
-<tr><th scope="row">111</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/services/ssh.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">112</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/usr/lib/firewalld/services/ssh.xml</bdi></td><td>Done, 217 bytes</td></tr>
-<tr><th scope="row">113</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/direct.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">114</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/ufw/ufw.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">115</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>web.acme.test</bdi></td><td>Done</td></tr>
-<tr><th scope="row">116</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>web.acme.test</bdi>:<bdi>8080</bdi></td><td>Done</td></tr>
-<tr><th scope="row">117</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
-<tr><th scope="row">118</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
-<tr><th scope="row">119</th><td><bdi>net.mtu</bdi></td><td>Listed a folder</td><td><bdi>/sys/class/net</bdi></td><td>Done, 2 entries</td></tr>
-<tr><th scope="row">120</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/mtu</bdi></td><td>Done, 5 bytes</td></tr>
-<tr><th scope="row">121</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/operstate</bdi></td><td>Done, 3 bytes</td></tr>
-<tr><th scope="row">122</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/type</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">6</th><td>the run itself</td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, reply code 200</td></tr>
+<tr><th scope="row">7</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">8</th><td><bdi>host.os</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">9</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/osrelease</bdi></td><td>Done, 22 bytes</td></tr>
+<tr><th scope="row">10</th><td><bdi>host.os</bdi></td><td>Read a file</td><td><bdi>/proc/sys/crypto/fips_enabled</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">11</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/systemd/system</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">12</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">13</th><td><bdi>host.os</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">14</th><td><bdi>host.os</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
+<tr><th scope="row">15</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 442 bytes</td></tr>
+<tr><th scope="row">16</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">17</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">18</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">19</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">20</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">21</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">22</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">23</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">24</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">25</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.swap.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">26</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td><td>Done, 8160 bytes</td></tr>
+<tr><th scope="row">27</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/devices/system/cpu/online</bdi></td><td>Done, 4 bytes</td></tr>
+<tr><th scope="row">28</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/status</bdi></td><td>Done, 172 bytes</td></tr>
+<tr><th scope="row">29</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">30</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">31</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">32</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">33</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">34</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">35</th><td><bdi>host.cpu</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">36</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib/acme</bdi></td><td>Done</td></tr>
+<tr><th scope="row">37</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">38</th><td><bdi>host.kernel</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
+<tr><th scope="row">39</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">40</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/proc/modules</bdi></td><td>Done, 208 bytes</td></tr>
+<tr><th scope="row">41</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.dep</bdi></td><td>Done, 454 bytes</td></tr>
+<tr><th scope="row">42</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.builtin</bdi></td><td>Done, 59 bytes</td></tr>
+<tr><th scope="row">43</th><td><bdi>host.kernel</bdi></td><td>Looked at a path</td><td><bdi>/sys/kernel/btf/vmlinux</bdi></td><td>Done, 26 bytes</td></tr>
+<tr><th scope="row">44</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
+<tr><th scope="row">45</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
+<tr><th scope="row">46</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.controllers</bdi></td><td>Done, 44 bytes</td></tr>
+<tr><th scope="row">47</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.subtree_control</bdi></td><td>Done, 19 bytes</td></tr>
+<tr><th scope="row">48</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers</bdi></td><td>Done, 19 bytes</td></tr>
+<tr><th scope="row">49</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.subtree_control</bdi></td><td>Done, 1 bytes</td></tr>
+<tr><th scope="row">50</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cgroups</bdi></td><td>Done, 226 bytes</td></tr>
+<tr><th scope="row">51</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/cmdline</bdi></td><td>Done, 143 bytes</td></tr>
+<tr><th scope="row">52</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
+<tr><th scope="row">53</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/device-tree/model</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">54</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/kernel/shmmax</bdi></td><td>Done, 21 bytes</td></tr>
+<tr><th scope="row">55</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_forward</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">56</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/tcp_rmem</bdi></td><td>Done, 20 bytes</td></tr>
+<tr><th scope="row">57</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/vm/max_map_count</bdi></td><td>Done, 6 bytes</td></tr>
+<tr><th scope="row">58</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">59</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">60</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">61</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/sysctl.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">62</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/sysctl.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">63</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/usr/lib/sysctl.d/50-acme-net.conf</bdi></td><td>Done, 78 bytes</td></tr>
+<tr><th scope="row">64</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.d/90-acme.conf</bdi></td><td>Done, 92 bytes</td></tr>
+<tr><th scope="row">65</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/sysctl.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">66</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf</bdi></td><td>Done, 31 bytes</td></tr>
+<tr><th scope="row">67</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system.conf.d</bdi></td><td>Done, 1 entries</td></tr>
+<tr><th scope="row">68</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/run/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">69</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/local/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">70</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/usr/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">71</th><td><bdi>host.sysctl</bdi></td><td>Listed a folder</td><td><bdi>/lib/systemd/system.conf.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">72</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/etc/systemd/system.conf.d/10-acme.conf</bdi></td><td>Done, 37 bytes</td></tr>
+<tr><th scope="row">73</th><td><bdi>host.sysctl</bdi></td><td>Made a system call</td><td><bdi>rlimit</bdi></td><td>Done</td></tr>
+<tr><th scope="row">74</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/nr_open</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">75</th><td><bdi>host.sysctl</bdi></td><td>Read a file</td><td><bdi>/proc/sys/fs/file-max</bdi></td><td>Done, 20 bytes</td></tr>
+<tr><th scope="row">76</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/fs/selinux/enforce</bdi></td><td>Done, 1 bytes</td></tr>
+<tr><th scope="row">77</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/etc/selinux/config</bdi></td><td>Done, 53 bytes</td></tr>
+<tr><th scope="row">78</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/var/log/audit/audit.log</bdi></td><td>Done, 1070 bytes</td></tr>
+<tr><th scope="row">79</th><td><bdi>host.lsm</bdi></td><td>Read a file</td><td><bdi>/sys/module/apparmor/parameters/enabled</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">80</th><td><bdi>host.time_sync</bdi></td><td>Opened a connection</td><td><bdi>192.0.2.10</bdi>:<bdi>123</bdi> (UDP)</td><td>Failed: <bdi>connection refused. Fix: check that the service is running and listening on that address and port. For a Unix socket, check that the file is not left over from an earlier run</bdi></td></tr>
+<tr><th scope="row">81</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>timedatectl</bdi> <bdi>show</bdi> <bdi>-p</bdi> <bdi>NTPSynchronized</bdi> <bdi>-p</bdi> <bdi>NTP</bdi> <bdi>-p</bdi> <bdi>Timezone</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">82</th><td><bdi>host.time_sync</bdi></td><td>Ran a command</td><td><bdi>chronyc</bdi> <bdi>-n</bdi> <bdi>-c</bdi> <bdi>tracking</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">83</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp</bdi></td><td>Done, 484 bytes</td></tr>
+<tr><th scope="row">84</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/tcp6</bdi></td><td>Done, 322 bytes</td></tr>
+<tr><th scope="row">85</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp</bdi></td><td>Done, 245 bytes</td></tr>
+<tr><th scope="row">86</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/net/udp6</bdi></td><td>Done, 163 bytes</td></tr>
+<tr><th scope="row">87</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_port_range</bdi></td><td>Done, 12 bytes</td></tr>
+<tr><th scope="row">88</th><td><bdi>host.ports</bdi></td><td>Read a file</td><td><bdi>/proc/sys/net/ipv4/ip_local_reserved_ports</bdi></td><td>Done, 1 bytes</td></tr>
+<tr><th scope="row">89</th><td><bdi>host.ports</bdi></td><td>Read where a link points</td><td><bdi>/proc/self/ns/net</bdi></td><td>Done</td></tr>
+<tr><th scope="row">90</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/.dockerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">91</th><td><bdi>host.ports</bdi></td><td>Looked at a path</td><td><bdi>/run/.containerenv</bdi></td><td>Done</td></tr>
+<tr><th scope="row">92</th><td><bdi>host.ports</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
+<tr><th scope="row">93</th><td><bdi>host.security_agents</bdi></td><td>Listed a folder</td><td><bdi>/proc</bdi></td><td>Done, 14 entries</td></tr>
+<tr><th scope="row">94</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/1/comm</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">95</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/612/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">96</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/640/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">97</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/733/comm</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">98</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/901/comm</bdi></td><td>Done, 11 bytes</td></tr>
+<tr><th scope="row">99</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/902/comm</bdi></td><td>Done, 8 bytes</td></tr>
+<tr><th scope="row">100</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/var/lib/kubelet/config.yaml</bdi></td><td>Done, 120 bytes</td></tr>
+<tr><th scope="row">101</th><td><bdi>host.container_runtime</bdi></td><td>Checked an environment variable name</td><td><bdi>XDG_RUNTIME_DIR</bdi></td><td>Done</td></tr>
+<tr><th scope="row">102</th><td><bdi>host.container_runtime</bdi></td><td>Looked at a path</td><td><bdi>/run/containerd/containerd.sock</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">103</th><td><bdi>host.container_runtime</bdi></td><td>Ran a command</td><td><bdi>containerd</bdi> <bdi>--version</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">104</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/etc/containerd/config.toml</bdi></td><td>Done, 536 bytes</td></tr>
+<tr><th scope="row">105</th><td><bdi>host.container_runtime</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system/containerd.service.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">106</th><td><bdi>host.firewall</bdi></td><td>Looked at a path</td><td><bdi>/run/firewalld</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">107</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--state</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">108</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--get-active-zones</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">109</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">110</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">111</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--list-all</bdi> <bdi>--zone=public</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">112</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/services/ssh.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">113</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/usr/lib/firewalld/services/ssh.xml</bdi></td><td>Done, 217 bytes</td></tr>
+<tr><th scope="row">114</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/direct.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">115</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/ufw/ufw.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">116</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>web.acme.test</bdi></td><td>Done</td></tr>
+<tr><th scope="row">117</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>web.acme.test</bdi>:<bdi>8080</bdi></td><td>Done</td></tr>
+<tr><th scope="row">118</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">119</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">120</th><td><bdi>net.mtu</bdi></td><td>Listed a folder</td><td><bdi>/sys/class/net</bdi></td><td>Done, 2 entries</td></tr>
+<tr><th scope="row">121</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/mtu</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">122</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/operstate</bdi></td><td>Done, 3 bytes</td></tr>
+<tr><th scope="row">123</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/type</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">124</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis</bdi></td><td>Done, reply code 200</td></tr>
+<tr><th scope="row">125</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>POST</bdi> <bdi>/apis/authorization.k8s.io/v1/selfsubjectaccessreviews</bdi></td><td>Done, reply code 201</td></tr>
+<tr><th scope="row">126</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/api/v1/nodes</bdi></td><td>Done, reply code 200</td></tr>
+<tr><th scope="row">127</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/storageclasses</bdi></td><td>Done, reply code 200</td></tr>
 </tbody>
 </table>
 </section>
@@ -945,7 +1014,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p>This link carries the product name and nothing else.</p>
 <p>rdy <bdi>&#60;version&#62;</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="b9270f00654086ba856a7c7c7bfaaa33297fb7d9831a4e140401fae277820fe0">{
+<script type="application/json" id="rdy-result" data-sha256="416fbbd2eaeadbce1add6feadce1c05bd4a9e784acaf4c7f91bc86606c951dc5">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -971,9 +1040,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   "spec": {
     "product": "acme-platform",
     "version": "\u003e=1.0",
-    "sha256": "02f829fbd25cd2e0a95cec50e41f4036b059fa382850746d1c4c451a9d67f7bf",
+    "sha256": "1ef919754e63e4b093e1e5b52dba245125131bd9ef6f1f2331650f6a95187da3",
     "file_name": "spec.yaml",
-    "size_bytes": 1680,
+    "size_bytes": 1905,
     "serial": null,
     "expires": null,
     "contact": null,
@@ -1006,7 +1075,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     "euid": 0,
     "user": null,
     "elevated": true,
-    "kube": null
+    "kube": {
+      "context": "acme-fixture",
+      "server": "https://k8s.acme.test:6443",
+      "user": "acme-reader",
+      "user_verified": false,
+      "exec_plugin": null,
+      "insecure_tls": false
+    }
   },
   "proxy": null,
   "capabilities": [
@@ -1023,15 +1099,22 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "available": true,
       "detail": null,
       "hint": null
+    },
+    {
+      "need": "kube_context",
+      "name": null,
+      "available": true,
+      "detail": "acme-fixture, https://k8s.acme.test:6443, user acme-reader",
+      "hint": null
     }
   ],
   "verdict": "ready_with_warnings",
   "verdict_reason": null,
   "exit_code": 1,
   "summary": {
-    "total": 15,
-    "pass": 13,
-    "warn": 2,
+    "total": 17,
+    "pass": 14,
+    "warn": 3,
     "block": 0,
     "skipped": 0,
     "timeout": 0,
@@ -1824,6 +1907,78 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "notes": [],
       "started_ms": 0,
       "duration_ms": 0
+    },
+    {
+      "key": "k8s.version",
+      "id": "k8s.version",
+      "name": null,
+      "family": "k8s",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Server v1.29.4, 1.27 to 1.31 needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "distribution": "vanilla",
+        "git_version": "v1.29.4",
+        "kubelet_minors": [
+          "1.29"
+        ],
+        "kubernetes": "1.29.4",
+        "nodes_read": 3
+      },
+      "expected": {
+        "max": "1.31",
+        "min": "1.27",
+        "over_max": "warn"
+      },
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
+      "key": "k8s.storageclass",
+      "id": "k8s.storageclass",
+      "name": null,
+      "family": "k8s",
+      "severity": "warn",
+      "status": "warn",
+      "bucket": "warning",
+      "message": "No default storage class. The cluster has: acme-fast, acme-slow",
+      "fix": "Mark one StorageClass as the default.",
+      "fix_source": "spec",
+      "builtin_fix": "Mark one class as the default: `kubectl patch storageclass acme-fast -p '{\"metadata\":{\"annotations\":{\"storageclass.kubernetes.io/is-default-class\":\"true\"}}}'`.",
+      "observed": {
+        "classes_complete": true,
+        "classes_read": 2,
+        "default_classes": [],
+        "server_minor": "1.29"
+      },
+      "expected": {},
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 0,
+      "duration_ms": 0
     }
   ],
   "actions": [
@@ -1880,6 +2035,18 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     },
     {
       "seq": 6,
+      "check": null,
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/version",
+      "status": 200,
+      "via_proxy": null
+    },
+    {
+      "seq": 7,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1890,7 +2057,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 7,
+      "seq": 8,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1899,7 +2066,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "api": "uname"
     },
     {
-      "seq": 8,
+      "seq": 9,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1910,7 +2077,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 9,
+      "seq": 10,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1921,7 +2088,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 10,
+      "seq": 11,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1931,7 +2098,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/systemd/system"
     },
     {
-      "seq": 11,
+      "seq": 12,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1940,7 +2107,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/.dockerenv"
     },
     {
-      "seq": 12,
+      "seq": 13,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1949,7 +2116,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/.containerenv"
     },
     {
-      "seq": 13,
+      "seq": 14,
       "check": "host.os",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1958,7 +2125,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "name": "KUBERNETES_SERVICE_HOST"
     },
     {
-      "seq": 14,
+      "seq": 15,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1969,7 +2136,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 15,
+      "seq": 16,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1980,7 +2147,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 16,
+      "seq": 17,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -1991,7 +2158,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 17,
+      "seq": 18,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2001,7 +2168,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max"
     },
     {
-      "seq": 18,
+      "seq": 19,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2011,7 +2178,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.max"
     },
     {
-      "seq": 19,
+      "seq": 20,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2021,7 +2188,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/memory.max"
     },
     {
-      "seq": 20,
+      "seq": 21,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2031,7 +2198,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/memory.max"
     },
     {
-      "seq": 21,
+      "seq": 22,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2041,7 +2208,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.swap.max"
     },
     {
-      "seq": 22,
+      "seq": 23,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2051,7 +2218,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/acme.slice/memory.swap.max"
     },
     {
-      "seq": 23,
+      "seq": 24,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2061,7 +2228,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/system.slice/memory.swap.max"
     },
     {
-      "seq": 24,
+      "seq": 25,
       "check": "host.memory",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2071,7 +2238,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/memory.swap.max"
     },
     {
-      "seq": 25,
+      "seq": 26,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2082,7 +2249,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 26,
+      "seq": 27,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2093,7 +2260,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 27,
+      "seq": 28,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2104,7 +2271,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 28,
+      "seq": 29,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2115,7 +2282,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 29,
+      "seq": 30,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2123,17 +2290,6 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "outcome": "ok",
       "bytes": 665,
       "path": "/proc/self/mountinfo",
-      "truncated": false
-    },
-    {
-      "seq": 30,
-      "check": "host.cpu",
-      "at_ms": 0,
-      "duration_ms": 0,
-      "kind": "read",
-      "outcome": "ok",
-      "bytes": 11,
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
       "truncated": false
     },
     {
@@ -2144,7 +2300,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "kind": "read",
       "outcome": "ok",
       "bytes": 11,
-      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max",
       "truncated": false
     },
     {
@@ -2155,11 +2311,22 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "kind": "read",
       "outcome": "ok",
       "bytes": 11,
-      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "path": "/sys/fs/cgroup/system.slice/acme.slice/cpu.max",
       "truncated": false
     },
     {
       "seq": 33,
+      "check": "host.cpu",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 11,
+      "path": "/sys/fs/cgroup/system.slice/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 34,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2169,7 +2336,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/fs/cgroup/cpu.max"
     },
     {
-      "seq": 34,
+      "seq": 35,
       "check": "host.cpu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2178,7 +2345,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "api": "uname"
     },
     {
-      "seq": 35,
+      "seq": 36,
       "check": "host.disk",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2188,7 +2355,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/var/lib/acme"
     },
     {
-      "seq": 36,
+      "seq": 37,
       "check": "host.disk",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2199,7 +2366,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 37,
+      "seq": 38,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2208,7 +2375,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "api": "uname"
     },
     {
-      "seq": 38,
+      "seq": 39,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2219,7 +2386,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 39,
+      "seq": 40,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2230,7 +2397,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 40,
+      "seq": 41,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2241,7 +2408,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 41,
+      "seq": 42,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2252,7 +2419,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 42,
+      "seq": 43,
       "check": "host.kernel",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2262,7 +2429,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/kernel/btf/vmlinux"
     },
     {
-      "seq": 43,
+      "seq": 44,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2273,7 +2440,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 44,
+      "seq": 45,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2284,7 +2451,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 45,
+      "seq": 46,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2295,7 +2462,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 46,
+      "seq": 47,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2306,7 +2473,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 47,
+      "seq": 48,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2317,7 +2484,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 48,
+      "seq": 49,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2328,7 +2495,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 49,
+      "seq": 50,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2339,7 +2506,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 50,
+      "seq": 51,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2350,7 +2517,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 51,
+      "seq": 52,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2361,7 +2528,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 52,
+      "seq": 53,
       "check": "host.cgroups",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2371,7 +2538,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/proc/device-tree/model"
     },
     {
-      "seq": 53,
+      "seq": 54,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2382,7 +2549,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 54,
+      "seq": 55,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2393,7 +2560,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 55,
+      "seq": 56,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2404,7 +2571,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 56,
+      "seq": 57,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2415,7 +2582,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 57,
+      "seq": 58,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2425,7 +2592,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/sysctl.d"
     },
     {
-      "seq": 58,
+      "seq": 59,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2435,7 +2602,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/sysctl.d"
     },
     {
-      "seq": 59,
+      "seq": 60,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2445,7 +2612,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/usr/local/lib/sysctl.d"
     },
     {
-      "seq": 60,
+      "seq": 61,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2455,7 +2622,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/usr/lib/sysctl.d"
     },
     {
-      "seq": 61,
+      "seq": 62,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2465,7 +2632,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/lib/sysctl.d"
     },
     {
-      "seq": 62,
+      "seq": 63,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2476,7 +2643,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 63,
+      "seq": 64,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2487,7 +2654,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 64,
+      "seq": 65,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2497,7 +2664,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/sysctl.conf"
     },
     {
-      "seq": 65,
+      "seq": 66,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2508,7 +2675,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 66,
+      "seq": 67,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2518,7 +2685,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/systemd/system.conf.d"
     },
     {
-      "seq": 67,
+      "seq": 68,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2528,7 +2695,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/systemd/system.conf.d"
     },
     {
-      "seq": 68,
+      "seq": 69,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2538,7 +2705,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/usr/local/lib/systemd/system.conf.d"
     },
     {
-      "seq": 69,
+      "seq": 70,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2548,7 +2715,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/usr/lib/systemd/system.conf.d"
     },
     {
-      "seq": 70,
+      "seq": 71,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2558,7 +2725,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/lib/systemd/system.conf.d"
     },
     {
-      "seq": 71,
+      "seq": 72,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2569,7 +2736,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 72,
+      "seq": 73,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2579,7 +2746,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "resource": "nofile"
     },
     {
-      "seq": 73,
+      "seq": 74,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2590,7 +2757,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 74,
+      "seq": 75,
       "check": "host.sysctl",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2601,7 +2768,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 75,
+      "seq": 76,
       "check": "host.lsm",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2612,7 +2779,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 76,
+      "seq": 77,
       "check": "host.lsm",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2623,7 +2790,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 77,
+      "seq": 78,
       "check": "host.lsm",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2634,7 +2801,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 78,
+      "seq": 79,
       "check": "host.lsm",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2644,7 +2811,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/module/apparmor/parameters/enabled"
     },
     {
-      "seq": 79,
+      "seq": 80,
       "check": "host.time_sync",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2656,7 +2823,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "proto": "udp"
     },
     {
-      "seq": 80,
+      "seq": 81,
       "check": "host.time_sync",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2678,7 +2845,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 81,
+      "seq": 82,
       "check": "host.time_sync",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2696,7 +2863,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 82,
+      "seq": 83,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2707,7 +2874,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 83,
+      "seq": 84,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2718,7 +2885,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 84,
+      "seq": 85,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2729,7 +2896,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 85,
+      "seq": 86,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2740,7 +2907,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 86,
+      "seq": 87,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2751,7 +2918,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 87,
+      "seq": 88,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2762,7 +2929,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 88,
+      "seq": 89,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2771,7 +2938,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/proc/self/ns/net"
     },
     {
-      "seq": 89,
+      "seq": 90,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2780,7 +2947,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/.dockerenv"
     },
     {
-      "seq": 90,
+      "seq": 91,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2789,7 +2956,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/.containerenv"
     },
     {
-      "seq": 91,
+      "seq": 92,
       "check": "host.ports",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2798,7 +2965,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "name": "KUBERNETES_SERVICE_HOST"
     },
     {
-      "seq": 92,
+      "seq": 93,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2808,7 +2975,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/proc"
     },
     {
-      "seq": 93,
+      "seq": 94,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2819,7 +2986,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 94,
+      "seq": 95,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2830,7 +2997,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 95,
+      "seq": 96,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2841,7 +3008,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 96,
+      "seq": 97,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2852,7 +3019,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 97,
+      "seq": 98,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2863,7 +3030,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 98,
+      "seq": 99,
       "check": "host.security_agents",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2874,7 +3041,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 99,
+      "seq": 100,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2885,7 +3052,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 100,
+      "seq": 101,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2894,7 +3061,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "name": "XDG_RUNTIME_DIR"
     },
     {
-      "seq": 101,
+      "seq": 102,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2904,7 +3071,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/containerd/containerd.sock"
     },
     {
-      "seq": 102,
+      "seq": 103,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2920,7 +3087,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 103,
+      "seq": 104,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2931,7 +3098,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 104,
+      "seq": 105,
       "check": "host.container_runtime",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2941,7 +3108,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/systemd/system/containerd.service.d"
     },
     {
-      "seq": 105,
+      "seq": 106,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2951,7 +3118,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/run/firewalld"
     },
     {
-      "seq": 106,
+      "seq": 107,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2967,7 +3134,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 107,
+      "seq": 108,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2983,7 +3150,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 108,
+      "seq": 109,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2994,7 +3161,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 109,
+      "seq": 110,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3005,7 +3172,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 110,
+      "seq": 111,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3022,7 +3189,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 111,
+      "seq": 112,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3032,7 +3199,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/firewalld/services/ssh.xml"
     },
     {
-      "seq": 112,
+      "seq": 113,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3043,7 +3210,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 113,
+      "seq": 114,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3053,7 +3220,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/firewalld/direct.xml"
     },
     {
-      "seq": 114,
+      "seq": 115,
       "check": "host.firewall",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3063,7 +3230,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/etc/ufw/ufw.conf"
     },
     {
-      "seq": 115,
+      "seq": 116,
       "check": "net.egress",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3073,7 +3240,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "host": "web.acme.test"
     },
     {
-      "seq": 116,
+      "seq": 117,
       "check": "net.egress",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3085,7 +3252,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "via_proxy": null
     },
     {
-      "seq": 117,
+      "seq": 118,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3096,7 +3263,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 118,
+      "seq": 119,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3107,7 +3274,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 119,
+      "seq": 120,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3117,7 +3284,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/class/net"
     },
     {
-      "seq": 120,
+      "seq": 121,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3128,7 +3295,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 121,
+      "seq": 122,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3139,7 +3306,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 122,
+      "seq": 123,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -3148,6 +3315,54 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "bytes": 2,
       "path": "/sys/class/net/eth0/type",
       "truncated": false
+    },
+    {
+      "seq": 124,
+      "check": "k8s.version",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/apis",
+      "status": 200,
+      "via_proxy": null
+    },
+    {
+      "seq": 125,
+      "check": "k8s.version",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "POST",
+      "path": "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+      "status": 201,
+      "via_proxy": null
+    },
+    {
+      "seq": 126,
+      "check": "k8s.version",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/api/v1/nodes",
+      "status": 200,
+      "via_proxy": null
+    },
+    {
+      "seq": 127,
+      "check": "k8s.storageclass",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/apis/storage.k8s.io/v1/storageclasses",
+      "status": 200,
+      "via_proxy": null
     }
   ],
   "actions_truncated": false,
