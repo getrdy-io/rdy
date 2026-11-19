@@ -200,7 +200,7 @@ command. It fails on:
   (`result.level`, `result.partial`, `result.timed_out_ms`, `result.notes`). The Timeout class also counts a hang the
   check survived: a hang in the case files (a `silent` chain in `chain.json` counts), no `timed_out_ms`, and a note that holds `timed out` or
   `no reply within` (M1-179). A `PENDING` list in the test names what is still
-  owed and by which ticket (empty since M1-174), and a row that is no longer true is a failure; a missing
+  owed and by which ticket (empty since M1-179), and a row that is no longer true is a failure; a missing
   `checks/_policy/symlink-to-shadow` stays in the lint file.
 
 Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
