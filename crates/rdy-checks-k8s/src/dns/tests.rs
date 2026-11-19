@@ -1114,3 +1114,22 @@ async fn the_refused_rke2_service_is_the_one_the_grant_names() {
     );
     rig.audit();
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[tokio::test]
+async fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    crate::client::mock::hits::clear();
+    for case in ["kubeadm-ok", "openshift", "rke2", "crashloop-old"] {
+        let rig = rig_with(case, case == "openshift");
+        let _ = rig.finding().await;
+    }
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.dns"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.dns is read by no fixture of the tests listed here"
+    );
+}

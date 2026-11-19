@@ -925,7 +925,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             Some("kube-system"),
             Some("metrics-server"),
         ),
-        ("list", "", "services", Some("kube-system"), None),
+        ("watch", "", "services", Some("kube-system"), None),
         ("list", "", "secrets", None, None),
         ("create", "", "pods", Some("default"), None),
         ("delete", "", "pods", Some("default"), None),
