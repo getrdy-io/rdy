@@ -894,10 +894,8 @@ impl ProbeHub {
         refused
     }
 
-    /// The redactor every string of this hub's log passes.
-    ///
-    /// Only the engine reads it, so a build without the `runtime` feature has no use for it.
-    #[cfg(feature = "runtime")]
+    /// The redactor every string of this hub's log passes. The engine and the `testing` helpers read it.
+    #[cfg(any(feature = "runtime", feature = "testing"))]
     pub(crate) fn redactor(&self) -> &Redactor {
         self.log.redactor()
     }

@@ -208,8 +208,7 @@ impl Peers {
     /// The first spec host equal to `host`, with its port, whatever the port. A lookup has no port of
     /// its own, so it takes the port of the entry that names the host.
     ///
-    /// Only the network module (`runtime` or `loopback`) calls it.
-    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    /// The network module and the nameserver exchange call it, so every build has it.
     pub(super) fn spec_host(&self, host: &Host) -> Option<(Host, u16)> {
         self.hosts.get().and_then(|hosts| {
             hosts
