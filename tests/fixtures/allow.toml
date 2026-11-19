@@ -236,3 +236,9 @@ rule = "host"
 path = "tests/fixtures/envs/warnings-only/golden/report.html"
 value = "getrdy.io"
 reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/readme/refusal-unsigned.txt"
+value = "docs.getrdy.io"
+reason = "The 07 C.5 refusal fix line names the product's own docs page (docs.getrdy.io/unsigned) on purpose, not a host a test contacts"

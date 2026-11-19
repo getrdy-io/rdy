@@ -29,6 +29,9 @@ mod chains;
 mod completeness;
 mod driver;
 mod families;
+mod readme;
+#[path = "../common/readme_goldens.rs"]
+mod readme_goldens;
 // The structure rules of the HTML report (M1-082), run here over the page a run wrote (M1-181). Its own
 // tests run a second time in this binary, which costs milliseconds.
 #[path = "../../../rdy-engine/tests/html_structure.rs"]
