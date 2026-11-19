@@ -710,3 +710,29 @@ the corrections log of `11-backlog.md`.
   merge; M1-138 depends on it. Week 24 holds 14.5 h. GitHub's macOS arm64 pool was down for hours; the
   founder waits and ADR 0050 stays, as the runbook records. No 03 `###` heading or Appendix A row
   changed, and no test-pinned text changed.
+- **Correction-60, the k8s skip after a probe timeout, the scheduler origin under a paused clock, the
+  per-check Service pin, and the replaced PR #62.** From the M1-187 review (PR #134), the security review
+  of PR #135 and the security reviews of M1-162 and M1-163. When the k8s family probe times out, the skip
+  prints "Set a kubeconfig, or pass --kube-context". A cluster was found but did not answer in 10 seconds,
+  so that text is wrong. 01 section 5.2 has one text for `missing_need`, cluster, and the capability's own
+  hint ("check that it is reachable") is never shown. New M2-155 (cli-ux, 1 h) shows that hint after a
+  timeout and gives 01 section 5.2 and 07 a second text; `skip_kind` and the result schema do not change.
+  `sched.rs` builds the scheduler origin from a std `Instant` through `Instant::from_std`, so under a
+  paused test clock real milliseconds come off check deadlines. That is test-only noise, in the class #135
+  fixed in `probe/sock.rs` and `probe/sock/nameserver.rs`. #135 is done (merged on main), and new M2-156
+  (rust-engineer, 0.5 h) moves the scheduler origin onto the deadlines' clock. M2-126 and correction-43
+  said the k8s.ingress Service list goes through `examples/rbac/rdy-readonly-target-namespace.yaml`.
+  M1-163's catch-up deletes that file, because the ClusterRole has granted cluster-wide `list services`
+  since M1-160, and its single `services` guard entry (k8s.admission, k8s.dns, k8s.ingress) has
+  `field_selector: NotRequired`. The correction-43 text above stays as history. M2-126 is rewritten into
+  the per-check pin: a new public `Probe::check_id()` returns the check's `CheckInfo.id`, not the result key, and `GuardLayer` stores it, `Allowed` gets
+  selector rules per citing check, `FieldSelector::Key` accepts only `=` and `==` (today `metadata.name!=x`
+  passes), and the k8s.ingress list is pinned to the family namespace. The k8s.nodes `pods` list sends two
+  `!=` terms, so its entry gets a rule that names them. The k8s.crds Deployment pin stays in the row. Exit
+  test on the kube mock: a list with no selector from k8s.admission is refused, and a k8s.ingress list in
+  another namespace is refused. ADR 0044's first implied ticket is folded into M2-126, so there is one
+  row, and its docs say that removing `services` from the ClusterRole makes k8s.admission and k8s.ingress
+  partial. M2-126 goes from 1.5 h to 2.5 h and depends on M1-162 too. M1-162's PR #62 holds an unsigned
+  merge commit, so #62 is replaced: M1-162 lands as a new PR from branch `m1/162-k8s-dns-2`. The runbook
+  gains a process lesson for that. No M1 ticket is added, widened or moved, and no calendar week changes.
+  No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.
