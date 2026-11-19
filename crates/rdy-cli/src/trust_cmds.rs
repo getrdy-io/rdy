@@ -587,7 +587,7 @@ mod unsupported_tests {
         fn read_line(&mut self) -> std::io::Result<Option<String>> {
             panic!("the command asked before it refused")
         }
-        fn read_hidden(&mut self) -> Result<crate::prompt::Secret, PromptError> {
+        fn read_hidden(&mut self, _: &str) -> Result<crate::prompt::Secret, PromptError> {
             panic!("the command asked before it refused")
         }
     }

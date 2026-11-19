@@ -1,0 +1,1 @@
+- Fix a race in the hidden password prompt: the terminal now stops echoing before the prompt text is shown, so a paste that arrives at once is never echoed or cut short.

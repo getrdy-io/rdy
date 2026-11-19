@@ -179,16 +179,18 @@ pub trait Terminal {
     /// Returns the I/O error if the input cannot be read.
     fn read_line(&mut self) -> io::Result<Option<String>>;
 
-    /// Read one line with echo off, without its line ending.
+    /// Show `prompt` and read one line with echo off, without its line ending.
     ///
-    /// The typed text is never shown. When the line is done the cursor is at the start of a new
-    /// line, so the implementation ends the line itself (the Enter key is not echoed either).
+    /// The implementation turns echo off before it writes `prompt`, so keys typed or pasted as soon
+    /// as the prompt shows are never echoed and never wait in the terminal's line buffer. The typed
+    /// text is never shown. When the line is done the cursor is at the start of a new line, so the implementation ends the line itself (the Enter key is not echoed either).
     ///
     /// # Errors
     /// [`PromptError::Cancelled`] on Ctrl-C or Ctrl-D, [`PromptError::TooLong`] past the cap, and
-    /// [`PromptError::Io`] if the terminal cannot be read or its mode cannot be changed. The
-    /// terminal mode is back as it was before this returns, whatever the outcome.
-    fn read_hidden(&mut self) -> Result<Secret, PromptError>;
+    /// [`PromptError::Io`] if the prompt cannot be written, the terminal cannot be read or its mode
+    /// cannot be changed. The terminal mode is back as it was before this returns, whatever the
+    /// outcome.
+    fn read_hidden(&mut self, prompt: &str) -> Result<Secret, PromptError>;
 }
 
 /// The real terminal: stdin for answers and hidden input, stderr for prompts.
@@ -210,8 +212,8 @@ impl Terminal for StdTerminal {
         read_bounded_line(&mut io::stdin().lock())
     }
 
-    fn read_hidden(&mut self) -> Result<Secret, PromptError> {
-        read_hidden_tty()
+    fn read_hidden(&mut self, prompt: &str) -> Result<Secret, PromptError> {
+        read_hidden_tty(prompt)
     }
 }
 
@@ -269,7 +271,12 @@ pub(crate) fn restore_terminal() -> bool {
     false
 }
 
-/// Read a password from stdin with echo and the signal keys off (Unix).
+/// Show `prompt` and read a password from stdin with echo and the signal keys off (Unix).
+///
+/// The order is the one `getpass` uses: save the settings, switch to hidden mode, write the prompt,
+/// read, restore, end the line. Keys typed or pasted as soon as the prompt shows then meet a terminal
+/// that is already hidden. The other order echoed them and left them in the canonical line buffer
+/// (1024 bytes on macOS), where a long paste lost its end and the read waited for ever.
 ///
 /// The terminal is set to non-canonical mode with ECHO, ECHONL, ICANON and ISIG off, so each key
 /// arrives as a byte and Ctrl-C is the byte 0x03, not a SIGINT. A guard puts the saved settings
@@ -277,12 +284,30 @@ pub(crate) fn restore_terminal() -> bool {
 /// bytes are ignored. After a signal closed the prompts ([`restore_terminal`]) this returns
 /// [`Cancel::Interrupted`] without touching the terminal.
 #[cfg(unix)]
-fn read_hidden_tty() -> Result<Secret, PromptError> {
+fn read_hidden_tty(prompt: &str) -> Result<Secret, PromptError> {
+    let stdin = io::stdin();
+    read_hidden_session(
+        std::os::fd::AsFd::as_fd(&stdin),
+        &mut stdin.lock(),
+        prompt,
+        &mut io::stderr().lock(),
+    )
+}
+
+/// The body of [`read_hidden_tty`] with the terminal, its input and the prompt stream given, so a
+/// test can run it on a pseudo-terminal and watch the order of events.
+#[cfg(unix)]
+fn read_hidden_session(
+    fd: std::os::fd::BorrowedFd<'_>,
+    input: &mut dyn io::Read,
+    prompt: &str,
+    out: &mut dyn Write,
+) -> Result<Secret, PromptError> {
     use rustix::termios::{LocalModes, OptionalActions, SpecialCodeIndex, tcgetattr, tcsetattr};
 
     /// Puts the saved terminal settings back when dropped.
     struct Restore<'a> {
-        fd: &'a io::Stdin,
+        fd: std::os::fd::BorrowedFd<'a>,
         saved: rustix::termios::Termios,
     }
     impl Drop for Restore<'_> {
@@ -297,7 +322,6 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
         }
     }
 
-    let stdin = io::stdin();
     // The state lock is held from the save through the change of mode, so the signal thread never sees
     // a terminal that is half way (S1). `Restore` takes the lock itself, so the lock is let go first
     // on every way out of this block.
@@ -306,7 +330,7 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
         if matches!(*state, TerminalState::Closed) {
             return Err(PromptError::Cancelled(Cancel::Interrupted));
         }
-        let saved = tcgetattr(&stdin).map_err(|e| PromptError::Io(e.into()))?;
+        let saved = tcgetattr(fd).map_err(|e| PromptError::Io(e.into()))?;
         let mut hidden = saved.clone();
         hidden
             .local_modes
@@ -315,22 +339,39 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
         hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
         // The signal thread puts these back if a signal ends the process during the read.
         *state = TerminalState::Hidden(saved.clone());
-        let changed = tcsetattr(&stdin, OptionalActions::Now, &hidden);
+        let secret_modes =
+            LocalModes::ECHO | LocalModes::ECHONL | LocalModes::ICANON | LocalModes::ISIG;
+        // `tcsetattr` may succeed in part (POSIX), so read the modes back before the prompt shows.
+        let changed = tcsetattr(fd, OptionalActions::Now, &hidden)
+            .map_err(io::Error::from)
+            .and_then(|()| {
+                let now = tcgetattr(fd).map_err(io::Error::from)?;
+                if now.local_modes.intersects(secret_modes) {
+                    Err(io::Error::other("the terminal did not turn echo off"))
+                } else {
+                    Ok(())
+                }
+            });
         drop(state);
         // Built after the lock is let go: a drop of `Restore` takes the lock itself.
-        let restore = Restore { fd: &stdin, saved };
+        let restore = Restore { fd, saved };
         if let Err(e) = changed {
             // The guard goes first, so a failure half way through `tcsetattr` is also undone.
             drop(restore);
-            return Err(PromptError::Io(e.into()));
+            return Err(PromptError::Io(e));
         }
         restore
     };
 
-    let result = read_hidden_bytes(&mut stdin.lock());
+    // The terminal is hidden before this text is written. If the write fails, the guard puts it back.
+    if let Err(e) = out.write_all(prompt.as_bytes()).and_then(|()| out.flush()) {
+        drop(restore);
+        return Err(PromptError::Io(e));
+    }
+    let result = read_hidden_bytes(input);
     drop(restore);
     // Echo of the Enter key is off, so end the line here. The terminal is back to normal first.
-    let _ = io::stderr().write_all(b"\n");
+    let _ = out.write_all(b"\n");
     result
 }
 
@@ -380,7 +421,12 @@ fn read_hidden_bytes(input: &mut dyn io::Read) -> Result<Secret, PromptError> {
 
 /// Read a password with echo off (not Unix). `rpassword` does the console work.
 #[cfg(not(unix))]
-fn read_hidden_tty() -> Result<Secret, PromptError> {
+fn read_hidden_tty(prompt: &str) -> Result<Secret, PromptError> {
+    let mut err = io::stderr().lock();
+    err.write_all(prompt.as_bytes())
+        .and_then(|()| err.flush())
+        .map_err(PromptError::Io)?;
+    drop(err);
     match rpassword::read_password() {
         Ok(text) if text.len() > MAX_SECRET => Err(PromptError::TooLong),
         Ok(text) => Ok(Secret::new(text)),
@@ -470,8 +516,7 @@ impl<T: Terminal> Prompter<T> {
                 fix: fix.to_string(),
             });
         }
-        self.term.write_prompt(prompt).map_err(PromptError::Io)?;
-        self.term.read_hidden()
+        self.term.read_hidden(prompt)
     }
 }
 
@@ -561,8 +606,9 @@ mod tests {
             read_bounded_line(&mut self.input)
         }
 
-        fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+        fn read_hidden(&mut self, prompt: &str) -> Result<Secret, PromptError> {
             self.hidden_reads += 1;
+            self.out.extend_from_slice(prompt.as_bytes());
             // Like the real terminal with echo off: the typed text is NOT written to `out`, but
             // the line is ended (the real read writes the line break itself).
             self.out.extend_from_slice(b"\n");
@@ -703,7 +749,7 @@ mod tests {
             fn read_line(&mut self) -> io::Result<Option<String>> {
                 Err(io::Error::other("boom"))
             }
-            fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+            fn read_hidden(&mut self, _: &str) -> Result<Secret, PromptError> {
                 Err(PromptError::Io(io::Error::other("boom")))
             }
         }
@@ -820,12 +866,19 @@ mod tests {
         assert_eq!(err.fix(), "use a shorter password");
     }
 
+    /// Serialises the tests that use the process-wide terminal state.
+    #[cfg(unix)]
+    static STATE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A signal that comes while no hidden read is under way (before the first prompt, or between two)
     /// closes the prompts: the next hidden read refuses to start, so echo is never turned off after the
     /// terminal was "restored" (security review S1). The state is process-wide, so it is put back.
     #[cfg(unix)]
     #[test]
     fn a_closed_terminal_refuses_a_hidden_read_and_restores_nothing() {
+        let _serial = STATE_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *terminal_state() = TerminalState::Idle;
         assert!(
             !restore_terminal(),
@@ -833,12 +886,140 @@ mod tests {
         );
         assert!(matches!(*terminal_state(), TerminalState::Closed));
         assert!(matches!(
-            read_hidden_tty(),
+            read_hidden_tty("Password: "),
             Err(PromptError::Cancelled(Cancel::Interrupted))
         ));
         // Still closed, and a second call still restores nothing.
         assert!(!restore_terminal());
         *terminal_state() = TerminalState::Idle;
+    }
+
+    /// The order of a hidden read, on a pseudo-terminal of the test's own: the terminal is hidden
+    /// before the prompt text is written, and is back as it was after every way out. Nothing here
+    /// depends on timing, because the prompt writer looks at the terminal at the moment of the write.
+    #[cfg(unix)]
+    mod order {
+        use super::*;
+        use rustix::fs::{Mode, OFlags, open};
+        use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+        use rustix::termios::{LocalModes, Termios, tcgetattr};
+        use std::fs::File;
+        use std::io::Read;
+        use std::os::fd::AsFd;
+
+        /// The prompt stream. The first write is the prompt: it records the slave's modes at that
+        /// moment, then "types" a line on the master, as a fast typist or a paste would.
+        struct Spy {
+            master: File,
+            slave: File,
+            at_prompt: Option<LocalModes>,
+            written: Vec<u8>,
+            fail: bool,
+        }
+
+        impl Write for Spy {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if self.fail {
+                    return Err(io::Error::other("closed"));
+                }
+                if self.at_prompt.is_none() {
+                    let modes = tcgetattr(&self.slave).map_err(io::Error::from)?.local_modes;
+                    self.at_prompt = Some(modes);
+                    self.master.write_all(b"typed-at-once\n")?;
+                }
+                self.written.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        fn pty() -> io::Result<(File, File)> {
+            let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+            // Not inherited by `sh` or `mkfifo` that other tests spawn.
+            rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC)?;
+            grantpt(&master)?;
+            unlockpt(&master)?;
+            let name = ptsname(&master, Vec::new())?;
+            let slave = open(
+                name.as_c_str(),
+                OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?;
+            Ok((File::from(master), File::from(slave)))
+        }
+
+        fn run(fail: bool) -> (Result<Secret, PromptError>, Spy, Termios, Termios) {
+            let _serial = STATE_TESTS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *terminal_state() = TerminalState::Idle;
+            let (master, slave) = pty().expect("open a pty");
+            let before = tcgetattr(&slave).expect("modes");
+            assert!(
+                before
+                    .local_modes
+                    .contains(LocalModes::ECHO | LocalModes::ICANON)
+            );
+            let mut spy = Spy {
+                master,
+                slave: slave.try_clone().expect("clone"),
+                at_prompt: None,
+                written: Vec::new(),
+                fail,
+            };
+            let mut input = slave.try_clone().expect("clone");
+            let result = read_hidden_session(slave.as_fd(), &mut input, "Password: ", &mut spy);
+            let after = tcgetattr(&slave).expect("modes");
+            assert!(matches!(*terminal_state(), TerminalState::Idle));
+            (result, spy, before, after)
+        }
+
+        #[test]
+        fn echo_and_the_line_buffer_are_off_before_the_prompt_is_written() {
+            let (result, spy, before, after) = run(false);
+            let modes = spy.at_prompt.expect("the prompt was written");
+            for flag in [
+                LocalModes::ECHO,
+                LocalModes::ECHONL,
+                LocalModes::ICANON,
+                LocalModes::ISIG,
+            ] {
+                assert!(
+                    !modes.intersects(flag),
+                    "{flag:?} was still on at the prompt"
+                );
+            }
+            // What was typed as the prompt showed is read.
+            assert_eq!(result.unwrap().expose(), "typed-at-once");
+            // And it was never echoed: nothing came back to the master.
+            let flags = rustix::fs::fcntl_getfl(&spy.master).expect("flags");
+            rustix::fs::fcntl_setfl(&spy.master, flags | OFlags::NONBLOCK).expect("nonblock");
+            let err = (&spy.master).read(&mut [0_u8; 64]).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+            assert_eq!(spy.written, b"Password: \n");
+            assert_eq!(settable(before.local_modes), settable(after.local_modes));
+        }
+
+        /// The local modes a program sets. The kernel sets `PENDIN` itself (macOS does when canonical mode
+        /// comes back), so it is left out of the compare.
+        fn settable(modes: rustix::termios::LocalModes) -> rustix::termios::LocalModes {
+            modes.difference(rustix::termios::LocalModes::PENDIN)
+        }
+
+        #[test]
+        fn a_failed_prompt_write_restores_the_terminal() {
+            let (result, spy, before, after) = run(true);
+            assert!(matches!(result, Err(PromptError::Io(_))));
+            assert!(spy.at_prompt.is_none());
+            assert_eq!(settable(before.local_modes), settable(after.local_modes));
+            assert_eq!(
+                before.special_codes[rustix::termios::SpecialCodeIndex::VMIN],
+                after.special_codes[rustix::termios::SpecialCodeIndex::VMIN]
+            );
+        }
     }
 
     #[cfg(unix)]
