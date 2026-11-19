@@ -21,16 +21,16 @@ const NANO: i128 = 1_000_000_000;
 
 /// A quantity in nano-units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct Amount(i128);
+pub(crate) struct Amount(i128);
 
 impl Amount {
     /// A size in bytes, from the spec's strict size grammar.
-    pub(super) fn from_bytes(bytes: u64) -> Self {
+    pub(crate) fn from_bytes(bytes: u64) -> Self {
         Self(i128::from(bytes).saturating_mul(NANO))
     }
 
     /// Reads a quantity. `None` for text that is not one, a negative amount and text over the bounds.
-    pub(super) fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         if text.is_empty() || text.len() > MAX_CHARS || !text.is_ascii() {
             return None;
         }
@@ -63,18 +63,36 @@ impl Amount {
     }
 
     /// The amount in nano-units.
-    pub(super) fn nano(self) -> i128 {
+    pub(crate) fn nano(self) -> i128 {
         self.0
     }
 
     /// Zero when the amount is below it.
-    pub(super) fn at_least_zero(self) -> Self {
+    pub(crate) fn at_least_zero(self) -> Self {
         Self(self.0.max(0))
     }
 
     /// `self` minus `other`. Saturates, so a hostile pair cannot overflow.
-    pub(super) fn minus(self, other: Self) -> Self {
+    pub(crate) fn minus(self, other: Self) -> Self {
         Self(self.0.saturating_sub(other.0))
+    }
+}
+
+impl Amount {
+    /// `self` plus `other`. Saturates, so a hostile pair cannot overflow.
+    pub(crate) fn plus(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
+    /// `self` times 6/5, rounded up: the 120% margin of `k8s.nodes` free capacity.
+    pub(crate) fn with_margin(self) -> Self {
+        let scaled = self.0.saturating_mul(6);
+        Self(scaled / 5 + i128::from(scaled % 5 != 0))
+    }
+
+    /// Zero.
+    pub(crate) fn zero() -> Self {
+        Self(0)
     }
 }
 
@@ -150,7 +168,7 @@ fn scale(mantissa: u128, binary: u32, exp10: i32) -> i128 {
 /// An amount as a person reads it. `bytes` is true for memory, storage and huge pages.
 ///
 /// The result is built from the number only, never from server text.
-pub(super) fn show(amount: Amount, bytes: bool) -> String {
+pub(crate) fn show(amount: Amount, bytes: bool) -> String {
     let nano = amount.nano();
     if nano <= 0 {
         return "0".to_owned();

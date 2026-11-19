@@ -10,6 +10,10 @@
 //! environments build on and is skipped. An environment whose `os` is not the OS the test runs on is
 //! skipped too, with a line on stderr: `rdy_cli::run` plans for `current_os()` and has no hook to change it.
 //!
+//! Clusters (M1-185). An environment whose `kube` cap is true serves its `api/` tree as a scripted cluster (the
+//! kube mock of `rdy-checks-k8s`, behind its `testing` feature), and the driver audits INV-14 over the run.
+//! `driver` says how.
+//!
 //! `report.html`: the run writes it next to the `.json` (M1-181). The goldens are taken with `--no-report`,
 //! so the page golden of each env in `HTML_ENVS` is rendered here from the normalised report. One test
 //! runs the host-min environment into a folder (exit 0) and checks the written page against the structure
@@ -25,6 +29,9 @@ mod chains;
 mod completeness;
 mod driver;
 mod families;
+mod readme;
+#[path = "../common/readme_goldens.rs"]
+mod readme_goldens;
 // The structure rules of the HTML report (M1-082), run here over the page a run wrote (M1-181). Its own
 // tests run a second time in this binary, which costs milliseconds.
 #[path = "../../../rdy-engine/tests/html_structure.rs"]
@@ -87,7 +94,7 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
     let run = driver::run_env("all-pass", 1)?;
     assert_eq!(run.report.exit_code, 0);
     let ids: Vec<&str> = run.report.checks.iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids.len(), 15, "checks that ran: {ids:?}");
+    assert_eq!(ids.len(), 16, "checks that ran: {ids:?}");
     for check in &run.report.checks {
         assert_eq!(
             check.status,
@@ -98,6 +105,26 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
         );
         assert!(check.partial.is_none(), "{} is partial", check.key);
     }
+    // M1-185: k8s.version reads the scripted three-node cluster, and the audit of the run (INV-14) is clean.
+    let version = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.version")
+        .ok_or("k8s.version did not run")?;
+    assert_eq!(version.message, "Server v1.29.4, 1.27 to 1.31 needed");
+    assert!(run.violations.is_empty(), "{:?}", run.violations);
+    assert_eq!(
+        run.kube_requests.first().map(String::as_str),
+        Some("GET /version")
+    );
+    assert!(
+        run.kube_requests
+            .iter()
+            .any(|line| line.starts_with("GET /api/v1/nodes")),
+        "{:?}",
+        run.kube_requests
+    );
     let memory = run
         .report
         .checks
@@ -112,6 +139,320 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
         memory.notes.iter().any(|n| n.contains("tolerance_percent")),
         "{:?}",
         memory.notes
+    );
+    Ok(())
+}
+
+/// M1-119: the `timeouts` env under paused time at `jobs = 1` and `jobs = 8`.
+///
+/// A hung `statvfs` ends `host.disk` in `timeout` at the facade's 5 s limit. A black-hole endpoint does not
+/// give `timeout`: `net.egress` cuts each endpoint to its own budget by design (03), so the check returns
+/// a bounded `block` that names the black hole. The run ends inside `deadline_ms` in virtual time. The end
+/// is read from the checks' own `started_ms + duration_ms`, which come from the paused tokio clock, before
+/// the golden normaliser zeroes them (`run.duration_ms` is wall clock and proves nothing here). No real
+/// sleep and no real socket is involved, so a slow runner cannot change the result. At `jobs = 1` the
+/// checks run one after the other, so virtual time is the sum (10 s for the cluster probe, then 5 s, then the
+/// black hole's 3 s). At `jobs = 8` both start at once, after the probe.
+///
+/// M1-187: the env also holds a cluster whose `/version` does not answer while the cluster client is
+/// built (`api/version.json`, `delay_ms` of 10 minutes). The engine cuts the family probe at
+/// `FAMILY_PROBE_LIMIT` (10 s) and leaves the `kube_context` need unmet, so `k8s.version` is skipped
+/// `missing_need` in the `required_not_run` bucket and never starts a request of its own. Every check
+/// starts after the probe, so the run ends inside `deadline_ms` only because the limit is shorter than
+/// the 10 minute delay. What is proven: the one `GET /version` was dropped at the limit and logged as
+/// `timeout`, and nothing else asked the cluster. The mock's delay is a tokio sleep, so this does not
+/// by itself show that no worker thread was blocked (the family-level test in rdy-checks-k8s does that
+/// on a one-thread runtime). The INV-14 audit (`run.violations`) passes.
+#[test]
+fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestResult {
+    use rdy_spec::result::{Bucket, SkipKind, Status};
+    if Fixture::load(&fixtures_dir(), "envs/timeouts")?.os() != current_os() {
+        eprintln!("env_harness: skipping timeouts: it is a Linux machine");
+        return Ok(());
+    }
+    let probe_ms = u64::try_from(rdy_engine::family::FAMILY_PROBE_LIMIT.as_millis())?;
+    // `started_ms` loses the real gap before the scheduler's origin, so allow 100 ms below the limit.
+    let probe_low = probe_ms - 100;
+    for jobs in [1, 8] {
+        let run = driver::run_env("timeouts", jobs)?;
+        let report = &run.report;
+        let check = |id: &str| {
+            report
+                .checks
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| format!("{id} did not run at jobs = {jobs}"))
+        };
+        let disk = check("host.disk")?;
+        assert_eq!(
+            disk.status,
+            Status::Timeout,
+            "jobs {jobs}: {}",
+            disk.message
+        );
+        assert_eq!(disk.timeout_after_ms, Some(5000), "jobs {jobs}");
+        // The hang cost its full limit in virtual time, so the paused clock really ran.
+        assert!(
+            disk.duration_ms >= 5000,
+            "jobs {jobs}: {} ms",
+            disk.duration_ms
+        );
+        let egress = check("net.egress")?;
+        assert_eq!(
+            egress.status,
+            Status::Block,
+            "jobs {jobs}: {}",
+            egress.message
+        );
+        assert!(egress.message.contains("blackhole"), "{}", egress.message);
+        // M1-187: the cluster client is built before any check runs, and the `/version` never answers, so
+        // the engine cuts the family probe at its limit. No check starts before that. The request was
+        // dropped at the limit and logged as `timeout`; it was the only one.
+        assert_eq!(run.kube_requests, ["GET /version"], "jobs {jobs}");
+        let actions = serde_json::to_value(&report.actions)?;
+        let kube_actions: Vec<_> = actions
+            .as_array()
+            .ok_or("actions is not an array")?
+            .iter()
+            .filter(|a| a.get("kind").and_then(|k| k.as_str()) == Some("kube"))
+            .collect();
+        assert_eq!(kube_actions.len(), 1, "jobs {jobs}: {kube_actions:?}");
+        assert_eq!(kube_actions[0]["path"], "/version", "jobs {jobs}");
+        assert_eq!(kube_actions[0]["outcome"], "timeout", "jobs {jobs}");
+        let version = check("k8s.version")?;
+        assert_eq!(version.status, Status::Skipped, "jobs {jobs}");
+        assert_eq!(
+            version.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "jobs {jobs}"
+        );
+        assert_eq!(
+            version.bucket,
+            Bucket::RequiredNotRun,
+            "jobs {jobs}: {}",
+            version.message
+        );
+        assert!(
+            version
+                .needs
+                .iter()
+                .any(|n| n.need == rdy_spec::result::Need::KubeContext && !n.met),
+            "jobs {jobs}: {:?}",
+            version.needs
+        );
+        assert_eq!(version.duration_ms, 0, "jobs {jobs}: the check never ran");
+        assert!(
+            run.violations.is_empty(),
+            "jobs {jobs}: INV-14 audit: {:?}",
+            run.violations
+        );
+        let end = report
+            .checks
+            .iter()
+            .map(|c| c.started_ms + c.duration_ms)
+            .max()
+            .unwrap_or(0);
+        let deadline = report.run.options.deadline_ms;
+        assert!(
+            (probe_low + 5000..=deadline).contains(&end),
+            "jobs {jobs}: the checks ended at {end} ms of virtual time, deadline_ms is {deadline}"
+        );
+        // Every check starts after the probe limit.
+        assert!(
+            (probe_low..=probe_ms + 100).contains(&disk.started_ms),
+            "jobs {jobs}: host.disk started at {} ms",
+            disk.started_ms
+        );
+        // The jobs differ: one at a time the black hole waits behind the hung statvfs, eight at once both
+        // start together.
+        if jobs == 1 {
+            assert!(
+                egress.started_ms >= disk.started_ms + disk.duration_ms,
+                "jobs 1: net.egress started at {} ms, host.disk ended at {} ms",
+                egress.started_ms,
+                disk.started_ms + disk.duration_ms
+            );
+        } else {
+            assert!(
+                (probe_low..=probe_ms + 100).contains(&egress.started_ms),
+                "jobs {jobs}: started at {} and {} ms",
+                disk.started_ms,
+                egress.started_ms
+            );
+        }
+        assert!(!report.interrupted, "jobs {jobs}");
+        assert_eq!(report.verdict.as_str(), "not_ready", "jobs {jobs}");
+        assert_eq!(report.exit_code, 2, "jobs {jobs}");
+    }
+    Ok(())
+}
+
+/// Runs `env` at `jobs = 1`, or `None` on a leg of another OS (these envs are Linux machines).
+fn run_linux_env(env: &str) -> TestResult<Option<driver::EnvRun>> {
+    if Fixture::load(&fixtures_dir(), &format!("envs/{env}"))?.os() != current_os() {
+        eprintln!("env_harness: skipping {env}: it is a Linux machine");
+        return Ok(None);
+    }
+    Ok(Some(driver::run_env(env, 1)?))
+}
+
+/// The ids of the checks of `run` that ended with `status`.
+fn ids_with(run: &driver::EnvRun, status: rdy_spec::result::Status) -> Vec<&str> {
+    let mut ids: Vec<&str> = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| c.status == status)
+        .map(|c| c.id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// M1-118, M1-185: `warnings-only` exits 1 with three warnings and no block, and no check is partial or
+/// skipped. The third warning is k8s.storageclass: the scripted cluster has two classes and no default.
+#[test]
+fn warnings_only_exits_1_with_three_warnings_and_nothing_else() -> TestResult {
+    use rdy_spec::result::{Status, Verdict};
+    let Some(run) = run_linux_env("warnings-only")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 1, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::ReadyWithWarnings);
+    assert_eq!(run.report.verdict_reason, None);
+    assert_eq!(
+        ids_with(&run, Status::Warn),
+        ["host.lsm", "host.sysctl", "k8s.storageclass"]
+    );
+    let storage = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.storageclass")
+        .ok_or("k8s.storageclass did not run")?;
+    assert!(
+        storage.message.starts_with("No default storage class"),
+        "{}",
+        storage.message
+    );
+    assert_eq!(run.report.summary.block, 0);
+    assert!(run.report.checks.iter().all(|c| c.partial.is_none()));
+    Ok(())
+}
+
+/// M1-118, M1-185: `all-block` exits 2 on six blockers: memory, disk, a held port, refused egress, a cluster
+/// too old for the spec (k8s.version) and an identity that may not create namespaces (k8s.rbac). The
+/// k8s.storageclass result is partial and names the grant it lacks, because the `CSINode` list is refused.
+#[test]
+fn all_block_exits_2_on_six_blockers() -> TestResult {
+    use rdy_spec::result::{Status, Verdict};
+    let Some(run) = run_linux_env("all-block")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 2, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::NotReady);
+    assert_eq!(run.report.verdict_reason, None, "a block was seen");
+    assert_eq!(
+        ids_with(&run, Status::Block),
+        [
+            "host.disk",
+            "host.memory",
+            "host.ports",
+            "k8s.rbac",
+            "k8s.version",
+            "net.egress"
+        ]
+    );
+    let storage = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.storageclass")
+        .ok_or("k8s.storageclass did not run")?;
+    let partial = storage
+        .partial
+        .as_ref()
+        .ok_or("k8s.storageclass is not partial")?;
+    assert_eq!(partial.missing_grants, ["list csinodes (storage.k8s.io)"]);
+    assert!(run.violations.is_empty(), "{:?}", run.violations);
+    assert_eq!(run.terminal.lines().last(), Some("NOT READY"));
+    Ok(())
+}
+
+/// M1-118: `no-privileges` (uid 1000, an audit log and other users' sockets out of reach, no kubeconfig)
+/// shows `partial` results, a `missing_need` skip, and no block, so the verdict reason is
+/// `required_check_not_run` and the exit code is 2.
+///
+/// `partial.missing_grants` stays empty here: only the k8s checks fill it, and this env has no kubeconfig,
+/// so it serves no cluster (`kube = false`) and sends no request. `all-block` shows the field (M1-185).
+#[test]
+fn no_privileges_shows_partial_results_and_a_missing_need_skip() -> TestResult {
+    use rdy_spec::result::{Need, SkipKind, Status, Verdict, VerdictReason};
+    let Some(run) = run_linux_env("no-privileges")? else {
+        return Ok(());
+    };
+    assert_eq!(run.report.exit_code, 2, "{}", run.terminal);
+    assert_eq!(run.report.verdict, Verdict::NotReady);
+    assert_eq!(
+        run.report.verdict_reason,
+        Some(VerdictReason::RequiredCheckNotRun)
+    );
+    assert_eq!(run.report.summary.block, 0);
+    assert_eq!(run.report.summary.required_not_run, 1);
+
+    let skipped = ids_with(&run, Status::Skipped);
+    assert_eq!(skipped, ["k8s.version"]);
+    assert!(run.kube_requests.is_empty(), "{:?}", run.kube_requests);
+    let version = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "k8s.version")
+        .ok_or("k8s.version missing")?;
+    assert_eq!(version.skip_kind, Some(SkipKind::MissingNeed));
+
+    // The root-optional owner lookup of host.ports: the port is held, the owner is not named.
+    let ports = run
+        .report
+        .checks
+        .iter()
+        .find(|c| c.id == "host.ports")
+        .ok_or("host.ports missing")?;
+    assert_eq!(ports.status, Status::Warn);
+    assert!(ports.message.contains("could not identify the holder"));
+
+    let mut partial: Vec<&str> = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| {
+            c.partial
+                .as_ref()
+                .is_some_and(|p| p.missing == [Need::Root])
+        })
+        .map(|c| c.id.as_str())
+        .collect();
+    partial.sort_unstable();
+    assert_eq!(
+        partial,
+        [
+            "host.container_runtime",
+            "host.firewall",
+            "host.lsm",
+            "host.ports",
+            "host.security_agents"
+        ]
+    );
+    let all_partial = run
+        .report
+        .checks
+        .iter()
+        .filter(|c| c.partial.is_some())
+        .count();
+    assert_eq!(all_partial, 5, "every partial result needs root");
+    assert_eq!(
+        run.terminal.lines().last(),
+        Some("NOT READY: 1 required check was not run")
     );
     Ok(())
 }
@@ -281,7 +622,7 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
         );
 
         // The same environment at one job and at eight gives the same report. Host-min has one check;
-        // all-pass has fourteen, so the order of completion has something to change.
+        // all-pass has sixteen, so the order of completion has something to change.
         let mut serial = driver::run_env(&env, 1)?.report;
         let mut parallel = driver::run_env(&env, 8)?.report;
         normalize_across_jobs(&mut serial);

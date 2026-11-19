@@ -34,7 +34,7 @@ const OBSERVED_LIST: usize = 20;
 /// The classes that were read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Classes {
-    /// The list, or its first page.
+    /// The list, or what was read of it.
     Listed(Page<Class>),
     /// The list was refused and the spec names a class, so the class was fetched by name.
     ByName(super::facts::Read<Class>),
@@ -87,7 +87,7 @@ impl Unread {
     fn state(self) -> &'static str {
         match self {
             Self::Forbidden => "may not be listed by this identity",
-            Self::Capped => "is longer than the page rdy read",
+            Self::Capped => "is longer than rdy reads or was cut short",
             Self::Status(_) => "could not be read",
             Self::Time => "was not read, the check ran out of time",
         }
@@ -461,7 +461,11 @@ fn missing_class(verdict: &mut Verdict, name: &str, have: &[String], more: bool)
         format!(
             "It has: {}{}.",
             list_names(have),
-            if more { " (first page)" } else { "" }
+            if more {
+                " (not all of them were read)"
+            } else {
+                ""
+            }
         )
     };
     verdict.fail(
@@ -481,10 +485,10 @@ fn listed_named(verdict: &mut Verdict, page: &Page<Class>, name: &str) -> Option
     }
     if page.more {
         // The class may be on a page that was not read.
-        verdict.unread("the storage classes after the first page", None);
+        verdict.unread("the storage classes past what was read", None);
         verdict.warn(
             format!(
-                "Not verified: the cluster has more than {} storage classes and {} is not in the first page",
+                "Not verified: the cluster has more than {} storage classes and {} is not among those read",
                 page.items.len(),
                 token(name)
             ),
@@ -511,10 +515,10 @@ fn listed_default(
     verdict.observe("default_classes", Value::Array(names));
     match defaults.as_slice() {
         [] if page.more => {
-            verdict.unread("the storage classes after the first page", None);
+            verdict.unread("the storage classes past what was read", None);
             verdict.warn(
                 format!(
-                    "Not verified: no default class in the first {} storage classes, and there are more",
+                    "Not verified: no default class in the {} storage classes read, and there are more",
                     page.items.len()
                 ),
                 None,
@@ -542,7 +546,7 @@ fn listed_default(
         [only] => {
             if page.more {
                 // A second default may sit on a page that was not read.
-                verdict.unread("the storage classes after the first page", None);
+                verdict.unread("the storage classes past what was read", None);
             }
             Some(Chosen {
                 class: (*only).clone(),
@@ -765,7 +769,7 @@ fn unread_nodes(verdict: &mut Verdict, why: Unread) {
             "the CSINode list",
             Some(Grant::cluster("list", "csinodes", "storage.k8s.io")),
         ),
-        Unread::Capped => verdict.unread("the CSINode objects after the first page", None),
+        Unread::Capped => verdict.unread("the CSINode objects past what was read", None),
         Unread::Status(_) | Unread::Time => verdict.unread("the CSINode list", None),
     }
 }
@@ -776,7 +780,7 @@ fn unread_object(verdict: &mut Verdict, why: Unread) {
             "the CSIDriver list",
             Some(Grant::cluster("list", "csidrivers", "storage.k8s.io")),
         ),
-        Unread::Capped => verdict.unread("the CSIDriver objects after the first page", None),
+        Unread::Capped => verdict.unread("the CSIDriver objects past what was read", None),
         Unread::Status(_) | Unread::Time => verdict.unread("the CSIDriver list", None),
     }
 }

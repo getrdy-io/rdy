@@ -5,10 +5,11 @@
 # is sent. This file is the second line: even if the guard had a bug, this identity could not write,
 # and it cannot read Secret objects.
 #
-# What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments
-# returns literal environment variable values, and those often hold credentials. rdy keeps only
-# resources, node name and phase, and drops the rest. Webhook configurations carry a CA bundle (a public
-# certificate) and policies carry rules: rdy keeps names, match rules and actions only. The token is still a credential, so keep it short
+# What this identity can still see: Pod and Deployment specs and claim events. Listing pods, events and
+# deployments can return literal environment variable values, and those often hold credentials. rdy keeps
+# only the fields it judges (for pods: requests, node name and phase) and drops the rest.
+# Webhook configurations carry a CA bundle (a public certificate) and policies carry rules: rdy keeps
+# names, match rules and actions only. The token is still a credential, so keep it short
 # lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
@@ -55,7 +56,7 @@ rules:
     resources: ["namespaces"]
     verbs: ["get"]
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
-  # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
+  # k8s.nodes: pod requests, node name and phase (free capacity). k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
   # k8s.admission: the Service behind an admission webhook that fails closed (its type only).
   - apiGroups: [""]

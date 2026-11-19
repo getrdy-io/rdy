@@ -180,6 +180,104 @@ pub(super) fn resolver(text: &str) -> Resolver {
     out
 }
 
+/// Facts of `/etc/resolv.conf` beyond the wait times: what the evidence and the notes need.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ResolvFacts {
+    /// `nameserver` lines, all of them (the resolver reads three).
+    pub(super) listed: usize,
+    /// The first `nameserver` is the `systemd-resolved` stub (127.0.0.53 or 127.0.0.54), so the direct
+    /// queries go to a local forwarder and not to the upstream servers.
+    pub(super) stub_first: bool,
+}
+
+/// Counts the `nameserver` lines and tells whether the first is a local stub. No address is kept.
+pub(super) fn resolv_facts(text: &str) -> ResolvFacts {
+    let mut out = ResolvFacts {
+        listed: 0,
+        stub_first: false,
+    };
+    for line in text.lines().take(200) {
+        let mut words = line.split_whitespace();
+        if words.next() == Some("nameserver")
+            && let Some(word) = words.next()
+        {
+            if out.listed == 0 {
+                let bare = word.split('%').next().unwrap_or(word);
+                out.stub_first = matches!(bare, "127.0.0.53" | "127.0.0.54");
+            }
+            out.listed += 1;
+        }
+    }
+    out
+}
+
+/// What the `hosts:` line of `/etc/nsswitch.conf` lists, reduced to what changes a lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Hosts {
+    /// `dns` or `resolve` (`systemd-resolved`) is listed, so a name can reach a nameserver at all.
+    pub(super) has_dns: bool,
+    /// `sss` is listed.
+    pub(super) has_sss: bool,
+    /// An mDNS source with `[NOTFOUND=return]` comes before the first `dns` or `resolve`: a name it does
+    /// not find, and every `.local` name is one, is never asked of a nameserver.
+    pub(super) mdns_return_before_dns: bool,
+}
+
+/// Reads the first `hosts:` line of an `nsswitch.conf`. A comment is cut off. A `[action]` group belongs to
+/// the source before it. `None` when there is no such line. Lines after the first 500 are ignored.
+pub(super) fn nsswitch_hosts(text: &str) -> Option<Hosts> {
+    for line in text.lines().take(500) {
+        let line = line.split('#').next().unwrap_or_default();
+        let Some(rest) = line.trim_start().strip_prefix("hosts:") else {
+            continue;
+        };
+        let mut out = Hosts {
+            has_dns: false,
+            has_sss: false,
+            mdns_return_before_dns: false,
+        };
+        // Sources are the words outside brackets. Words inside `[` `]` are the actions of the last source.
+        let mut sources: Vec<(String, String)> = Vec::new();
+        let mut inside = false;
+        for word in rest.split_whitespace().take(64) {
+            let mut word = word;
+            if !inside && let Some(after) = word.strip_prefix('[') {
+                inside = true;
+                word = after;
+            } else if !inside {
+                sources.push((word.to_ascii_lowercase(), String::new()));
+                continue;
+            }
+            let closes = word.ends_with(']');
+            if let Some((_, actions)) = sources.last_mut() {
+                actions.push_str(&word.trim_end_matches(']').to_ascii_lowercase());
+                actions.push(' ');
+            }
+            if closes {
+                inside = false;
+            }
+        }
+        for (name, actions) in &sources {
+            let dns = name == "dns" || name == "resolve";
+            if dns {
+                out.has_dns = true;
+            }
+            if name == "sss" {
+                out.has_sss = true;
+            }
+            if !out.has_dns
+                && name.starts_with("mdns")
+                && actions.replace(' ', "").contains("notfound=return")
+            {
+                out.mdns_return_before_dns = true;
+            }
+        }
+        // A `dns` after the mDNS source does not undo it, and one before it means the check is moot.
+        return Some(out);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +406,74 @@ mod tests {
                 prop_assert!(!name.starts_with('-'));
                 prop_assert!(name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)));
             }
+        }
+    }
+
+    #[test]
+    fn the_nsswitch_hosts_line_is_read_with_its_actions() {
+        let ubuntu =
+            "passwd: files\nhosts:          files mdns4_minimal [NOTFOUND=return] dns myhostname\n";
+        let h = nsswitch_hosts(ubuntu).expect("a hosts line");
+        assert!(h.has_dns && h.mdns_return_before_dns && !h.has_sss);
+
+        let plain = nsswitch_hosts("hosts: files dns # comment sss\n").expect("a line");
+        assert!(plain.has_dns && !plain.has_sss && !plain.mdns_return_before_dns);
+
+        let sss = nsswitch_hosts("hosts: files sss dns\n").expect("a line");
+        assert!(sss.has_sss && sss.has_dns);
+
+        let late =
+            nsswitch_hosts("hosts: files dns mdns4_minimal [NOTFOUND=return]\n").expect("a line");
+        assert!(!late.mdns_return_before_dns, "dns comes first");
+
+        let spaced =
+            nsswitch_hosts("hosts: files mdns4_minimal [ NOTFOUND=return ] dns\n").expect("a line");
+        assert!(spaced.mdns_return_before_dns);
+
+        let resolved =
+            nsswitch_hosts("hosts: files resolve [!UNAVAIL=return] dns\n").expect("a line");
+        assert!(resolved.has_dns);
+
+        let nodns = nsswitch_hosts("hosts: files\n").expect("a line");
+        assert!(!nodns.has_dns);
+        assert_eq!(nsswitch_hosts("passwd: files\n"), None);
+        assert_eq!(nsswitch_hosts(""), None);
+    }
+
+    #[test]
+    fn resolv_facts_count_lines_and_spot_the_stub_without_keeping_addresses() {
+        let f = resolv_facts("# c\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nsearch x\n");
+        assert_eq!(
+            f,
+            ResolvFacts {
+                listed: 2,
+                stub_first: true
+            }
+        );
+        let f = resolv_facts(
+            "nameserver 10.0.0.2\nnameserver 127.0.0.53\nnameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 9.9.9.9\n",
+        );
+        assert_eq!(
+            f,
+            ResolvFacts {
+                listed: 5,
+                stub_first: false
+            }
+        );
+        assert_eq!(
+            resolv_facts(""),
+            ResolvFacts {
+                listed: 0,
+                stub_first: false
+            }
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn the_nsswitch_reader_never_panics(text in ".{0,300}") {
+            let _ = nsswitch_hosts(&text);
+            let _ = resolv_facts(&text);
         }
     }
 }

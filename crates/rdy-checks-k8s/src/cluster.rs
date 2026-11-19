@@ -39,8 +39,8 @@ pub trait Cluster: Send + Sync + 'static {
         user: ImpersonateAs,
     ) -> Result<ReadOnlyClient, ImpersonationError>;
 
-    /// True when the cluster facts say the cluster is OpenShift, so a fix can name `oc` commands. The
-    /// default knows nothing and says no; M1-107's holder of the cluster facts answers it.
+    /// True when the cluster is OpenShift, so a fix can name `oc` commands. The default knows nothing and
+    /// says no. The connection of a run answers it from the group list it read once, after `GET /version`.
     fn is_openshift(&self) -> bool {
         false
     }
@@ -69,6 +69,10 @@ impl Cluster for Connected {
         user: ImpersonateAs,
     ) -> Result<ReadOnlyClient, ImpersonationError> {
         Connected::read_only_as(self, probe, user)
+    }
+
+    fn is_openshift(&self) -> bool {
+        Connected::is_openshift(self)
     }
 
     fn map_error(&self, error: &kube::Error) -> KubeError {

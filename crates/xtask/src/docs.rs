@@ -6,6 +6,9 @@
 //! This build generates the spec and result reference pages. Each is rendered from a committed JSON
 //! schema that `cargo xtask schema` writes, so `docs` reads those files and never the Rust types.
 //!
+//! The check family pages (`checks/host.md` and the rest) come from the check registry; see
+//! `check_pages`.
+//!
 //! The intro above the tables is hand-written, in `docs/intro/`. That folder is outside the published
 //! tree. The generator adds the frontmatter, the banner and the tables, and their text comes from the
 //! schema's descriptions.
@@ -15,6 +18,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::check_pages;
 use crate::generate::{self, Generated};
 use crate::schema::{RESULT_PATH, SPEC_PATH};
 use crate::spec_reference::{self, Page};
@@ -45,7 +49,8 @@ pub fn pages(root: &Path) -> Result<Vec<Generated>> {
     let result = read(root, RESULT_PATH, schema_hint)?;
     let spec_intro = read(root, SPEC_INTRO, intro_hint)?;
     let result_intro = read(root, RESULT_INTRO, intro_hint)?;
-    Ok(vec![
+    let registry = crate::checks::registry()?;
+    let mut files = vec![
         Generated {
             path: SPEC_PAGE,
             contents: spec_reference::page(
@@ -70,7 +75,9 @@ pub fn pages(root: &Path) -> Result<Vec<Generated>> {
                 },
             )?,
         },
-    ])
+    ];
+    files.extend(check_pages::pages(root, &registry)?);
+    Ok(files)
 }
 
 /// Reads a committed file under `root`. A missing file fails with `hint`, which says how to get it back.

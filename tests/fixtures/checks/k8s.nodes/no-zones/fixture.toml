@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-no-zones"
+summary = "Three healthy nodes with no zone label"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

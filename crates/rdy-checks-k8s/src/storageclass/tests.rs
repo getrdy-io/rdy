@@ -406,7 +406,7 @@ async fn the_words_follow_why_the_list_was_not_read() {
     assert!(
         capped
             .message
-            .contains("the CSINode list is longer than the page rdy read"),
+            .contains("the CSINode list is longer than rdy reads or was cut short"),
         "{}",
         capped.message
     );
@@ -536,7 +536,26 @@ async fn no_default_blocks_and_the_fix_names_a_class_to_mark() {
 }
 
 #[tokio::test]
-async fn a_class_list_longer_than_a_page_is_not_a_block() {
+async fn the_class_list_is_read_page_by_page_and_the_default_on_page_two_is_found() {
+    let rig = rig("paged");
+    let finding = rig.finding(json!({})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["classes_read"], 2);
+    assert_eq!(finding.observed["classes_complete"], true);
+    // Two requests for the list, with the continue token on the second. The provisioner is not a CSI
+    // driver of the table, so no node is asked.
+    assert_eq!(rig.paths(), [CLASSES, CLASSES]);
+    let seen = rig.cluster.harness.mock().seen();
+    assert!(
+        seen[1].line().contains("continue=tok-more"),
+        "{}",
+        seen[1].line()
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_class_list_cut_by_a_failing_server_is_not_a_block() {
     let capped = rig("capped");
     let finding = capped.finding(json!({})).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
@@ -553,7 +572,7 @@ async fn a_class_list_longer_than_a_page_is_not_a_block() {
     let named = rig("capped");
     let finding = named.finding(json!({"class": "elsewhere"})).await;
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
-    assert!(finding.message.contains("is not in the first page"));
+    assert!(finding.message.contains("is not among those read"));
 }
 
 // ---- a list the identity may not read -----------------------------------------------------------------------
@@ -924,19 +943,18 @@ async fn class_parameters_annotations_and_event_text_never_reach_the_result() {
     // The fixture must really serve the values, or the test below proves nothing.
     let seeded = rig("secret-params");
     let client = seeded.cluster.harness.client(seeded.ctx.probe());
-    let classes = client
-        .all::<StorageClass>()
-        .list(&first_page())
+    let classes = list_all(&client.all::<StorageClass>(), &plain())
         .await
         .expect("the class list");
     let held = serde_json::to_string(&classes.items).expect("serializes");
     assert!(held.matches(SENTINELS[0]).count() >= 6, "{held}");
     assert!(held.contains(SENTINELS[1]), "{held}");
-    let events = client
-        .namespaced::<Event>("acme-system")
-        .list(&first_page().fields("involvedObject.kind=PersistentVolumeClaim"))
-        .await
-        .expect("the event list");
+    let events = list_all(
+        &client.namespaced::<Event>("acme-system"),
+        &plain().fields("involvedObject.kind=PersistentVolumeClaim"),
+    )
+    .await
+    .expect("the event list");
     let held = serde_json::to_string(&events.items).expect("serializes");
     assert!(held.matches(SENTINELS[0]).count() >= 3, "{held}");
 
@@ -983,6 +1001,7 @@ const CASES: &[(&str, bool)] = &[
     ("no-default", false),
     ("two-defaults", false),
     ("capped", false),
+    ("paged", false),
     ("driver-object-only", false),
     ("csinode-forbidden", false),
     ("csinode-forbidden-no-object", false),
@@ -1056,4 +1075,23 @@ fn the_info_is_registered_and_declares_what_the_check_needs() {
     assert!(std::ptr::eq(StorageClassCheck::info(), &INFO));
     // The generic remediation text passes the allow-list too.
     rdy_engine::fixtext::check(INFO.meta.remediation).expect("remediation text is clean");
+}
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    a_claim_pending_with_provisioning_failed_warns_and_names_the_describe_command();
+    a_driver_object_without_a_registration_warns_the_node_plugin_may_be_down();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.storageclass"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.storageclass is read by no fixture of the tests listed here"
+    );
 }

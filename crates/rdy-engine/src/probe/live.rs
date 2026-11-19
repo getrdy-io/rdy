@@ -288,6 +288,17 @@ impl Backend for Live {
         Box::pin(netio::udp(to, payload, max_reply, timeout))
     }
 
+    fn dns_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        transport: super::sock::DnsTransport,
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(netio::dns(to, payload, transport, max_reply, timeout))
+    }
+
     fn unix_get<'a>(
         &'a self,
         socket: &'a Path,

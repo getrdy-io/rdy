@@ -14,13 +14,33 @@
     "level": "fail",
     "message": "1 of 1 names do not resolve: `slow.acme.test` (timed out)",
     "notes": [
-      "`slow.acme.test` timed out: getent is stopped after 5 s. This machine's resolver is set to wait 3 s per nameserver, 3 attempts, 2 nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about 18 s."
+      "`slow.acme.test` timed out: getent is stopped after 5 s. This machine's resolver is set to wait 3 s per nameserver, 3 attempts, 2 nameservers (options timeout and attempts in /etc/resolv.conf), so it can wait up to about 18 s.",
+      "No nameserver answered rdy's direct queries, so the system answer could not be compared with them. A local stub resolver or a firewall that allows only the system resolver can cause this."
     ],
     "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
       "names": [
         {
           "ms": 5000,
           "name": "slow.acme.test",
+          "nameservers": [
+            {
+              "ms": 0,
+              "position": 1,
+              "status": "refused"
+            },
+            {
+              "ms": 0,
+              "position": 2,
+              "status": "refused"
+            }
+          ],
           "result": "timeout",
           "source": "getent"
         }

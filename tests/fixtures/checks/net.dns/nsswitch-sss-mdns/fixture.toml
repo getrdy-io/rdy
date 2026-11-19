@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-nsswitch-sss-mdns"
+summary = "hosts: lists an mDNS source with NOTFOUND=return before dns, and sss"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

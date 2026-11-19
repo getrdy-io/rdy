@@ -167,12 +167,24 @@ elevation does not change what is read (ADR 0027). M2-105 revisits it.
 | `cloud_credentials` (M3) | the provider chain resolves | cloud family | assume a role without consent |
 
 Rules:
-- Plan, then probe, then run. All probes run concurrently before the first check, each under its own
-  timeout, and their results go into `capabilities` with a hint.
+- Plan, then probe, then run. The needs the engine knows are probed first. Then each family's `probe` runs
+  (one family after another in M1; only `k8s` has one), each under the engine's own timer, and their results go
+  into `capabilities` with a hint.
 - With `--no-network`, `kube_context` is unavailable and no kube client is built.
+- **As built in M1-107.** The hook is `Family::probe(FamilyProbe) -> Result<Vec<Capability>, FamilyFatal>` (default:
+  nothing), with `Family::probe_timed_out()` and `Family::kube_identity(&[CheckResult])` beside it. `Engine::execute`
+  calls it once per family that has a runnable check in the plan, so a spec with no `k8s.*` check reads no kubeconfig
+  and sends no request. The engine holds the 10 s limit (`FAMILY_PROBE_LIMIT`) with a tokio timer, so a plugin that
+  waits for a login is abandoned on the blocking pool and never holds a worker; the runtime shuts down without waiting
+  for it. A `FamilyFatal` (a kubeconfig or proxy secret the known-secret set refused) runs no check and exits 70.
+  The kube client's request timeout is the longest a check may take (60 s), not the 10 s of the probe: the
+  one client serves every check, and each check's own timer ends its requests (ADR 0031 decision 7).
+  The run's `read` entries (the kubeconfig files) and the one `exec` entry (`form: delegated`, the file found on
+  `PATH` for a bare name) come from `Probe::record_run_read` and `Probe::record_run_exec`. The cluster line goes to
+  stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
-  scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.
+  engine. A stuck plugin costs one abandoned blocking thread, never a worker.
 - A token refresh later in the run runs the plugin inside kube. Checked against kube 4.2.0 (M1-102,
   `auth/mod.rs`, `to_header`): the refresh runs `auth_exec` on `tokio::task::spawn_blocking`, so a stuck
   refresh holds one blocking thread and the one request that waited for it, never a worker. The
@@ -485,11 +497,19 @@ tests policy.
   A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
   refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
   `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
-- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
-  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
-  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
-  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
-  to query such a nameserver reports Skipped, "nameserver in a refused range".
+- One narrow door in the table (built in M1-155, ADR 0051): `Probe::nameserver_exchange(index, payload,
+  transport)` serves the `SystemResolver` peer class. The facade reads the OS nameserver list itself
+  (`/etc/resolv.conf`, Linux, three entries at most, through its own read policy), and the check passes an
+  index and never an address. The port is 53, the transport is UDP or TCP, and the payload must be one
+  plain DNS query of type A, AAAA, CNAME or SOA and class IN, with nothing after the question but a bare
+  OPT record, whose name (letters, digits, `-` and `_` only) is one of the check's spec hosts or the
+  configured proxy's name. The read guard of the list names the exact files `resolv.conf` may link to
+  (`systemd-resolved`, Debian `resolvconf`, NetworkManager). An address that `is_unusable_peer` refuses is refused with the rule "nameserver in a
+  refused range", which the check reports as Skipped. The one exception is the exact IPv4 address
+  168.63.129.16, the nameserver on every Azure VM, and only because the OS list gave it. A spec host at
+  that address, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay
+  refused. Replies are capped (4 KiB UDP, 16 KiB TCP), the call times out at 3 s, and the `dns` log entry
+  has `server`, `name` and `rtype`, never the payload. `Probe::nameserver_count()` gives the count.
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
@@ -802,7 +822,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 
 | Hook | Answer |
 | --- | --- |
-| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers (`dns` entries) stay M2. Gates `host.time_sync`; direct `net.dns` waits for the nameserver class. |
+| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers are `nameserver_exchange` (M1-155, `dns` entries, see "Network"). Gates `host.time_sync`; direct `net.dns` uses the nameserver call. |
 | 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` built in M1-144 (declared as `PeerClass::UnixSocket`); named pipes M2. |
 | 3 Nonblocking record read | Accepted for M2: `read_records(path, max_records, max_bytes)` with `O_NONBLOCK` until `EAGAIN`, `/dev/kmsg` as the only allowed device. No M1-tier check needs it. |
 | 4 Exec | Accepted for M1: `Hung { pid }` without waiting, per-command stdout cap, declared extra search directories. |
@@ -1321,7 +1341,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
-| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
+| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes` free capacity: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
 | core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-many-nodes"
+summary = "Twenty-six healthy nodes and a cut pod list: more nodes than are listed one by one"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true
