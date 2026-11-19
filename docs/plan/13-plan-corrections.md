@@ -704,7 +704,7 @@ the corrections log of `11-backlog.md`.
   M1-163's catch-up deletes that file, because the ClusterRole has granted cluster-wide `list services`
   since M1-160, and its single `services` guard entry (k8s.admission, k8s.dns, k8s.ingress) has
   `field_selector: NotRequired`. The correction-43 text above stays as history. M2-126 is rewritten into
-  the per-check pin: `Probe::check_id()` becomes public and `GuardLayer` stores it, `Allowed` gets
+  the per-check pin: a new public `Probe::check_id()` returns the check's `CheckInfo.id`, not the result key, and `GuardLayer` stores it, `Allowed` gets
   selector rules per citing check, `FieldSelector::Key` accepts only `=` and `==` (today `metadata.name!=x`
   passes), and the k8s.ingress list is pinned to the family namespace. The k8s.nodes `pods` list sends two
   `!=` terms, so its entry gets a rule that names them. The k8s.crds Deployment pin stays in the row. Exit

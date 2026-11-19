@@ -297,7 +297,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
 - 60: new M2-155 (the k8s skip after a probe timeout shows the capability's hint; a second 01 5.2 and 07
   text) and M2-156 (the scheduler origin on the deadlines' clock under a paused clock; #135 is done).
-  M2-126 becomes the per-check `services` pin (public `Probe::check_id()`, per-check `Allowed` rules,
+  M2-126 becomes the per-check `services` pin (a new public `Probe::check_id()` that returns `CheckInfo.id`, per-check `Allowed` rules,
   `FieldSelector::Key` only `=` and `==`, k8s.ingress pinned to the family namespace), 2.5 h, and holds
   ADR 0044's first implied ticket. #62 is replaced: M1-162 lands from `m1/162-k8s-dns-2`.
 
