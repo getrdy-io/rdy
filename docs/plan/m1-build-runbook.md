@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-59: M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets,
-1429.25 h, 1369.25 h core.
+correction-60: M1 184 tickets, 405 h, 345 h core; M2 156 tickets, 513.25 h; all milestones 440 tickets,
+1431.75 h, 1371.75 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -295,6 +295,11 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   `:443` in the env harness); the reason-line variant waits for M2-152. 03 net.dns: Alpine's `musl-utils`
   ships `getent`; the M1-154 fixture stays a minimal musl image without it. New M2-154 (SEC-22 strace leg
   for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
+- 60: new M2-155 (the k8s skip after a probe timeout shows the capability's hint; a second 01 5.2 and 07
+  text) and M2-156 (the scheduler origin on the deadlines' clock under a paused clock; #135 is done).
+  M2-126 becomes the per-check `services` pin (public `Probe::check_id()`, per-check `Allowed` rules,
+  `FieldSelector::Key` only `=` and `==`, k8s.ingress pinned to the family namespace), 2.5 h, and holds
+  ADR 0044's first implied ticket. #62 is replaced: M1-162 lands from `m1/162-k8s-dns-2`.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -307,10 +312,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next PR is #51 (#50 is this pause-state PR).
 - The next free ADR is 0053. ADRs 0051 and 0052 are M1-155's (#118, `m1/155-net-dns-check2`, not
   merged), and 0050 is the macOS CI gate (merged in #110). ADR 0042 (the Gatekeeper constraints list
-  wildcard) is in #48, accepted by security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
+  wildcard) is in #48, accepted by security. ADR 0043 is on `m1/162-k8s-dns-2` (M1-162; #62 is replaced), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165). ADR 0047 is in #85 (M1-133, merged). ADR 0048 is M1-136's docs-test ADR. ADR 0049 is
   correction-56's (Proposed).
-- The next ticket ids are M1-188 and M2-155, and the next correction is 60 (49 is in #85).
+- The next ticket ids are M1-188 and M2-157, and the next correction is 61 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -340,6 +345,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   founder chose to wait rather than change the gate, so ADR 0050 stays. When it happens again, do not
   merge around the gate or edit the workflow; hold merges and rerun the cancelled jobs once the
   pool is back.
+- An approved branch with an unsigned commit is re-landed as one signed squash commit on a new branch.
 
 **Environment facts from this session.**
 - The pinned toolchain 1.99.1 was installed and worked. `cargo-deny` and `cargo-nextest` are not installed,
@@ -580,6 +586,15 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     host.
   - M1-154's PR (correction-59): keep the fixture a minimal musl image without `getent`; 03 now says
     Alpine ships `getent` in `musl-utils`.
+  - Follow-ups that correction-60 gave ids:
+    - M2-155: after a k8s family probe timeout, the skip shows the `kube_context` capability's hint, escaped,
+      with its own message; 01 section 5.2 and 07 get a second `missing_need`, cluster text (M1-187 review).
+    - M2-156: the scheduler origin on the deadlines' clock, so a paused test clock loses no real time
+      (security review of PR #135).
+    - M2-126 (rewritten): the per-check `services` pin, with ADR 0044's first implied ticket folded in. The
+      k8s.nodes `pods` rule keeps its two `!=` terms when `FieldSelector::Key` narrows.
+  - M1-162 (correction-60): #62 is replaced by a new PR from `m1/162-k8s-dns-2`, one signed squash commit.
+    Where these notes say #62, read that PR.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
