@@ -114,6 +114,15 @@ pub enum Access {
     /// One object of a cluster-scoped resource by name, or a `Namespace` by name:
     /// `/<prefix>/<resource>/<name>`.
     Get(Only),
+    /// One named object of one namespace: `/<prefix>/namespaces/<namespace>/<resource>/<name>`. Both are
+    /// fixed in the table, so a role can grant it with `resourceNames` in a `Role` of that namespace and
+    /// nothing more.
+    GetIn {
+        /// The one namespace.
+        namespace: &'static str,
+        /// The one object name.
+        name: &'static str,
+    },
 }
 
 /// The field selector a list of a resource must carry. The value is decoded once and split on `,`. A
@@ -235,8 +244,8 @@ pub const ALLOWED: &[Allowed] = &[
         version: "v1",
         resource: "pods",
         access: &[Access::List],
-        checks: &["k8s.nodes"],
-        reads: "requests, nodeName and phase only, with a status.phase field selector",
+        checks: &["k8s.nodes", "k8s.dns"],
+        reads: "k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector",
         field_selector: FieldSelector::Key("status.phase"),
     },
     Allowed {
@@ -307,8 +316,56 @@ pub const ALLOWED: &[Allowed] = &[
         version: "v1",
         resource: "deployments",
         access: &[Access::ListInNamespace(Only::Name("kube-system"))],
-        checks: &["k8s.nodes"],
-        reads: "the cluster-autoscaler deployment by name",
+        checks: &["k8s.nodes", "k8s.dns"],
+        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "apps",
+        version: "v1",
+        resource: "daemonsets",
+        access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::ListInNamespace(Only::Name("openshift-dns")),
+        ],
+        checks: &["k8s.dns"],
+        reads: "desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "services",
+        access: &[
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kube-dns",
+            },
+            // RKE2 names its DNS Service after its Deployment.
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "rke2-coredns-rke2-coredns",
+            },
+            Access::GetIn {
+                namespace: "openshift-dns",
+                name: "dns-default",
+            },
+            Access::ListInNamespace(Only::Any),
+        ],
+        checks: &["k8s.admission", "k8s.dns"],
+        reads: "k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector)",
+        field_selector: FieldSelector::Key("metadata.name"),
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "configmaps",
+        access: &[Access::GetIn {
+            namespace: "kube-system",
+            name: "coredns",
+        }],
+        checks: &["k8s.dns"],
+        reads: "the Corefile key of the coredns ConfigMap in kube-system; every other key is dropped while parsing",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -355,15 +412,6 @@ pub const ALLOWED: &[Allowed] = &[
         checks: &["k8s.admission"],
         reads: "policy name, validation actions and match resources",
         field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "",
-        version: "v1",
-        resource: "services",
-        access: &[Access::ListInNamespace(Only::Any)],
-        checks: &["k8s.admission"],
-        reads: "the type of the one Service a Fail webhook names, found with a metadata.name field selector",
-        field_selector: FieldSelector::Key("metadata.name"),
     },
     Allowed {
         group: "discovery.k8s.io",
@@ -1018,6 +1066,14 @@ fn check_get(
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
+            (
+                Access::GetIn {
+                    namespace: ns,
+                    name: n,
+                },
+                Some(namespace),
+                Some(name),
+            ) => *ns == namespace && *n == name,
             _ => false,
         });
     if !allowed {

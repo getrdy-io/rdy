@@ -89,6 +89,16 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 
 [[allow]]
 rule = "host"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of a Corefile names (k8s.dns fixtures); a reserved zone, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of a Corefile names (k8s.dns fixtures); a reserved zone, not a host a test contacts"
+
+[[allow]]
+rule = "host"
 path = "tests/fixtures/reports/golden/five-sections-exec-plugin.html"
 value = "getrdy.io"
 reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"

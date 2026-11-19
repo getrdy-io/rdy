@@ -36,12 +36,12 @@ Point rdy at the right cluster with `--kubeconfig <file>` and `--kube-context <n
 - **Reads:** none
 - **API reads:**
   - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions
+  - `v1 services` (get, list in a namespace): k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector)
   - `security.openshift.io/v1 securitycontextconstraints` (list): the OpenShift SCCs
   - `admissionregistration.k8s.io/v1 validatingwebhookconfigurations` (list): each webhook's name, failurePolicy, rules, selectors, matchConditions and backend (service name or URL kind); the CA bundle is dropped
   - `admissionregistration.k8s.io/v1 mutatingwebhookconfigurations` (list): the same fields of the mutating webhooks
   - `admissionregistration.k8s.io/v1 validatingadmissionpolicies` (list): name, match constraints, match conditions and whether it has validations; the CEL expressions are dropped
   - `admissionregistration.k8s.io/v1 validatingadmissionpolicybindings` (list): policy name, validation actions and match resources
-  - `v1 services` (list in a namespace): the type of the one Service a Fail webhook names, found with a metadata.name field selector
   - `discovery.k8s.io/v1 endpointslices` (list in a namespace): the ready condition of the endpoints behind one webhook Service, found by its service-name label
   - `kyverno.io/v1 clusterpolicies` (list): policy names, failure actions and match filters; the rules' bodies are dropped
   - `policies.kyverno.io/v1 validatingpolicies` (list): policy names, validation actions and match constraints
@@ -55,6 +55,25 @@ Point rdy at the right cluster with `--kubeconfig <file>` and `--kube-context <n
 **Remediation**
 
 Set the Pod Security level of the install namespace to what the product needs: `kubectl label ns <namespace> pod-security.kubernetes.io/enforce=<level> --overwrite`. On OpenShift, grant the SCC the vendor documents: `oc adm policy add-scc-to-user <scc> -z <service-account> -n <namespace>`. If a policy engine or a webhook is installed, ask the platform team which policies apply to the namespace, and whether every webhook that fails closed has a running backend.
+
+## `k8s.dns` Cluster DNS
+
+- **Measures:** Cluster DNS runs, has a ClusterIP, serves the cluster domain and shows no forward loop
+- **Needs:** kube_context
+- **Wants:** none
+- **Timeout:** 15 s
+- **Systems:** Linux: full. macOS: full. Windows: full.
+- **Reads:** none
+- **API reads:**
+  - `v1 pods` (list): k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector
+  - `apps/v1 deployments` (list in a namespace): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label
+  - `apps/v1 daemonsets` (list in a namespace): desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns
+  - `v1 services` (get, list in a namespace): k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector)
+  - `v1 configmaps` (get): the Corefile key of the coredns ConfigMap in kube-system; every other key is dropped while parsing
+
+**Remediation**
+
+Find out why the cluster DNS pods are not ready with `kubectl -n kube-system get pods -l k8s-app=kube-dns` and `kubectl -n kube-system describe pods -l k8s-app=kube-dns`. If CoreDNS crash-loops and forwards to `/etc/resolv.conf`, change the forward in its Corefile to the node's real upstream resolvers (the fix text of this check names the command for your cluster).
 
 ## `k8s.namespace` Namespace
 
@@ -83,8 +102,8 @@ Ask the platform team for a namespace the product can install into. Create it wi
 - **Reads:** none
 - **API reads:**
   - `v1 nodes` (list): allocatable, conditions, taints, labels; providerID and kubeletVersion
-  - `v1 pods` (list): requests, nodeName and phase only, with a status.phase field selector
-  - `apps/v1 deployments` (list in a namespace): the cluster-autoscaler deployment by name
+  - `v1 pods` (list): k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector
+  - `apps/v1 deployments` (list in a namespace): k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label
 
 **Remediation**
 

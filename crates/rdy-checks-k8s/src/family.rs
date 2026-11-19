@@ -42,6 +42,7 @@ use crate::client::{
     ReadOnlyClient, SecretHook, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
+use crate::dns::DnsCheck;
 use crate::namespace::NamespaceCheck;
 use crate::nodes::NodesCheck;
 use crate::rbac::RbacCheck;
@@ -542,6 +543,7 @@ pub(crate) fn build_check(
         CheckParams::K8sNamespace(params) => Ok(Built::new(Box::new(NamespaceCheck::new(
             params, namespace, cluster,
         )))),
+        CheckParams::K8sDns(params) => Ok(Built::new(Box::new(DnsCheck::new(params, cluster)))),
         _ => Err(BuildError::Unsupported(
             "not a k8s check this rdy can build".to_owned(),
         )),

@@ -110,6 +110,8 @@ jobs:
         run: python3 -I scripts/gen-k8s-admission-fixtures.py --check
       - name: k8s.namespace fixtures are current
         run: python3 -I scripts/gen-k8s-namespace-fixtures.py --check
+      - name: k8s.dns fixtures are current
+        run: python3 -I scripts/gen-k8s-dns-fixtures.py --check
       - name: The k8s api trees of the fixture envs are current
         run: python3 -I scripts/gen-k8s-env-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-default-replicas"
+summary = "A Deployment with no replicas field (the server's default is 1) and one ready pod"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true
