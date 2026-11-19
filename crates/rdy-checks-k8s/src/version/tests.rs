@@ -763,6 +763,46 @@ async fn the_check_declares_what_the_registry_and_the_planner_read() {
     );
 }
 
+// ---- a slow API server (M1-119) ---------------------------------------------------------------------------
+
+/// `k8s.version` takes the server's `/version` from the cluster it is given, so a slow `/version` is a slow
+/// cluster build, which M1-107 owns. What the check itself asks is the group list, and a server that sits
+/// on that request must end the check as `Timeout` at the 10 s default, in virtual time and with no real
+/// wait. The case is the `slow-groups` cluster: a one hour delay on `GET /apis`.
+#[test]
+fn a_server_that_never_answers_the_group_list_ends_in_timeout_at_the_default_limit() {
+    use rdy_engine::sched::{End, Planned};
+
+    let rig = rig("slow-groups");
+    let check: Arc<dyn Check> = Arc::new(VersionCheck::new(
+        params(json!({"min": "1.27", "apis": ["v1 Pod"]})),
+        rig.cluster.clone(),
+    ));
+    let fixture = Fixture::load(&fixtures_dir(), "checks/k8s.version/slow-groups").expect("loads");
+    // The scheduler logs into the harness's own run, so the INV-14 audit sees the request. The runtime
+    // has a paused clock, so the hour of delay costs no real time.
+    let scheduler = rig
+        .cluster
+        .harness
+        .run()
+        .scheduler(1, Os::Linux, fixture.available_needs());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("a runtime");
+    let mut ran = runtime.block_on(scheduler.run(vec![Planned::new(check, INFO.id)]));
+    match ran.remove(0).end {
+        End::TimedOut { after } => assert_eq!(after, Duration::from_secs(10)),
+        other => panic!("expected a timeout at the 10 s default, got {other:?}"),
+    }
+    assert_eq!(
+        rig.requests(),
+        [("GET".to_owned(), "/apis".to_owned(), ActionOutcome::Timeout)]
+    );
+    rig.audit();
+}
+
 #[tokio::test]
 async fn a_review_the_authorizer_could_not_decide_leaves_the_list_to_say() {
     // `allowed: false` with an evaluation error and no `denied` is not a no: the list is tried.

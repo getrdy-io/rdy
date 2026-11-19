@@ -1,0 +1,23 @@
+schema = 1
+name = "timeouts"
+summary = "An NFS mount whose statvfs never returns: host.disk times out, and net.egress blocks on a black-hole endpoint"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk", "net.egress"]
+spec = "spec.yaml"
+
+[caps]
+root = false
+network = true
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000005"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "not_ready"
+exit_code = 2
