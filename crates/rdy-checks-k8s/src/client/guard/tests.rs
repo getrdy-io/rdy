@@ -266,8 +266,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             if matches!(
                 access,
                 Access::Get(_) | Access::GetIn { .. } | Access::GetInNamespace(_)
-            )
-                || entry.field_selector == FieldSelector::NotRequired
+            ) || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
                 assert_eq!(judge_get(&format!("{path}?limit=500")), Ok(()), "{path}");

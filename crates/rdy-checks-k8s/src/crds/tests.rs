@@ -841,7 +841,9 @@ const NOT_READ_YET: &[&str] = &[];
 async fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
     crate::client::mock::hits::clear();
     let rig_one = rig("operator-ready");
-    let _ = rig_one.finding(json!({"operators": [operator(None)]})).await;
+    let _ = rig_one
+        .finding(json!({"operators": [operator(None)]}))
+        .await;
     // The audit records the hits.
     rig_one.audit();
     assert_eq!(
