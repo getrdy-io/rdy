@@ -23,15 +23,16 @@
 //! The hosts of a check's spec entry are not handed to its probe here: that is M1-095, with the first
 //! live socket check. Until then no check can reach a host.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rdy_spec::LoadedSpec;
-use rdy_spec::result::{Capability, CheckResult, Report, Severity, Status};
+use rdy_spec::result::{Capability, CheckResult, KubeIdentity, Report, Severity, Status};
 use rdy_spec::spec::{CheckSpec, Lenient};
 
 use crate::check::{CheckContext, CheckInfo, Finding, Need, Os};
-use crate::family::Registry;
+use crate::family::{FAMILY_PROBE_LIMIT, Family, FamilyFatal, FamilyProbe, Registry};
 use crate::outcome::{
     SPEC_PLACEHOLDER, cancelled_result, map_outcome, panicked_result, run_deadline_result,
     timeout_result, unfinished_result,
@@ -44,9 +45,11 @@ use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Observer, Planned, Ran, 
 use crate::watchdog::Board;
 
 #[cfg(test)]
+mod hook_tests;
+#[cfg(test)]
 mod hosts_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// What shapes one run.
 #[derive(Debug, Clone)]
@@ -68,6 +71,31 @@ pub struct RunOptions {
     /// run started (M1-176). [`Engine::execute`] tells it about every start and end. `None` runs
     /// without one.
     pub board: Option<Arc<Board>>,
+    /// `--kubeconfig`, for the Kubernetes family's probe.
+    pub kubeconfig: Option<PathBuf>,
+    /// `--kube-context`, for the Kubernetes family's probe.
+    pub kube_context: Option<String>,
+    /// Where a family's probe prints the line that says which cluster it is about to touch. `None`
+    /// prints nothing.
+    pub announce: Option<Announce>,
+}
+
+/// A line printer for a family's probe: it writes one line to the user's stderr.
+#[derive(Clone)]
+pub struct Announce(Arc<dyn Fn(&str) + Send + Sync>);
+
+impl Announce {
+    /// A printer that calls `print` once per line.
+    #[must_use]
+    pub fn new(print: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(print))
+    }
+}
+
+impl std::fmt::Debug for Announce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Announce(..)")
+    }
 }
 
 /// Sends the scheduler's positions to the board's slots. The scheduler counts only the checks it runs;
@@ -110,6 +138,9 @@ impl RunOptions {
             spec_arg: "<spec>".to_owned(),
             origin: None,
             board: None,
+            kubeconfig: None,
+            kube_context: None,
+            announce: None,
         }
     }
 }
@@ -135,6 +166,11 @@ pub struct Executed {
     /// `Redactor::redact_report_counted`: that call rebuilds the report's `redaction` block from this
     /// and its own walk, so a count the log made would be lost without it.
     pub counts: RuleCounts,
+    /// The Kubernetes identity of the run, when a family has one (`identity.kube`).
+    pub kube: Option<KubeIdentity>,
+    /// A family's probe ended the run. No check ran: every entry that was to run is "not finished". The
+    /// caller exits 70 with this message and hint.
+    pub fatal: Option<FamilyFatal>,
 }
 
 /// The families of this build and the hub of this run.
@@ -253,7 +289,10 @@ impl Engine {
         }
         // The facade enforces the option too, so a check that skips the need gate still opens no socket.
         self.hub.set_network(options.network);
-        let found = capabilities(&self.hub.run_probe(), privilege, &wanted, options.network).await;
+        let mut found =
+            capabilities(&self.hub.run_probe(), privilege, &wanted, options.network).await;
+        let (probed, fatal) = self.probe_families(&entries, options).await;
+        found.extend(probed.capabilities);
         let available: Vec<Need> = wanted
             .iter()
             .filter(|need| {
@@ -354,9 +393,11 @@ impl Engine {
         if let Some(origin) = options.origin {
             scheduler = scheduler.with_origin(origin);
         }
-        let ran = match observer {
-            Some(observer) => scheduler.run_observed(planned, Arc::new(observer)).await,
-            None => scheduler.run(planned).await,
+        // A fatal probe ends the run before any check starts. Every entry then maps to "not finished".
+        let ran = match (observer, &fatal) {
+            (_, Some(_)) => Vec::new(),
+            (Some(observer), None) => scheduler.run_observed(planned, Arc::new(observer)).await,
+            (None, None) => scheduler.run(planned).await,
         };
 
         // One result per item, in order. A result the scheduler did not hand back is "not finished", never
@@ -383,7 +424,7 @@ impl Engine {
         let redactor = self.hub.redactor();
         let mut counts = RuleCounts::default();
         let mut mapped = mapped.into_iter();
-        let results = slots
+        let results: Vec<CheckResult> = slots
             .into_iter()
             .map(|slot| {
                 let mut result = match slot {
@@ -403,6 +444,14 @@ impl Engine {
             })
             .collect();
 
+        let kube = if fatal.is_some() {
+            None
+        } else {
+            probed
+                .families
+                .iter()
+                .find_map(|family| family.kube_identity(&results))
+        };
         let log = self.hub.action_log();
         counts.merge(&log.redaction);
         Executed {
@@ -410,8 +459,65 @@ impl Engine {
             capabilities: found,
             log,
             counts,
+            kube,
+            fatal,
         }
     }
+
+    /// Runs the probe hook of every family that has a runnable check in `entries`, each under
+    /// [`FAMILY_PROBE_LIMIT`]. A probe that does not end in time leaves its `kube_context` need unmet and
+    /// is told so. The first fatal answer stops the rest.
+    async fn probe_families(
+        &self,
+        entries: &[crate::plan::PlanEntry],
+        options: &RunOptions,
+    ) -> (Probed<'_>, Option<FamilyFatal>) {
+        let mut probed = Probed::default();
+        for family in self.registry.families() {
+            let checks: Vec<&'static CheckInfo> = entries
+                .iter()
+                .filter_map(|entry| match &entry.action {
+                    PlanAction::Run(built) => Some(built.check.info()),
+                    _ => None,
+                })
+                .filter(|info| info.family == family.name())
+                .collect();
+            if checks.is_empty() {
+                continue;
+            }
+            let print = |line: &str| {
+                if let Some(announce) = &options.announce {
+                    (announce.0)(line);
+                }
+            };
+            let ctx = FamilyProbe {
+                probe: self.hub.run_probe(),
+                secrets: self.hub.secret_sink(),
+                checks: &checks,
+                network: options.network,
+                kubeconfig: options.kubeconfig.as_deref(),
+                kube_context: options.kube_context.as_deref(),
+                announce: &print,
+            };
+            probed.families.push(family);
+            match tokio::time::timeout(FAMILY_PROBE_LIMIT, family.probe(ctx)).await {
+                Ok(Ok(capabilities)) => probed.capabilities.extend(capabilities),
+                Ok(Err(fatal)) => return (probed, Some(fatal)),
+                Err(_) => {
+                    probed.capabilities.extend(family.probe_timed_out());
+                }
+            }
+        }
+        (probed, None)
+    }
+}
+
+/// What the family probes found.
+#[derive(Default)]
+struct Probed<'a> {
+    capabilities: Vec<Capability>,
+    /// The families whose probe ran.
+    families: Vec<&'a dyn Family>,
 }
 
 /// Where a spec entry's result comes from.

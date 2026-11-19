@@ -1,0 +1,12 @@
+schema = 1
+name = "net-proxy-no-network"
+summary = "A run with --no-network: the proxy is not contacted"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.proxy"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,74 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "svc.cluster.local"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "Edit the `hosts:` line of `/etc/nsswitch.conf` so `dns` comes before the mDNS source, or remove the mDNS source: `hosts: files dns`. On Ubuntu `apt remove libnss-mdns` removes it.",
+    "level": "warn",
+    "message": "`svc.cluster.local` ends in `.local` and `/etc/nsswitch.conf` has an mDNS source with `[NOTFOUND=return]` before `dns`, so it is never sent to a nameserver",
+    "notes": [
+      "`svc.cluster.local` ends in `.local` and `/etc/nsswitch.conf` has an mDNS source with `[NOTFOUND=return]` before `dns`, so it is never sent to a nameserver",
+      "The `hosts:` line of `/etc/nsswitch.conf` lists `sss`: every lookup asks sssd first, and a stopped or slow sssd stalls them."
+    ],
+    "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "nsswitch_hosts": {
+          "dns": true,
+          "mdns_return_before_dns": true,
+          "sss": true
+        },
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.20"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "svc.cluster.local",
+          "nameservers": [
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.20"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 1,
+              "rcode": "NOERROR",
+              "status": "replied"
+            },
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.20"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 2,
+              "rcode": "NOERROR",
+              "status": "replied"
+            }
+          ],
+          "result": "found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

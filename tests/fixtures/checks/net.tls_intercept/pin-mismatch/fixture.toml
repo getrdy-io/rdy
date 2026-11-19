@@ -1,0 +1,12 @@
+schema = 1
+name = "net-tls-intercept-pin-mismatch"
+summary = "A public chain in which no certificate is pinned"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["net.tls_intercept"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -2,8 +2,8 @@
 //!
 //! Internal to rdy. No API stability promise.
 //!
-//! So far this crate holds [`MtuCheck`] (`net.mtu`, M1-157), [`EgressCheck`] (`net.egress`, staged: lookup,
-//! dual-stack connect, TLS and ALPN, M1-095) and [`NetFamily`], which builds them from their spec entries.
+//! So far this crate holds [`DnsCheck`] (`net.dns`, system answer, M1-153), [`MtuCheck`] (`net.mtu`, M1-157), [`ProxyCheck`] (`net.proxy`, M1-098), [`EgressCheck`] (`net.egress`, staged: lookup,
+//! dual-stack connect, TLS and ALPN, M1-095), [`TlsInterceptCheck`] (`net.tls_intercept`, M1-099) and [`NetFamily`], which builds them from their spec entries.
 //! Every network call goes through the probe facade, which owns the sockets, the address policy and the
 //! trust roots. The family lists only the checks that exist: the other `net.*` ids are reserved, so the
 //! planner skips them with `skip_kind: not_in_build` until their tickets add them here. Every check
@@ -27,11 +27,19 @@
 )]
 #![warn(missing_docs)]
 
+mod dns;
 mod egress;
+#[cfg(test)]
+mod expect_cases;
 mod family;
 mod mtu;
+mod proxy;
 mod text;
+mod tls_intercept;
 
+pub use dns::DnsCheck;
 pub use egress::EgressCheck;
 pub use family::NetFamily;
 pub use mtu::MtuCheck;
+pub use proxy::ProxyCheck;
+pub use tls_intercept::TlsInterceptCheck;

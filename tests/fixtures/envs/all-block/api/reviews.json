@@ -1,0 +1,28 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "nodes"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": ""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "no RBAC policy matched"
+      }
+    }
+  ]
+}

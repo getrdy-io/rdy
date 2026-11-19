@@ -39,6 +39,34 @@ use rdy_cli::RunHooks;
 use rdy_engine::check::{Os, current_os};
 use rdy_engine::testing::Replay;
 
+/// The variables that could hand `rdy run` a proxy, or a `NO_PROXY` list, from the machine that runs
+/// the tests (M1-097). A CI runner often sets some of them, and a binary test must not depend on that.
+pub const PROXY_VARIABLES: [&str; 8] = [
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+];
+
+/// Removes [`PROXY_VARIABLES`] from a command's environment.
+pub trait NoProxyEnv {
+    /// Removes every proxy variable, so the runner's environment cannot leak into the run.
+    fn no_proxy_env(&mut self) -> &mut Self;
+}
+
+impl NoProxyEnv for std::process::Command {
+    fn no_proxy_env(&mut self) -> &mut Self {
+        for name in PROXY_VARIABLES {
+            self.env_remove(name);
+        }
+        self
+    }
+}
+
 /// The text of `/proc/self/status` for the given ids and capability masks.
 #[must_use]
 pub fn proc_status(uid: [u32; 4], gid: [u32; 4], cap_eff: u64, cap_amb: u64) -> String {
@@ -103,4 +131,20 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     run_on(unprivileged(), argv, out, err)
+}
+
+/// A validator for the `ErrorOutput` definition of the result schema (07 section 4.1).
+#[must_use]
+pub fn error_output_validator() -> jsonschema::Validator {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../rdy-spec/schema/result.v1.schema.json");
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let mut schema: serde_json::Value =
+        serde_json::from_str(&source).unwrap_or_else(|e| panic!("schema is not JSON: {e}"));
+    schema["$ref"] = serde_json::Value::String("#/$defs/ErrorOutput".into());
+    jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .unwrap_or_else(|e| panic!("schema does not build: {e}"))
 }

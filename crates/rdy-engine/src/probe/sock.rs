@@ -7,6 +7,9 @@
 //! - [`Probe::unix_get`] sends one `GET` over a unix socket and returns the status and the body. It
 //!   serves the Docker and Podman Engine API of `host.container_runtime`.
 //!
+//! A third family, [`Probe::nameserver_exchange`] (M1-155), sends one DNS query to a nameserver the
+//! facade reads from the OS itself. Its rules are in [`nameserver`].
+//!
 //! Both go in the order the rest of the facade does: the handle is checked, the policy is applied, the
 //! backend runs, and the entry is closed. A refused call never reaches the backend. There is one
 //! action-log entry per call.
@@ -22,7 +25,7 @@
 //!   on the next address.
 //! - The payload is 1 to [`MAX_UDP_PAYLOAD`] bytes and the reply is cut at the smaller of `max_reply`
 //!   and [`MAX_UDP_REPLY`]. The socket is connected, so a datagram from any other source is never read.
-//! - The whole call has [`UDP_TIMEOUT`]. A silent server is [`ProbeError::Timeout`].
+//! - The whole call takes at most [`UDP_TIMEOUT`]. A silent server is [`ProbeError::Timeout`].
 //! - The entry is a `connect` with `proto` `udp`, the `host` and `port` as the spec wrote them, the
 //!   `addr` used, and the reply `bytes`. The payload and the reply are never logged.
 //!
@@ -41,7 +44,7 @@
 //!   There is no query string. So `/containers/json`, `/events`, `/exec/...` and `/images/...` are
 //!   refused, and a `POST` to `/containers/create` is refused twice over.
 //! - The request has no body and no credential. The reply is read to [`BODY_LIMIT`] bytes and the cut
-//!   is flagged. The whole call has [`UNIX_TIMEOUT`].
+//!   is flagged. The whole call takes at most [`UNIX_TIMEOUT`] (`unix_get_within` can lower it).
 //! - The entry is an `http` with `method`, `path` (the socket) and `url` (the API path), then the
 //!   `status` and body `bytes`. The body is never logged: `/info` can carry proxy settings, so a check
 //!   redacts what it keeps.
@@ -51,7 +54,15 @@
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Component, Path};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// The remaining budget is measured on tokio's clock when tokio is in the build, the clock the backend's
+// timeout runs on. It is the real clock in a normal run. Under a paused test clock, a real-clock
+// measurement would take real milliseconds off a virtual limit and cut the call early.
+#[cfg(not(any(feature = "runtime", feature = "loopback")))]
+use std::time::Instant;
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+use tokio::time::Instant;
 
 use rdy_spec::Target;
 use rdy_spec::result::ActionKind;
@@ -63,10 +74,17 @@ use super::{Probe, ProbeError, RULE_NO_NETWORK, refuse, settle};
 use crate::check::{Os, PeerClass};
 use crate::family::HostSet;
 
+pub mod nameserver;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
+
+pub use nameserver::{
+    DnsTransport, MAX_DNS_QUERY, MAX_NAMESERVER_TCP_REPLY, MAX_NAMESERVER_UDP_REPLY,
+    MAX_NAMESERVERS, NAMESERVER_FILES, NAMESERVER_PORT, NAMESERVER_TIMEOUT, RULE_NS_ADDRESS,
+    RULE_NS_INDEX, RULE_NS_PAYLOAD, RULE_NS_UNDECLARED,
+};
 
 /// The most time one UDP exchange may take, name lookup included.
 pub const UDP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -124,6 +142,9 @@ pub struct UdpReply {
     pub truncated: bool,
     /// The address that answered.
     pub addr: IpAddr,
+    /// The message ID the facade put in the query it sent (`Probe::nameserver_exchange` picks a random
+    /// one and overwrites the caller's). `None` for a call that does not choose an ID.
+    pub query_id: Option<u16>,
 }
 
 impl UdpReply {
@@ -134,6 +155,7 @@ impl UdpReply {
             bytes,
             truncated: false,
             addr,
+            query_id: None,
         }
     }
 }
@@ -166,6 +188,8 @@ impl UnixResponse {
 #[derive(Debug, Default)]
 pub(super) struct Peers {
     hosts: OnceLock<HostSet>,
+    /// The OS nameserver list, read once by `nameserver_exchange` (M1-155).
+    pub(super) nameservers: OnceLock<Vec<IpAddr>>,
     #[cfg(test)]
     pub(super) timeout: OnceLock<Duration>,
 }
@@ -228,7 +252,9 @@ impl Probe {
     ///
     /// [`ProbeError::Denied`] for an undeclared class, a server that is not a spec host, a bad size,
     /// a forbidden address, or a call after the check ended; [`ProbeError::Timeout`] when no reply
-    /// came in time; the other variants when the lookup or the socket fails.
+    /// came in time; [`ProbeError::NotFound`] when the name has no address;
+    /// [`ProbeError::ConnectionRefused`] when the host answers with an ICMP port unreachable;
+    /// [`ProbeError::Io`] for the other socket and lookup failures.
     pub async fn udp_exchange(
         &self,
         server: &Target,
@@ -324,7 +350,8 @@ impl Probe {
     /// [`ProbeError::Denied`] for an OS without unix sockets, a socket the check did not declare, a
     /// path off the allowlist, or a call after the check ended; [`ProbeError::NotFound`] and
     /// [`ProbeError::PermissionDenied`] when the socket is missing or the user may not open it;
-    /// [`ProbeError::Timeout`]; the other variants for a reply that is not HTTP.
+    /// [`ProbeError::ConnectionRefused`] when the socket file is there and nothing listens;
+    /// [`ProbeError::Timeout`]; [`ProbeError::Io`] for a reply that is not HTTP.
     pub async fn unix_get(&self, socket: &Path, path: &str) -> Result<UnixResponse, ProbeError> {
         self.unix_request("GET", socket, path, None).await
     }

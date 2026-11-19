@@ -1,0 +1,12 @@
+schema = 1
+name = "net-dns-split-horizon"
+summary = "The system resolver and the second nameserver disagree about web.acme.test"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.dns"]
+
+[caps]
+root = false
+network = true
+kube = false

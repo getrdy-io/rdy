@@ -19,7 +19,7 @@ use rdy_engine::check::{
 use rdy_engine::exec::policy::PolicyError;
 use rdy_engine::exec::table::{self, ExitClass, Param};
 use rdy_engine::probe::ProbeError;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::family::{OS, ROOT};
 use crate::reads::{Read, read_text};
@@ -707,6 +707,11 @@ fn assemble(requested: &[u16], found: &[Inspection]) -> Finding {
     finding
 }
 
+/// `is` for one port, `are` for several.
+fn is_are(ports: &[u16]) -> &'static str {
+    if ports.len() == 1 { "is" } else { "are" }
+}
+
 /// The fix for ports that could not be confirmed.
 fn unknown_fix(one: &Inspection, ports: &[u16]) -> String {
     if one.missing.contains(&Need::Root) {
@@ -718,17 +723,21 @@ fn unknown_fix(one: &Inspection, ports: &[u16]) -> String {
     }
     match (one.manager, &one.zone) {
         ("firewalld", Some(zone)) => format!(
-            "Run `firewall-cmd --list-all --zone={zone}` and check that {} is accepted from the nodes that need it. If it is not, run `firewall-cmd --permanent --zone={zone} {} && firewall-cmd --reload`.",
+            "Run `firewall-cmd --list-all --zone={zone}` and check that {} {} accepted from the nodes that need {}. If not, run `firewall-cmd --permanent --zone={zone} {} && firewall-cmd --reload`.",
             list(ports),
+            is_are(ports),
+            if ports.len() == 1 { "it" } else { "them" },
             add_ports(ports)
         ),
         ("firewalld", None) => format!(
-            "Run `firewall-cmd --list-all` and check that {} is open in the zone of the default-route interface.",
-            list(ports)
+            "Run `firewall-cmd --list-all` and check that {} {} open in the zone of the default-route interface.",
+            list(ports),
+            is_are(ports)
         ),
         _ => format!(
-            "Run `ufw status verbose` as root and check that {} is allowed.",
-            list(ports)
+            "Run `ufw status verbose` as root and check that {} {} allowed.",
+            list(ports),
+            is_are(ports)
         ),
     }
 }
@@ -738,13 +747,15 @@ fn observed(found: &[Inspection]) -> Value {
     let managers: Vec<Value> = found
         .iter()
         .map(|one| {
-            let mut ports = Map::new();
-            for (port, verdict) in &one.verdicts {
-                ports.insert(
-                    port.to_string(),
-                    json!({ "verdict": verdict.word(), "detail": verdict.detail() }),
-                );
-            }
+            // An array, sorted by port number. An object would list "10250" before "6443".
+            let mut verdicts: Vec<&(u16, Verdict)> = one.verdicts.iter().collect();
+            verdicts.sort_by_key(|(port, _)| *port);
+            let ports: Vec<Value> = verdicts
+                .into_iter()
+                .map(|(port, verdict)| {
+                    json!({ "port": port, "verdict": verdict.word(), "detail": verdict.detail() })
+                })
+                .collect();
             json!({
                 "manager": one.manager,
                 "zone": one.zone,

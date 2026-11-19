@@ -20,7 +20,16 @@ const MAX_AUTHORITY: usize = 16 * 1024;
 static SCHEME: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"[A-Za-z][A-Za-z0-9+.\-]*:(?:\\?/){2}"));
 
-/// Removes the userinfo of every URL in `text`.
+/// The keys of a proxy URL with no scheme, written as JSON (lower case, with the quotes).
+const PROXY_JSON_KEYS: [&str; 4] = [
+    "\"http-proxy\"",
+    "\"https-proxy\"",
+    "\"httpproxy\"",
+    "\"httpsproxy\"",
+];
+
+/// Removes the userinfo of every URL in `text`, and of a proxy value with no scheme (see
+/// [`find_scheme_less_proxy`]).
 ///
 /// The authority is the text after `://` up to the first `/`, `?`, `#`, quote, angle bracket, white
 /// space, control character or backslash. The userinfo ends at the last `@` in it, so a password that
@@ -31,6 +40,7 @@ static SCHEME: LazyLock<Result<Regex, regex::Error>> =
 /// space, quote or backslash, the userinfo runs to the last such `@`: `postgres://app:K7x/9+Qa@db/app`.
 /// A space in a password is not read: write it as a percent escape, as the URL standard asks.
 pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
+    find_scheme_less_proxy(text, out);
     // A scheme is followed by `:` and two slashes, either of which may carry a JSON backslash.
     if !text.contains(":/") && !text.contains(":\\/") {
         return;
@@ -62,6 +72,103 @@ pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
             out.push(m.end()..end);
         }
     }
+}
+
+/// A proxy value with no scheme, `svc:pw@proxy.acme.test:3128`, after a `*_proxy=` key (any case, so
+/// also `Environment="HTTPS_PROXY=..."`) or after the JSON keys `"http-proxy":`, `"https-proxy":`,
+/// `"HttpProxy":` and `"HttpsProxy":`. The userinfo is what comes before the last `@` of the value.
+///
+/// A value with no `@` (`proxy.acme.test:3128`, a `no_proxy` list) is left alone, and so is one with a
+/// `://`, which the scheme form reads. Any other key, and free text, is not read: a check stores a proxy
+/// only as `ProxyUrl::origin` or `evidence_url`.
+fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
+    if !text.contains('@') && !text.contains("\\u0040") {
+        return;
+    }
+    let lower = text.to_ascii_lowercase();
+    // Matches inside a value already read are skipped, so the work stays linear.
+    let mut done = 0;
+    let mut hits: Vec<usize> = lower
+        .match_indices("_proxy=")
+        .map(|(i, key)| i + key.len())
+        .collect();
+    for key in PROXY_JSON_KEYS {
+        for (i, found) in lower.match_indices(key) {
+            let rest = &text[i + found.len()..];
+            let after_colon = rest.trim_start_matches([' ', '\t']);
+            let Some(after_colon) = after_colon.strip_prefix(':') else {
+                continue;
+            };
+            let value = after_colon.trim_start_matches([' ', '\t']);
+            if value.starts_with('"') {
+                hits.push(text.len() - value.len());
+            }
+        }
+    }
+    hits.sort_unstable();
+    for start in hits {
+        if start < done {
+            continue;
+        }
+        let (span, scanned_to) = proxy_value(text, start);
+        done = scanned_to;
+        let value = &text[span.clone()];
+        // Only a value that opens with a scheme is the scheme form's. `svc:\/pw@h` is not one.
+        if SCHEME
+            .as_ref()
+            .is_ok_and(|re| re.find(value).is_some_and(|m| m.start() == 0))
+        {
+            continue;
+        }
+        let at = value.rfind('@');
+        let escaped = value.rfind("\\u0040");
+        let Some(userinfo_end) = at.into_iter().chain(escaped).max().filter(|&e| e > 0) else {
+            continue;
+        };
+        if !is_single_placeholder(&value[..userinfo_end]) {
+            out.push(span.start..span.start + userinfo_end);
+        }
+    }
+}
+
+/// The span of the value that starts at `start`, at most `MAX_AUTHORITY` bytes, and where the scan
+/// stopped.
+///
+/// A value that opens with `"`, `'` or a JSON-escaped `\"` skips it and ends at the same quote (for
+/// `\"`, its `\"`), white space or a control character. Any other value ends at white space, a control character, `"`, a backtick, `<` or `>`,
+/// so a `'` in an unquoted password stays inside it.
+fn proxy_value(text: &str, start: usize) -> (Range<usize>, usize) {
+    let window_end = floor_boundary(text, (start + MAX_AUTHORITY).min(text.len()));
+    let window = &text[start..window_end];
+    let escaped = window.starts_with("\\\"");
+    let (quote, body_offset) = match window.chars().next() {
+        _ if escaped => (Some('"'), 2),
+        Some(q @ ('"' | '\'')) => (Some(q), 1),
+        _ => (None, 0),
+    };
+    let body = &window[body_offset..];
+    let end = body
+        .find(|c: char| match quote {
+            Some(q) => c == q || c.is_whitespace() || c.is_control(),
+            None => c.is_whitespace() || c.is_control() || matches!(c, '"' | '`' | '<' | '>'),
+        })
+        .unwrap_or(body.len());
+    // A JSON-escaped quote closes with its backslash, which is not part of the value.
+    let end = if escaped && body[..end].ends_with('\\') && body[end..].starts_with('"') {
+        end - 1
+    } else {
+        end
+    };
+    let from = start + body_offset;
+    (from..from + end, from + end)
+}
+
+/// The largest char boundary of `text` that is at most `at`.
+fn floor_boundary(text: &str, mut at: usize) -> usize {
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }
 
 /// Reads the authority that starts at `from`. Returns where the userinfo ends (the last `@`) and where
@@ -243,6 +350,97 @@ mod tests {
     #[test]
     fn two_urls_in_one_line_are_two_spans() {
         assert_eq!(found("http://a:b@h1 and https://c:d@h2/x"), ["a:b", "c:d"]);
+    }
+
+    #[test]
+    fn a_proxy_with_no_scheme_after_a_proxy_key_loses_its_userinfo() {
+        for (text, want) in [
+            ("HTTPS_PROXY=svc:pw@proxy.acme.test:3128", "svc:pw"),
+            ("http_proxy=svc:p@w@proxy:3128 next", "svc:p@w"),
+            (
+                "Environment=\"HTTP_PROXY=svc:pw@proxy:3128\" \"NO_PROXY=a,.b\"",
+                "svc:pw",
+            ),
+            ("Environment=Https_Proxy=TOKEN123@proxy:3128", "TOKEN123"),
+            (r#"{"http-proxy": "svc:pw@proxy:3128"}"#, "svc:pw"),
+            (r#"{"https-proxy":"svc:pw@proxy:3128"}"#, "svc:pw"),
+            (r#""HttpProxy" : "svc:pw@proxy:3128","#, "svc:pw"),
+            (r#""HttpsProxy":"svc:p/w@proxy:3128""#, "svc:p/w"),
+            // A quote around the value, and a quote or a space inside it.
+            ("http_proxy=\"svc:pw@p:3128\"", "svc:pw"),
+            ("export HTTPS_PROXY='svc:pw@p:3128'", "svc:pw"),
+            (r#"{"cmd":"HTTP_PROXY=\"svc:pw@h:1\" run"}"#, "svc:pw"),
+            ("Environment=HTTP_PROXY=\"svc:pw@h:1\"", "svc:pw"),
+            ("HTTPS_PROXY=svc:it'spw@proxy:3128", "svc:it'spw"),
+            (r#"{"http-proxy": "svc:it'spw@proxy:3128"}"#, "svc:it'spw"),
+            // Not a scheme: a backslash slash, and a scheme after the userinfo.
+            ("HTTP_PROXY=svc:\\/pw@proxy:3128", "svc:\\/pw"),
+            ("HTTP_PROXY=svc:pw@proxy:3128/?u=http://x", "svc:pw"),
+            (r#""HttpProxy":"svc:pw\u0040proxy:3128""#, "svc:pw"),
+        ] {
+            assert_eq!(found(text), [want], "{text}");
+        }
+    }
+
+    #[test]
+    fn a_proxy_value_with_no_at_sign_or_another_key_is_left_alone() {
+        for text in [
+            "HTTPS_PROXY=proxy.acme.test:3128",
+            "NO_PROXY=localhost,10.0.0.0/8,.cluster.local",
+            r#""HttpProxy":"proxy.acme.test:3128""#,
+            r#""no-proxy":"localhost""#,
+            "proxy=svc:pw@proxy:3128",
+            "the proxy svc:pw@proxy:3128 is down",
+            "HTTP_PROXY=",
+            "HTTP_PROXY=@proxy:3128",
+            // A space in a password ends the value (05 I1). The check-side guarantee covers it.
+            "HTTP_PROXY='svc:p w@h:1'",
+        ] {
+            assert!(found(text).is_empty(), "{text}: {:?}", found(text));
+        }
+        // A scheme is read by the scheme form, once.
+        assert_eq!(found("HTTP_PROXY=http://u:p@h:1"), ["u:p"]);
+    }
+
+    #[test]
+    fn a_placeholder_proxy_userinfo_is_not_read_again() {
+        let ph = "[REDACTED:url_userinfo:1a2b3c4d]";
+        assert!(found(&format!("HTTPS_PROXY={ph}@proxy:3128")).is_empty());
+        assert!(found(&format!(r#""HttpProxy":"{ph}@proxy:3128""#)).is_empty());
+    }
+
+    #[test]
+    fn a_proxy_value_is_read_inside_a_window_so_the_work_is_bounded() {
+        // Hits more than the window apart, with no white space: each scan stops at the window.
+        let filler = "a".repeat(MAX_AUTHORITY * 2);
+        let text = format!("_proxy={filler}_proxy={filler}_proxy=x:y@h");
+        let mut start = 7;
+        let mut scans = 0;
+        loop {
+            let (span, to) = proxy_value(&text, start);
+            assert!(to - start <= MAX_AUTHORITY, "{}", to - start);
+            assert!(span.len() <= MAX_AUTHORITY);
+            scans += 1;
+            match text[to..].find("_proxy=") {
+                Some(i) => start = to + i + 7,
+                None => break,
+            }
+        }
+        assert_eq!(scans, 3);
+        assert_eq!(found(&text), ["x:y"]);
+        // A wide char at the window edge is not cut.
+        let text = format!("_proxy={}@h", "é".repeat(MAX_AUTHORITY));
+        let _ = found(&text);
+    }
+
+    #[test]
+    fn many_proxy_keys_cost_linear_time() {
+        let text = "_proxy=".repeat(200_000);
+        assert!(found(&text).is_empty());
+        let text = "_proxy=a@".repeat(100_000);
+        assert!(!found(&text).is_empty());
+        let text = format!("{}é@", "\"httpproxy\":\"é".repeat(50_000));
+        let _ = found(&text);
     }
 
     #[test]

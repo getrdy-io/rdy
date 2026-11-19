@@ -99,9 +99,10 @@ fn the_guard_allows_exactly_the_daemonsets_of_the_table() {
         .iter()
         .filter(|e| e.resource == "daemonsets" && e.checks.contains(&"k8s.cni"))
         .flat_map(|e| e.access.iter())
-        .map(|a| match a {
-            Access::GetIn { namespace, name } => format!("{namespace}/{name}"),
-            other => panic!("k8s.cni reads a DaemonSet only by name: {other:?}"),
+        // The entry is shared with k8s.dns, which lists DaemonSets by label: only the named pairs are ours.
+        .filter_map(|a| match a {
+            Access::GetIn { namespace, name } => Some(format!("{namespace}/{name}")),
+            _ => None,
         })
         .collect();
     let table: std::collections::BTreeSet<String> = shipped()

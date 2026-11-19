@@ -3,7 +3,9 @@
 
 use rdy_spec::result::{CheckResult, Need, NeedState, Severity, SkipKind, Status};
 
-use super::view::{need_label, need_spans, not_run_reason, plain, short_fingerprint, utc_text};
+use super::view::{
+    need_label, need_spans, not_run_reason, plain, short_fingerprint, shown, utc_text,
+};
 
 #[test]
 fn a_timestamp_is_shown_as_utc_and_anything_else_as_written() {
@@ -87,8 +89,8 @@ fn a_need_name_is_the_only_untrusted_piece_of_its_label() {
         .filter(|span| span.untrusted)
         .map(|span| span.text.as_str())
         .collect();
-    assert_eq!(untrusted, ["ss\u{202e}"]);
-    assert_eq!(plain(&spans), "the command ss\u{202e}");
+    assert_eq!(untrusted, ["ss\\u{202e}"]);
+    assert_eq!(plain(&spans), "the command ss\\u{202e}");
     assert!(need_spans(&Need::Root, None).iter().all(|s| !s.untrusted));
 }
 
@@ -199,7 +201,11 @@ fn a_report_near_the_json_cap_is_under_the_page_cap() {
         check["key"] = serde_json::json!(format!("host.cpu{number}"));
         check["id"] = serde_json::json!("host.cpu");
         check["notes"] = serde_json::json!(vec![note.clone(); 7]);
-        check["observed"] = serde_json::Value::Null;
+        // Large Found and Needed lists: 200-item lists and a 4 KiB string on every check.
+        check["observed"] = serde_json::json!({
+            "items": (0..200).map(|n| format!("item number {n:04}")).collect::<Vec<_>>(),
+            "text": "word ".repeat(820),
+        });
         check["expected"] = serde_json::Value::Null;
         checks.push(check);
     }
@@ -214,4 +220,134 @@ fn a_report_near_the_json_cap_is_under_the_page_cap() {
         page.len()
     );
     assert!(page.len() <= super::MAX_PAGE_BYTES, "{} bytes", page.len());
+}
+
+/// A report whose first check has the given `observed`.
+fn report_with_observed(
+    observed: serde_json::Value,
+    checks: usize,
+) -> crate::redact::RedactedReport {
+    use crate::redact::{Redactor, TagKey};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/reports/not-ready-7.2.json");
+    let text = std::fs::read_to_string(path).expect("the sample report is in the repo");
+    let mut doc: serde_json::Value = serde_json::from_str(&text).expect("the sample is JSON");
+    let template = doc["checks"][0].clone();
+    let list = doc["checks"].as_array_mut().expect("checks is a list");
+    list.clear();
+    for number in 0..checks {
+        let mut check = template.clone();
+        check["key"] = serde_json::json!(format!("host.cpu{number}"));
+        check["observed"] = observed.clone();
+        check["expected"] = serde_json::Value::Null;
+        list.push(check);
+    }
+    let report = serde_json::from_value(doc).expect("a report");
+    Redactor::new(TagKey::fixed([5; 32]))
+        .redact_report(report)
+        .expect("redacts")
+}
+
+/// Past the page cap, with no action rows left to cut, Found lines are cut, each check says how many
+/// lines it lost, the page fits, and the embedded JSON is whole (07 D.4).
+#[test]
+fn a_page_still_over_its_cap_loses_found_lines_and_says_so() {
+    let observed =
+        serde_json::json!({"items": (0..40).map(|n| format!("item {n:03}")).collect::<Vec<_>>()});
+    let report = report_with_observed(observed, 20);
+    let mut view = super::view::View::new(&report).expect("fine");
+    let whole = super::fit_page(&mut view, usize::MAX).expect("renders");
+    // 800 fact lines, and the details list has `<dd>` too.
+    let total = whole.matches("<dd>").count();
+    assert!(total >= 800);
+    assert!(!whole.contains("more lines are in the embedded JSON"));
+    let max = whole.len() - 20_000;
+    let mut view = super::view::View::new(&report).expect("fine");
+    let page = super::fit_page(&mut view, max).expect("renders");
+    assert!(page.len() <= max, "{} bytes is over {max}", page.len());
+    let shown = page.matches("<dd>").count();
+    assert!(shown > 0 && shown < total, "{shown} lines");
+    assert!(
+        page.contains("more lines are in the embedded JSON."),
+        "no count"
+    );
+    // The counts add up: what is shown and what is left out are all 800 lines.
+    let left_out: usize = page
+        .split("<p class=\"muted\">")
+        .skip(1)
+        .filter_map(|rest| rest.split(" more line").next()?.parse::<usize>().ok())
+        .sum();
+    assert_eq!(shown + left_out, total);
+    let json = |text: &str| text[text.find("id=\"rdy-result\"").expect("block")..].to_owned();
+    assert_eq!(json(&page), json(&whole));
+}
+
+/// What the JSON writer cut is not on the page: a string over its 4 KiB cap shows the cut text, the same
+/// text the embedded JSON holds (SEC-81).
+#[test]
+fn found_shows_what_the_json_holds_and_not_the_longer_text() {
+    let observed = serde_json::json!({"text": format!("{}END", "a".repeat(10_000))});
+    let report = report_with_observed(observed, 1);
+    let page = super::render_html(&report).expect("renders");
+    assert!(!page.contains("END"), "the page shows text the JSON cut");
+    assert!(!page.contains(&"a".repeat(5_000)));
+    assert!(page.contains(&"a".repeat(1_000)));
+}
+
+/// M1-141: every Unicode format (Cf) and zero-width character becomes an escape. Other text is kept.
+#[test]
+fn format_and_zero_width_characters_are_shown_as_escapes() {
+    assert_eq!(esc("x\u{2069}\u{202e}"), "x\\u{2069}\\u{202e}");
+    assert_eq!(esc("a\u{2066}b"), "a\\u{2066}b");
+    for (c, text) in [
+        ('\u{200b}', "\\u{200b}"),
+        ('\u{200d}', "\\u{200d}"),
+        ('\u{feff}', "\\u{feff}"),
+        ('\u{2060}', "\\u{2060}"),
+        ('\u{ad}', "\\u{ad}"),
+        ('\u{61c}', "\\u{61c}"),
+        ('\u{600}', "\\u{600}"),
+        ('\u{6dd}', "\\u{6dd}"),
+        ('\u{110bd}', "\\u{110bd}"),
+        ('\u{e0041}', "\\u{e0041}"),
+        ('\u{3164}', "\\u{3164}"),
+    ] {
+        assert_eq!(esc(&format!("a{c}b")), format!("a{text}b"), "{c:?}");
+    }
+    let kept = "caf\u{e9} \u{4e2d}\u{6587} \u{1f600} \\ \"q\" <b>\n\t";
+    assert_eq!(esc(kept), kept);
+    assert_eq!(esc(""), "");
+}
+
+/// A span from the report is escaped. Our own words are not touched.
+#[test]
+fn an_untrusted_span_is_escaped() {
+    let spans = need_spans(&Need::Command, Some("a\u{202e}"));
+    assert_eq!(plain(&spans), "the command a\\u{202e}");
+    assert_eq!(
+        need_spans(&Need::from("x\u{2066}"), None)[0].text,
+        "x\\u{2066}"
+    );
+}
+
+/// The page's escaper as a `String`.
+fn esc(text: &str) -> String {
+    shown(text).as_str().to_owned()
+}
+
+/// S1: C0, DEL and C1 controls become `\xNN` like the terminal. Line feed and tab stay.
+#[test]
+fn control_characters_are_shown_as_hex_escapes_except_line_feed_and_tab() {
+    assert_eq!(esc("a\u{8}b"), "a\\x08b");
+    assert_eq!(esc("a\u{1b}[2Jb"), "a\\x1b[2Jb");
+    assert_eq!(esc("\u{7f}\u{85}\u{9b}\u{0}"), "\\x7f\\x85\\x9b\\x00");
+    assert_eq!(esc("a\r"), "a\\x0d");
+    assert_eq!(esc("a\nb\tc"), "a\nb\tc");
+}
+
+/// The escaper is idempotent, so a string that was escaped before is not changed by a second pass.
+#[test]
+fn escaping_twice_changes_nothing() {
+    let once = esc("a\u{202e}\u{1b}\u{200b}b");
+    assert_eq!(esc(&once), once);
 }

@@ -1075,3 +1075,30 @@ async fn every_result_says_which_policy_objects_are_not_read() {
         rig.audit();
     }
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[tokio::test]
+async fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    crate::client::mock::hits::clear();
+    for case in [
+        "kubeadm-flannel",
+        "eks-vpc-cni-on",
+        "openshift-ovn",
+        "servicecidr-v1",
+        "servicecidr-beta",
+        "default-deny-egress",
+        "flannel-ds",
+    ] {
+        let rig = rig(case);
+        let _ = rig.finding(json!({})).await;
+    }
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.cni"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.cni is read by no fixture of the tests listed here"
+    );
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-prerelease"
+summary = "An operator at 1.14.0-rc.1, which is below 1.14.0"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

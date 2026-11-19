@@ -21,9 +21,9 @@ pub(crate) fn is_forbidden(addr: IpAddr) -> bool {
     }
 }
 
-/// Whether a datagram must never be sent to `addr`: [`is_forbidden`], or an unspecified, multicast or
+/// Whether a datagram must never be sent to `addr`: `is_forbidden` (link-local, the cloud metadata addresses and the other forbidden ranges), or an unspecified, multicast or
 /// broadcast address (including the same addresses in an embedded IPv4 form).
-pub(crate) fn is_unusable_peer(addr: IpAddr) -> bool {
+pub fn is_unusable_peer(addr: IpAddr) -> bool {
     if is_forbidden(addr) {
         return true;
     }
@@ -47,6 +47,13 @@ const ALIYUN_METADATA: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
 /// check has a reason to reach it: the system resolver may use it, but that is the OS, not a facade
 /// connect. The decision and its residual are in 05 (M1-094).
 const AZURE_HOST_SERVICES: Ipv4Addr = Ipv4Addr::new(168, 63, 129, 16);
+
+/// Whether `addr` is exactly the Azure virtual DNS address, as an IPv4 address. Only the nameserver
+/// call asks, and only about an address that the OS list gave (M1-155, ADR 0051). The IPv4-mapped and
+/// NAT64 forms are not it.
+pub(crate) fn is_azure_dns(addr: IpAddr) -> bool {
+    addr == IpAddr::V4(AZURE_HOST_SERVICES)
+}
 
 /// The GCP IPv6 metadata address `fd20:ce::254`.
 const GCP_METADATA_V6: Ipv6Addr = Ipv6Addr::new(0xfd20, 0x00ce, 0, 0, 0, 0, 0, 0x0254);

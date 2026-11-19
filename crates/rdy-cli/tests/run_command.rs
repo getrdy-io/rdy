@@ -12,8 +12,10 @@ use jsonschema::Validator;
 use rdy_cli::RunHooks;
 use rdy_engine::testing::Replay;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 
 mod common;
+use common::NoProxyEnv;
 
 const ACME: &str = "../../examples/specs/acme-platform.yaml";
 
@@ -94,6 +96,18 @@ fn call_as_given(machine: Replay, hooks: RunHooks, args: &[&str]) -> Ran {
 }
 
 /// Hooks that pin the clock and the run id.
+/// The families of this build with the Kubernetes family reading an empty environment, so a test never
+/// reads the kubeconfig of the machine it runs on (the kube client does not go through the probe).
+fn hermetic_families() -> Result<rdy_engine::family::Registry, rdy_engine::family::RegistryError> {
+    let mut registry = rdy_engine::family::Registry::new();
+    registry.register(rdy_checks_host::HostFamily)?;
+    registry.register(rdy_checks_net::NetFamily)?;
+    registry.register(rdy_checks_k8s::K8sFamily::with_env(
+        rdy_checks_k8s::client::Env::empty(),
+    ))?;
+    Ok(registry)
+}
+
 fn pinned() -> RunHooks {
     let mut hooks = RunHooks::default();
     // 2027-03-09T10:15:02.123Z
@@ -122,9 +136,11 @@ fn parse(stdout: &str) -> Value {
 fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let spec = acme();
+    let mut hooks = pinned();
+    hooks.families = Some(hermetic_families);
     let ran = call(
         common::unprivileged(),
-        pinned(),
+        hooks,
         &[
             "run",
             &spec.to_string_lossy(),
@@ -166,7 +182,14 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     let checks = doc["checks"].as_array().cloned().unwrap_or_default();
     assert_eq!(checks[3]["status"], "skipped", "{}", checks[3]);
     assert_eq!(checks[3]["skip_kind"], "missing_need", "{}", checks[3]);
-    for check in &checks[4..] {
+    // `k8s.version` is built since M1-107 and `k8s.storageclass` since M1-175. This machine has no kubeconfig
+    // in the replay, so its cluster is missing and both are skipped for that need. The ids after them
+    // are still not built.
+    for check in &checks[4..6] {
+        assert_eq!(check["status"], "skipped", "{check}");
+        assert_eq!(check["skip_kind"], "missing_need", "{check}");
+    }
+    for check in &checks[6..] {
         assert_eq!(check["status"], "skipped", "{check}");
         assert_eq!(check["skip_kind"], "not_in_build", "{check}");
     }
@@ -196,6 +219,49 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
         std::fs::read(dir.join("spec.yaml")).unwrap_or_default(),
         std::fs::read(&spec).unwrap_or_default()
     );
+    // The page is next to the `.json` and carries its hash (M1-181). Nothing else is in the folder.
+    let page = std::fs::read_to_string(dir.join("rdy-report-acme-platform-20270309T101502Z.html"))
+        .unwrap_or_else(|e| panic!("no HTML file: {e}"));
+    let hash: String = Sha256::digest(file.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert!(page.contains(&format!("data-sha256=\"{hash}\"")), "{hash}");
+    // The spec is unsigned, and the page says so (01 section 4.7).
+    assert!(page.contains("WARNING: UNSIGNED SPEC"), "no banner title");
+    assert!(
+        page.contains("This report is marked UNSIGNED SPEC."),
+        "no banner line"
+    );
+    let mut listed: Vec<String> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .map(|e| {
+            e.unwrap_or_else(|e| panic!("{e}"))
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    listed.sort();
+    assert_eq!(
+        listed,
+        [
+            "rdy-report-acme-platform-20270309T101502Z.html",
+            "rdy-report-acme-platform-20270309T101502Z.json",
+            "spec.yaml"
+        ]
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        for name in &listed {
+            let mode = std::fs::metadata(dir.join(name))
+                .unwrap_or_else(|e| panic!("no metadata: {e}"))
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{name}: {mode:o}");
+        }
+    }
 
     // The pinned facts, and the unsigned spec says so.
     assert_eq!(doc["run"]["id"], "00000000-0000-4000-8000-000000000001");
@@ -212,6 +278,7 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
         ran.stderr
     );
     assert!(ran.stderr.contains("Report written to "), "{}", ran.stderr);
+    assert!(ran.stderr.contains(".html\n"), "{}", ran.stderr);
 }
 
 #[test]
@@ -330,7 +397,7 @@ fn an_out_dir_that_is_missing_is_exit_70_with_report_write() {
 }
 
 #[test]
-fn a_one_run_key_is_not_silently_ignored() {
+fn a_one_run_key_that_is_not_a_key_stops_the_run() {
     let ran = call(
         common::unprivileged(),
         pinned(),
@@ -343,9 +410,10 @@ fn a_one_run_key_is_not_silently_ignored() {
             "--no-report",
         ],
     );
-    assert_eq!(ran.code, 70, "{}", ran.stderr);
+    // The key is read before the spec, so a key that is not one stops the run (M1-126).
+    assert_eq!(ran.code, 64, "{}", ran.stderr);
     assert!(
-        ran.stderr.contains("is not yet implemented"),
+        ran.stderr.contains("cannot read RWQ-not-a-key"),
         "{}",
         ran.stderr
     );
@@ -380,6 +448,7 @@ fn rdy(args: &[&str]) -> Output {
             .args(args)
             .args(offline.then_some("--no-network"))
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("RUST_LOG")
             .env_remove("CLICOLOR_FORCE")
             .output()
@@ -460,6 +529,7 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
+                .no_proxy_env()
                 .env_remove("RUST_LOG")
                 .output()
                 .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
@@ -601,6 +671,7 @@ fn a_signed_spec_prints_no_unsigned_warning() {
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
+                .no_proxy_env()
                 .env_remove("RUST_LOG")
                 .output()
                 .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
@@ -666,7 +737,11 @@ fn a_sidecar_that_is_a_folder_is_exit_64_and_makes_no_folder() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let ran = run_with_sidecar(&spec, out.path(), &[]);
     assert_refused_with_no_folder(&ran, out.path());
-    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+    // 01 section 4.7: a folder where the signature should be is a bad signature, not a bad spec file.
+    assert_eq!(
+        parse(&ran.stdout)["error"]["code"],
+        "spec_signature_invalid"
+    );
 }
 
 #[test]
@@ -711,7 +786,11 @@ fn a_sidecar_that_cannot_be_read_is_exit_64_and_makes_no_folder() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let ran = run_with_sidecar(&spec, out.path(), &[]);
     assert_refused_with_no_folder(&ran, out.path());
-    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+    // 01 section 4.7: permission denied on the sidecar is a bad signature, even with the flag.
+    assert_eq!(
+        parse(&ran.stdout)["error"]["code"],
+        "spec_signature_invalid"
+    );
 }
 
 // --- the words of a skipped entry carry the did-you-mean hint ---

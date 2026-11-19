@@ -4,6 +4,7 @@
 use std::process::{Command, Output};
 
 mod common;
+use common::NoProxyEnv;
 
 const WANT: &str = "error: passwords on the command line show up in shell history and in ps\n\
                     fix: use --password-file, the RDY_KEY_PASSWORD variable, or the prompt\n";
@@ -13,6 +14,7 @@ fn rdy(args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_rdy"))
             .args(args)
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("RDY_KEY_PASSWORD")
             .output()
             .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
@@ -88,6 +90,7 @@ fn password_file_and_the_variable_are_not_refused() {
         cmd.args(args)
             .current_dir(dir.path())
             .env_remove("RDY_PROGRESS")
+            .no_proxy_env()
             .env_remove("RDY_KEY_PASSWORD");
         if let Some(password) = password {
             cmd.env("RDY_KEY_PASSWORD", password);

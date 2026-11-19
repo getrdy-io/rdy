@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-ready"
+summary = "An operator at 1.14.5 with 2 of 2 replicas ready"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

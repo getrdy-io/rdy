@@ -1,0 +1,1 @@
+- CI now runs the macOS tests on the arm64 runner for every PR and the Intel macOS tests on main and nightly. No change to the binary.

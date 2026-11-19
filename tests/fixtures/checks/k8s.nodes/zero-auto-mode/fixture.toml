@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-zero-auto-mode"
+summary = "Every node is cordoned, and one is managed by EKS Auto Mode"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/deployments",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DeploymentList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "cluster-autoscaler",
+          "namespace": "kube-system"
+        },
+        "status": {
+          "readyReplicas": 1
+        }
+      }
+    ]
+  }
+}

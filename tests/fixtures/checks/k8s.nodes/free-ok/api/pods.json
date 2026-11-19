@@ -1,0 +1,112 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "limit=500&fieldSelector=status.phase!=Succeeded,status.phase!=Failed"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "web-1",
+          "namespace": "app"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "registry.acme.example/acme/app:1",
+              "resources": {
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "512Mi"
+                }
+              }
+            }
+          ],
+          "nodeName": "acme-node-1"
+        },
+        "status": {
+          "phase": "Running"
+        }
+      },
+      {
+        "metadata": {
+          "name": "web-2",
+          "namespace": "app"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "registry.acme.example/acme/app:1",
+              "resources": {
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "512Mi"
+                }
+              }
+            }
+          ],
+          "nodeName": "acme-node-1"
+        },
+        "status": {
+          "phase": "Running"
+        }
+      },
+      {
+        "metadata": {
+          "name": "done-1",
+          "namespace": "app"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "registry.acme.example/acme/app:1",
+              "resources": {
+                "requests": {
+                  "cpu": "7",
+                  "memory": "20Gi"
+                }
+              }
+            }
+          ],
+          "nodeName": "acme-node-2"
+        },
+        "status": {
+          "phase": "Succeeded"
+        }
+      },
+      {
+        "metadata": {
+          "name": "waiting-1",
+          "namespace": "app"
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "main",
+              "image": "registry.acme.example/acme/app:1",
+              "resources": {
+                "requests": {
+                  "cpu": "7",
+                  "memory": "20Gi"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Pending"
+        }
+      }
+    ]
+  }
+}

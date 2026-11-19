@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-none"
+summary = "No LoadBalancer service in the namespace yet"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

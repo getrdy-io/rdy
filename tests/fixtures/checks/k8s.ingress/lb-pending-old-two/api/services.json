@@ -1,0 +1,134 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/services",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ServiceList",
+    "metadata": {
+      "resourceVersion": "9300"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "name": "acme-gateway",
+          "namespace": "acme-system",
+          "uid": "00000000-0000-4000-8000-0000000000c1",
+          "resourceVersion": "8800",
+          "labels": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "creationTimestamp": "2026-11-17T11:40:00Z"
+        },
+        "spec": {
+          "type": "LoadBalancer",
+          "selector": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "ports": [
+            {
+              "name": "https",
+              "port": 443,
+              "protocol": "TCP",
+              "targetPort": 8443
+            }
+          ],
+          "clusterIP": "10.96.12.34",
+          "clusterIPs": [
+            "10.96.12.34"
+          ],
+          "sessionAffinity": "None",
+          "externalTrafficPolicy": "Cluster"
+        },
+        "status": {
+          "loadBalancer": {}
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "name": "acme-metrics",
+          "namespace": "acme-system",
+          "uid": "00000000-0000-4000-8000-0000000000c1",
+          "resourceVersion": "8800",
+          "labels": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "creationTimestamp": "2026-11-17T11:15:00Z"
+        },
+        "spec": {
+          "type": "LoadBalancer",
+          "selector": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "ports": [
+            {
+              "name": "https",
+              "port": 443,
+              "protocol": "TCP",
+              "targetPort": 8443
+            }
+          ],
+          "clusterIP": "10.96.12.34",
+          "clusterIPs": [
+            "10.96.12.34"
+          ],
+          "sessionAffinity": "None",
+          "externalTrafficPolicy": "Cluster"
+        },
+        "status": {
+          "loadBalancer": {}
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "name": "acme-public",
+          "namespace": "acme-system",
+          "uid": "00000000-0000-4000-8000-0000000000c1",
+          "resourceVersion": "8800",
+          "labels": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "creationTimestamp": "2026-11-17T11:40:00Z"
+        },
+        "spec": {
+          "type": "LoadBalancer",
+          "selector": {
+            "app.kubernetes.io/name": "acme-gateway"
+          },
+          "ports": [
+            {
+              "name": "https",
+              "port": 443,
+              "protocol": "TCP",
+              "targetPort": 8443
+            }
+          ],
+          "clusterIP": "10.96.12.34",
+          "clusterIPs": [
+            "10.96.12.34"
+          ],
+          "sessionAffinity": "None",
+          "externalTrafficPolicy": "Cluster"
+        },
+        "status": {
+          "loadBalancer": {
+            "ingress": [
+              {
+                "hostname": "acme-gateway-1234.elb.acme.example"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

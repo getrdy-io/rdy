@@ -2,7 +2,9 @@
 //!
 //! The role is the second line behind the guard. If the two drift, either rdy asks for something the
 //! role does not grant (a check fails with 403 on a cluster that uses the role) or the role grants
-//! something rdy never reads. Both directions are tested.
+//! something rdy never reads. Both directions are tested. The role is three files: the main one, the
+//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162) and the optional operator template
+//! (`rdy-readonly-operator.yaml`, M1-164), which are read together with it.
 
 #![allow(clippy::expect_used)]
 // This test reads the example role file from the repository, which the lint wall bans in the rest of
@@ -16,9 +18,16 @@ use std::path::Path;
 use rdy_checks_k8s::client::guard::{ALLOWED, Access, Only};
 use serde_json::Value;
 
-/// The example files, under `examples/rbac/`: the main one, and the optional `k8s.cni` file (M1-165), which
-/// is read together with it.
-const FILES: [&str; 2] = ["rdy-readonly.yaml", "rdy-readonly-cni.yaml"];
+/// The example files, under `examples/rbac/`.
+const FILES: [&str; 4] = [
+    "rdy-readonly.yaml",
+    "rdy-readonly-openshift-dns.yaml",
+    // The optional operator template, which holds the Role of the `k8s.crds` read.
+    "rdy-readonly-operator.yaml",
+    // The optional `k8s.cni` file (M1-165): the Roles of the named DaemonSet and ConfigMap reads, the
+    // ranges, and the NetworkPolicy list of the install namespace.
+    "rdy-readonly-cni.yaml",
+];
 
 /// The documents of the example files, parsed.
 fn documents() -> Vec<Value> {
@@ -89,6 +98,16 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::Get(Only::Any) => ("get", None, String::new()),
                 // A get of one name is granted by name, so the role cannot read any other object.
                 Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
+                // A get of a named object in a namespace the spec names: the optional operator template,
+                // a Role of one namespace and one name.
+                Access::GetInNamespace(Only::Any) => (
+                    "get",
+                    Some("<operator-namespace>".to_owned()),
+                    " name=<operator-deployment>".to_owned(),
+                ),
+                Access::GetInNamespace(Only::Name(ns)) => {
+                    ("get", Some((*ns).to_owned()), String::new())
+                }
                 Access::ListInNamespace(Only::Any) => {
                     let template = TARGET_NAMESPACE_ROLES
                         .iter()
@@ -108,6 +127,12 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())
                 }
+                // One object of one namespace: a Role of that namespace, granted by name.
+                Access::GetIn { namespace, name } => (
+                    "get",
+                    Some((*namespace).to_owned()),
+                    format!(" name={name}"),
+                ),
             };
             out.insert((
                 namespace,
@@ -146,7 +171,22 @@ fn the_role_never_writes_reads_secrets_or_uses_a_wildcard() {
     let docs = documents();
     let text = serde_json::to_string(&docs).expect("json");
     assert!(!text.contains("secrets"), "the role must not name Secrets");
-    assert!(!text.contains('*'), "the role must not use a wildcard");
+    // The one wildcard is the list of every Gatekeeper constraint kind (ADR 0042). Anything else with a `*`
+    // fails.
+    let without_gatekeeper = text.replace(
+        r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#,
+        "",
+    );
+    let rule = r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#;
+    assert_eq!(
+        text.matches(rule).count(),
+        1,
+        "the Gatekeeper rule is there, once"
+    );
+    assert!(
+        !without_gatekeeper.contains('*'),
+        "the role must not use a wildcard but the Gatekeeper constraints rule"
+    );
     for kind in ["ClusterRole", "Role"] {
         for (_, grant) in grants(&docs, kind) {
             let verb = grant.split(' ').nth(1).expect("verb");
@@ -178,7 +218,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 7);
+    assert_eq!(bindings.len(), 9);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]

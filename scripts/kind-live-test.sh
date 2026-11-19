@@ -18,7 +18,8 @@
 # creates the namespaces calico-system and kube-flannel when they do not exist, because the Roles of that
 # file live there, and deletes only the ones it created.
 #
-# It deletes the namespaces rdy-live and rdy-system and the rdy-readonly roles, before and after. So it
+# It deletes the namespaces rdy-live and rdy-system, the rdy-readonly roles and the operator Role it
+# renders for CoreDNS in kube-system, before and after. So it
 # refuses to run unless the current context is named kind-* and its API server is on this machine
 # (127.0.0.1, localhost or [::1], where kind puts it), or RDY_LIVE_ALLOW_ANY_CLUSTER=1 is set.
 # Optional: RDY_LIVE_TARGET=<triple> passes --target to cargo.
@@ -84,6 +85,12 @@ esac
     die "the server of context '$context' is '$server', which is not on this machine (127.0.0.1, localhost or [::1]). A kind cluster listens there. This script deletes the namespaces $NS and rdy-system. Use a kind cluster, or set RDY_LIVE_ALLOW_ANY_CLUSTER=1 if you mean it."
 echo "cluster: context $context, server host $host, expected minor $RDY_LIVE_EXPECT_MINOR"
 
+# The operator template, rendered for CoreDNS. Its Role and binding live in kube-system, so the delete of
+# the main file does not remove them.
+operator_yaml() {
+    sed -e 's/<operator-namespace>/kube-system/g' -e 's/<operator-deployment>/coredns/g' \
+        "$root/examples/rbac/rdy-readonly-operator.yaml"
+}
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/rdy-live.XXXXXX")
 # The k8s.cni file, with its install namespace placeholder set to the live namespace. `created` lists the
 # namespaces of that file that this run made, so only those are deleted.
@@ -95,6 +102,7 @@ cleanup() {
     for ns in $created; do
         kw delete namespace "$ns" --ignore-not-found > /dev/null 2>&1 || true
     done
+    operator_yaml | k delete -f - --ignore-not-found --wait=false > /dev/null 2>&1 || true
     k delete -f "$rbac" --ignore-not-found --wait=false > /dev/null 2>&1 || true
     k delete namespace "$NS" --ignore-not-found --wait=false > /dev/null 2>&1 || true
     rm -rf "$work"
@@ -104,6 +112,7 @@ trap cleanup EXIT
 # Start clean, so a second run on the same cluster proves the same thing. The namespace deletes wait,
 # so the create below does not race a namespace that is still terminating.
 kw delete -f "$work/cni.yaml" --ignore-not-found > /dev/null 2>&1 || true
+operator_yaml | kw delete -f - --ignore-not-found > /dev/null
 kw delete -f "$rbac" --ignore-not-found > /dev/null
 kw delete namespace "$NS" --ignore-not-found > /dev/null
 
@@ -175,6 +184,9 @@ echo "  pod that meets restricted admitted"
 
 echo "step 2: the rdy-readonly service account"
 k apply -f "$rbac" > /dev/null
+# The optional operator template, rendered for CoreDNS (a Deployment of every kind cluster), which the
+# k8s.crds read of live_cluster.rs gets by name.
+operator_yaml | k apply -f - > /dev/null
 # The k8s.cni Roles. Two of them live in namespaces a kind cluster does not have, so make those first.
 for ns in calico-system kube-flannel; do
     # A namespace that is still Terminating from an earlier run would refuse the Role: wait for it to go.

@@ -404,7 +404,7 @@ fn a_single_default_on_a_cut_list_is_not_a_clean_pass() {
     assert!(
         partial
             .note
-            .contains("the storage classes after the first page"),
+            .contains("the storage classes past what was read"),
         "{partial:?}"
     );
     assert_eq!(finding.observed["classes_complete"], json!(false));

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-rke2"
+summary = "RKE2: the Deployment rke2-coredns-rke2-coredns found by label, and no ConfigMap coredns"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

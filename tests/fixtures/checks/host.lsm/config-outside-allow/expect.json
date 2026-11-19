@@ -1,0 +1,47 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": []
+      }
+    },
+    "fix": "Set `SELINUX=enforcing` in `/etc/selinux/config`.",
+    "level": "warn",
+    "message": "SELinux is enforcing now, but /etc/selinux/config sets permissive, which the spec does not allow after a reboot.",
+    "notes": [
+      "SELinux is enforcing now, and /etc/selinux/config sets permissive. The next boot applies the configured mode."
+    ],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "permissive",
+        "denials": {
+          "count": 0,
+          "groups": [],
+          "inspected": true,
+          "permissive": 0,
+          "watched": {},
+          "window": "24h",
+          "window_truncated": false
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": null
+  }
+}

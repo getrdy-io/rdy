@@ -46,7 +46,7 @@ cannot check, so each milestone also gets an engineering "done" test (proposed, 
 | Milestone | Scope (plan) | Exit test (plan, exact) | Engineering done test (proposed) |
 | --- | --- | --- | --- |
 | M0 Validate | 15 interviews, 5 design partners signed, landing page waitlist live | 5 vendors agree to run the alpha on a real POC | Not engineering. Go or no-go on Nov 20, 2026. |
-| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it | On all five targets, the replay fixture envs exit 0, 1 and 2 on the ready, warning and not-ready fixtures and write JSON and HTML into a new report directory; the shipped binary exits 0, 1 and 2 live in the real-binary smoke (net-only signed specs on loopback); an unsigned spec exits 64; a tampered spec exits 64 even with `--allow-unsigned`; every "0.1.0 gate" security ticket is closed. |
+| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it | On the two Linux targets, the replay fixture envs exit 0, 1 and 2 on the ready, warning and not-ready fixtures and write JSON and HTML into a new report directory (macOS and Windows skip Linux envs until M2-130, correction-48); on all five targets, the shipped binary exits 0, 1 and 2 live in the real-binary smoke (net-only signed specs on loopback); an unsigned spec exits 64; a tampered spec exits 64 even with `--allow-unsigned`; every "0.1.0 gate" security ticket is closed. |
 | M2 Portal MVP | Share links, results dashboard, redacted bundles, bundle viewer, Slack alerts | Design partners run it on 20 prospect environments | `rdy run <product>` with the token from `RDY_TOKEN`, `--token-file` or a prompt (never argv) fetches a signed spec from staging, the redaction golden suite passes, nothing uploads without the flag or a yes. |
 | M3 Launch | AWS account checks, Stripe billing, docs, public open-source launch, Team tier on sale | First 10 paying vendors | AWS checks pass against recorded fixtures, the docs site builds its reference from the schema, `rdy-spec` and `rdy-engine` are 1.0. |
 | M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal | GPU checks pass on fixtures and one real node, branded report renders from data, data store checks ship, `custom.exec` runs only with hash-bound consent. |
@@ -91,9 +91,9 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 181 | 400 |
-| M1, core | 150 | 335.5 |
-| M1, `core: no` (the cut list) | 31 | 64.5 |
+| M1, all | 183 | 404.5 |
+| M1, core | 155 | 344.5 |
+| M1, `core: no` (the cut list) | 28 | 60 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
 that. The earlier counts here (about 194 hours, then 248 in 02, then 571 in the first draft of 11) were
@@ -113,29 +113,29 @@ and Dec 28 run at half capacity.
 | 5 | Dec 21 to Dec 27, 2026 | 6.5 | 6 | 2 Spec parser, result model, engine core | M1-023 to M1-025 | `v0.1.0-alpha.4`: same CLI; typed parameters for the M1 host, net and k8s check ids |
 | 6 | Dec 28, 2026 to Jan 3, 2027 | 6.5 | 6.5 | 2 Spec parser, result model, engine core | M1-026 to M1-028 | `v0.1.0-alpha.5`: same CLI; semantic validation, parser property tests, root CI job |
 | 7 | Jan 4 to Jan 10, 2027 | 13 | 14 | 2 Spec parser, result model, engine core | M1-029 to M1-032, M1-123 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
-| 8 | Jan 11 to Jan 17, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-033 to M1-037 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP |
+| 8 | Jan 11 to Jan 17, 2027 | 13 | 14.5 | 2 Spec parser, result model, engine core; 6 Signing, `rdy verify`, 0.1.0 | M1-033 to M1-037, M1-112 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP; `--password` refused on argv |
 | 9 | Jan 18 to Jan 24, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-038 to M1-042 | `v0.1.0-alpha.8`: commands only through the mediated runner; action log; privilege snapshot |
-| 10 | Jan 25 to Jan 31, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; redactor core |
-| 11 | Feb 1 to Feb 7, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted |
+| 10 | Jan 25 to Jan 31, 2027 | 13 | 14.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048, M1-170 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; machine identity files denied; redactor core |
+| 11 | Feb 1 to Feb 7, 2027 | 13 | 15 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056, M1-169 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted; facade `read_link` |
 | 12 | Feb 8 to Feb 14, 2027 | 13 | 15 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-057 to M1-062, M1-176 | `v0.1.0-alpha.11`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP; `rdy run` exits 70 on a hang; Ctrl-C exits 70; `--no-network` |
-| 13 | Feb 15 to Feb 21, 2027 | 13 | 14 | 3 Host checks, HTML report | M1-063 to M1-069, M1-171 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
-| 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
+| 13 | Feb 15 to Feb 21, 2027 | 13 | 15 | 3 Host checks, HTML report | M1-063 to M1-069, M1-124, M1-171 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk; CONTRIBUTING.md checked on a fresh clone |
+| 14 | Feb 22 to Feb 28, 2027 | 13 | 14.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-073 to M1-076, M1-174 | `v0.1.0-alpha.13`: host.cpu and host.os on Linux; terminal styling; in-process env harness; expected results for the host check fixture cases |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 14.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report renderer, with golden reports; generated spec reference |
-| 16 | Mar 8 to Mar 14, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
-| 17 | Mar 15 to Mar 21, 2027 | 13 | 14 | 4 Network checks | M1-091 to M1-095, M1-141 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
-| 18 | Mar 22 to Mar 28, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-100, M1-073, M1-180 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
+| 16 | Mar 8 to Mar 14, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 4 Network checks; 6 Signing, `rdy verify`, 0.1.0 | M1-086 to M1-090, M1-133 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; install, exit codes and unsigned pages |
+| 17 | Mar 15 to Mar 21, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-091 to M1-095, M1-141, M1-168 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy; umask 077 and an inherited-descriptor warning at start-up |
+| 18 | Mar 22 to Mar 28, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-100, M1-180, M1-184 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; every TLS result says no revocation check |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072, M1-181 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux; `rdy run` writes the HTML report next to the JSON |
-| 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
-| 21 | Apr 12 to Apr 18, 2027 | 13 | 15 | 4 Network checks; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115, M1-101 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; TLS verifier review closed |
-| 22 | Apr 19 to Apr 25, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120, M1-175 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
-| 23 | Apr 26 to May 2, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-124, M1-125, M1-174, M1-177 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
-| 24 | May 3 to May 9, 2027 | 13 | 14 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
-| 25 | May 10 to May 16, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-132 to M1-139 | **`v0.1.0`**: signing review closed; install and sign pages; README ready, core done, announcement sent to design partners |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 15 | 4 Network checks; 5 Kubernetes checks | M1-105 to M1-109, M1-101 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI; TLS verifier review closed |
+| 21 | Apr 12 to Apr 18, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-110, M1-111, M1-113 to M1-115, M1-182 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; no proxy password in host.container_runtime evidence |
+| 22 | Apr 19 to Apr 25, 2027 | 13 | 14.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120, M1-175 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
+| 23 | Apr 26 to May 2, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-125, M1-177, M1-185 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign`; the fixture envs serve a cluster |
+| 24 | May 3 to May 9, 2027 | 13 | 14 | 3 Host checks, HTML report; 6 Signing, `rdy verify`, 0.1.0 | M1-126, M1-127, M1-129 to M1-131, M1-186 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove`; the terminal report names missing grants |
+| 25 | May 10 to May 16, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-128, M1-132, M1-134 to M1-139, M1-183 | **`v0.1.0`**: signing review closed; every spec read refuses a FIFO or device within 1 s; sign page; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 12.5 | Non-core, steps 2 and 3 | M1-140, M1-142, M1-144, M1-145, M1-172, M1-178 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |
-| 28 | May 31 to Jun 6, 2027 | 13 | 13.5 | Non-core, steps 3 and 4 | M1-151 to M1-156 | `v0.1.3`: host.cgroups, host.kernel; net.dns; net.registry |
-| 29 | Jun 7 to Jun 13, 2027 | 13 | 12.5 | Non-core, steps 4 and 5 | M1-157 to M1-163 | `v0.1.4`: net.mtu, net.bandwidth; k8s.nodes free capacity, webhooks, namespace, dns, ingress |
-| 30 | Jun 14 to Jun 20, 2027 | 13 | 12.5 | Non-core, steps 2, 5 and 6 | M1-143, M1-164 to M1-167, M1-173, M1-179 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; air-gapped fixture env; quickstart timed; agent catalog staleness gate; M1 complete |
+| 28 | May 31 to Jun 6, 2027 | 13 | 10 | Non-core, steps 3 and 4 | M1-151 to M1-155 | `v0.1.3`: host.cgroups, host.kernel; net.dns |
+| 29 | Jun 7 to Jun 13, 2027 | 13 | 12 | Non-core, steps 4 and 5 | M1-157, M1-159 to M1-163 | `v0.1.4`: net.mtu; k8s.nodes free capacity, webhooks, namespace, dns, ingress |
+| 30 | Jun 14 to Jun 20, 2027 | 13 | 12 | Non-core, steps 2, 5 and 6 | M1-143, M1-164, M1-165, M1-167, M1-173, M1-179 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; quickstart timed; agent catalog staleness gate; M1 complete |
 
 Builds before 0.1.0 (weeks 1 to 24) are `0.1.0-alpha.N` and are not handed to design partners for real
 POCs. Until `rdy verify` lands in week 24 they run specs only with `--allow-unsigned`, so rule 3 holds
@@ -146,21 +146,21 @@ before signing exists. The week 16 build is the demo shown on calls.
 These are every M1 ticket marked `core: no` in 11. They all come after the 0.1.0 tag in the calendar.
 
 - 03 M1-late host checks: M1-145, M1-146, M1-147, M1-148, M1-149, M1-150, M1-151, M1-152 (8 tickets, 19.5 h).
-- 03 M1-late network checks: M1-153, M1-155, M1-156, M1-157, M1-158 (5 tickets, 12 h).
-- 03 M1-late Kubernetes checks: M1-160, M1-161, M1-162, M1-163, M1-164, M1-165 (6 tickets, 13 h).
+- 03 M1-late network checks: M1-153, M1-155, M1-157 (3 tickets, 7 h). net.registry (M1-156) and net.bandwidth
+  (M1-158) moved to M2 as M2-149 and M2-151, after their facade tickets (correction-58).
+- 03 M1-late Kubernetes checks: M1-160, M1-161, M1-162, M1-163, M1-164, M1-165 (6 tickets, 15 h).
 - M1-140 HTML next-step sentences and the nothing-verified wording (1 h).
 - M1-142 Progress line with indicatif, TTY only (2 h).
 - M1-143 Quiet and verbose output modes (2 h).
 - M1-144 Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard (3.5 h).
 - M1-154 musl resolver behaviour fixture for net.dns (1 h).
 - M1-159 k8s.nodes free capacity from pod requests (cut 2) (1.5 h).
-- M1-166 Fixture env net-airgapped (1.5 h).
 - M1-167 Time the quickstart with two design-partner SEs (2 h).
 - M1-172 Parameter types for the M1-late check ids (3 h).
 - M1-173 Agent catalog staleness gate and lint-wall include gaps (0.5 h).
 - M1-178 `SysctlName::canonical` by the first separator (0.5 h).
 - M1-179 The env harness counts a hang the check survived as the Timeout class (1.5 h).
-- Total: 31 tickets, 64.5 h.
+- Total: 28 tickets, 60 h. M1-166 (the net-airgapped env) moved to M2 as M2-153 (correction-58).
 
 Never on the cut list: the "0.1.0 gate" security tickets, the root-only system trust store, verify
 before parse, the egress address policy, the kube guard and the facade policies.

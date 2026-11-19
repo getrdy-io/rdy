@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-odd-name"
+summary = "One node whose name is not a DNS name and a cut pod list"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

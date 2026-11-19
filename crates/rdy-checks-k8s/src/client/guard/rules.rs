@@ -114,6 +114,9 @@ pub enum Access {
     /// One object of a cluster-scoped resource by name, or a `Namespace` by name:
     /// `/<prefix>/<resource>/<name>`.
     Get(Only),
+    /// One object of a namespaced resource, by name, in the namespaces `Only` admits:
+    /// `/<prefix>/namespaces/<namespace>/<resource>/<name>`. The name is any valid name.
+    GetInNamespace(Only),
     /// One named object of one namespace: `/<prefix>/namespaces/<namespace>/<resource>/<name>`. Both are
     /// fixed in the table, so a role can grant it with `resourceNames` in a `Role` of that namespace and
     /// nothing more.
@@ -135,17 +138,35 @@ pub enum FieldSelector {
     Key(&'static str),
     /// This exact term, with `=` or `==` (`involvedObject.kind=PersistentVolumeClaim`).
     Equals(&'static str, &'static str),
+    /// The `labelSelector` (not the field selector) must hold a term `key=value` or `key==value` on this
+    /// key, with a value. A selector with `(` is refused. Used for `endpointslices`, so a list names one Service and not every slice.
+    LabelEquals(&'static str),
 }
 
 impl FieldSelector {
-    /// True when `decoded` (the value of the `fieldSelector` key) meets the requirement.
-    fn met_by(self, decoded: Option<&str>) -> bool {
+    /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
+    /// `labelSelector` key) meet the requirement.
+    pub(super) fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+        if let Self::LabelEquals(key) = self {
+            // A set expression (`app in (a,key=x)`) can hide a term after a comma: refuse any `(`.
+            if labels.is_some_and(|text| text.contains('(')) {
+                return false;
+            }
+            return labels
+                .into_iter()
+                .flat_map(|text| text.split(','))
+                .any(|term| {
+                    term.strip_prefix(key)
+                        .and_then(|rest| rest.strip_prefix("==").or_else(|| rest.strip_prefix('=')))
+                        .is_some_and(|value| !value.is_empty())
+                });
+        }
         let mut terms = decoded
             .into_iter()
             .flat_map(|text| text.split(','))
             .filter_map(split_term);
         match self {
-            Self::NotRequired => true,
+            Self::NotRequired | Self::LabelEquals(_) => true,
             Self::Key(key) => terms.any(|(k, _, _)| k == key),
             Self::Equals(key, value) => {
                 terms.any(|(k, op, v)| k == key && matches!(op, "=" | "==") && v == value)
@@ -169,6 +190,13 @@ fn split_term(term: &str) -> Option<(&str, &str, &str)> {
     Some((key, op, value))
 }
 
+/// The `resource` of an [`ALLOWED`] entry that admits every resource of its group and version. Used once:
+/// a Gatekeeper constraint kind is a CRD that each `ConstraintTemplate` creates, so its plural name cannot
+/// be listed ahead of time (ADR 0042). Every GET shape of such an entry is still a list, never a secret.
+/// Nothing enforces that the group holds only constraints, so a list can return more than policy
+/// objects. ADR 0042 writes down that residual and why it is accepted.
+pub const ANY_RESOURCE: &str = "*";
+
 /// One resource the M1 checks read (02 Appendix B, section 4). There is no `secrets` entry, and a test
 /// keeps it that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,7 +205,7 @@ pub struct Allowed {
     pub group: &'static str,
     /// The API version.
     pub version: &'static str,
-    /// The plural resource name.
+    /// The plural resource name, or [`ANY_RESOURCE`].
     pub resource: &'static str,
     /// The GET shapes allowed for it.
     pub access: &'static [Access],
@@ -220,8 +248,8 @@ pub const ALLOWED: &[Allowed] = &[
         version: "v1",
         resource: "pods",
         access: &[Access::List],
-        checks: &["k8s.nodes"],
-        reads: "requests, nodeName and phase only, with a status.phase field selector",
+        checks: &["k8s.nodes", "k8s.dns"],
+        reads: "k8s.nodes: requests, nodeName and phase only. k8s.dns: the container states of the cluster DNS pods, with a label selector (k8s-app=kube-dns, or the OpenShift DNS label), and only those of kube-system and openshift-dns are kept. Both with a status.phase field selector",
         field_selector: FieldSelector::Key("status.phase"),
     },
     Allowed {
@@ -291,63 +319,12 @@ pub const ALLOWED: &[Allowed] = &[
         group: "apps",
         version: "v1",
         resource: "deployments",
-        access: &[Access::ListInNamespace(Only::Name("kube-system"))],
-        checks: &["k8s.nodes"],
-        reads: "the cluster-autoscaler deployment by name",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "security.openshift.io",
-        version: "v1",
-        resource: "securitycontextconstraints",
-        access: &[Access::List],
-        checks: &["k8s.admission"],
-        reads: "the OpenShift SCCs",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "config.openshift.io",
-        version: "v1",
-        resource: "clusterversions",
-        access: &[Access::Get(Only::Name("version"))],
-        checks: &["k8s.version"],
-        reads: "the OpenShift version",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "config.openshift.io",
-        version: "v1",
-        resource: "networks",
-        access: &[Access::Get(Only::Name("cluster"))],
-        checks: &["k8s.cni"],
-        reads: "the OpenShift network type and the pod and service ranges",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "networking.k8s.io",
-        version: "v1",
-        resource: "networkpolicies",
-        access: &[Access::ListInNamespace(Only::Any)],
-        checks: &["k8s.cni"],
-        reads: "the pod selector, policy types and the shape of the egress rules of the policies of the install namespace; names only, no labels or annotations",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "networking.k8s.io",
-        version: "v1",
-        resource: "servicecidrs",
-        access: &[Access::List],
-        checks: &["k8s.cni"],
-        reads: "the service ranges (GA in 1.33)",
-        field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "networking.k8s.io",
-        version: "v1beta1",
-        resource: "servicecidrs",
-        access: &[Access::List],
-        checks: &["k8s.cni"],
-        reads: "the service ranges (beta before 1.33)",
+        access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::GetInNamespace(Only::Any),
+        ],
+        checks: &["k8s.nodes", "k8s.dns", "k8s.crds"],
+        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.dns: the replicas, ready count and container names of the cluster DNS deployment, found by label. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -355,6 +332,9 @@ pub const ALLOWED: &[Allowed] = &[
         version: "v1",
         resource: "daemonsets",
         access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::ListInNamespace(Only::Name("openshift-dns")),
+            // k8s.cni: the node agents of data/cni.toml, by name, one pair each.
             Access::GetIn {
                 namespace: "kube-system",
                 name: "calico-node",
@@ -420,20 +400,239 @@ pub const ALLOWED: &[Allowed] = &[
                 name: "kube-flannel-ds",
             },
         ],
-        checks: &["k8s.cni"],
-        reads: "the network plugin node agent DaemonSets of data/cni.toml, by name in one namespace each (desired and ready counts, and ENABLE_NETWORK_POLICY of aws-node; every other env value, args and annotations are dropped while parsing)",
+        checks: &["k8s.dns", "k8s.cni"],
+        reads: "k8s.dns: desired and ready counts and container names of the cluster DNS and NodeLocal DNSCache daemon sets, found by label, or by the name dns-default in openshift-dns. k8s.cni: the network plugin node agent DaemonSets of data/cni.toml, by name in one namespace each (desired and ready counts, and ENABLE_NETWORK_POLICY of aws-node; every other env value, args and annotations are dropped while parsing)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "services",
+        access: &[
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kube-dns",
+            },
+            // RKE2 names its DNS Service after its Deployment.
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "rke2-coredns-rke2-coredns",
+            },
+            Access::GetIn {
+                namespace: "openshift-dns",
+                name: "dns-default",
+            },
+            Access::ListInNamespace(Only::Any),
+        ],
+        checks: &["k8s.admission", "k8s.dns", "k8s.ingress"],
+        reads: "k8s.admission: the type of the one Service a Fail webhook names, found with a metadata.name field selector (a list). k8s.dns: the cluster IP and ports of the cluster DNS service (a get by name in one namespace, no selector). k8s.ingress: the name, creation time, type and whether a load balancer address is assigned, of the services of the target namespace (a list without a selector); the address itself, annotations and the rest of the spec are dropped while parsing",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "",
         version: "v1",
         resource: "configmaps",
-        access: &[Access::GetIn {
-            namespace: "kube-system",
-            name: "kubeadm-config",
-        }],
+        access: &[
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "coredns",
+            },
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "kubeadm-config",
+            },
+        ],
+        checks: &["k8s.dns", "k8s.cni"],
+        reads: "k8s.dns: the Corefile key of the coredns ConfigMap in kube-system. k8s.cni: the ClusterConfiguration key of the kubeadm-config ConfigMap in kube-system (the service range). Every other key is dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "security.openshift.io",
+        version: "v1",
+        resource: "securitycontextconstraints",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "the OpenShift SCCs",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "each webhook's name, failurePolicy, rules, selectors, matchConditions and backend (service name or URL kind); the CA bundle is dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "mutatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "the same fields of the mutating webhooks",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "name, match constraints, match conditions and whether it has validations; the CEL expressions are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicybindings",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy name, validation actions and match resources",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "discovery.k8s.io",
+        version: "v1",
+        resource: "endpointslices",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.admission"],
+        reads: "the ready condition of the endpoints behind one webhook Service, found by its service-name label",
+        field_selector: FieldSelector::LabelEquals("kubernetes.io/service-name"),
+    },
+    Allowed {
+        group: "kyverno.io",
+        version: "v1",
+        resource: "clusterpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, failure actions and match filters; the rules' bodies are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "constraints.gatekeeper.sh",
+        version: "v1beta1",
+        resource: ANY_RESOURCE,
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "constraint names, enforcementAction and match; the parameters are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "config.openshift.io",
+        version: "v1",
+        resource: "clusterversions",
+        access: &[Access::Get(Only::Name("version"))],
+        checks: &["k8s.version"],
+        reads: "the OpenShift version",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "ingressclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controller and the default-class annotation only; every other annotation and the parameters are dropped while parsing",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        resource: "gatewayclasses",
+        access: &[Access::List],
+        checks: &["k8s.ingress"],
+        reads: "each class name, its spec.controllerName and the Accepted condition status only",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "config.openshift.io",
+        version: "v1",
+        resource: "networks",
+        access: &[Access::Get(Only::Name("cluster"))],
         checks: &["k8s.cni"],
-        reads: "the ClusterConfiguration key of the kubeadm-config ConfigMap (the service range); every other key is dropped while parsing",
+        reads: "the OpenShift network type and the pod and service ranges",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "networkpolicies",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.cni"],
+        reads: "the pod selector, policy types and the shape of the egress rules of the policies of the install namespace; names only, no labels or annotations",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1",
+        resource: "servicecidrs",
+        access: &[Access::List],
+        checks: &["k8s.cni"],
+        reads: "the service ranges (GA in 1.33)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "networking.k8s.io",
+        version: "v1beta1",
+        resource: "servicecidrs",
+        access: &[Access::List],
+        checks: &["k8s.cni"],
+        reads: "the service ranges (beta before 1.33)",
         field_selector: FieldSelector::NotRequired,
     },
 ];
@@ -603,15 +802,19 @@ pub(crate) fn judge(
         if !matches!(body, BodyView::Empty) {
             return Err(RULE_GET_BODY);
         }
-        let field_selector = check_query(uri.query())?;
-        check_get(&segments, field_selector.as_deref())
+        let (field_selector, label_selector) = check_query(uri.query())?;
+        check_get(
+            &segments,
+            field_selector.as_deref(),
+            label_selector.as_deref(),
+        )
     } else {
         check_post(&segments, uri.query(), body)
     }
 }
 
 /// What a request path is, for the audit of a fixture run (`client::mock`).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     /// A path with no [`ALLOWED`] entry by design: `/version`, discovery and the three review POSTs.
@@ -624,7 +827,7 @@ pub(crate) enum Target {
 
 /// Classifies a path as written in the action log (no query string). Only the path is judged, so this
 /// says which entry a request belongs to, not whether the guard would allow it ([`judge`] does that).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn target_of(path: &str) -> Target {
     const REVIEWS: [&str; 3] = [
         "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
@@ -646,10 +849,7 @@ pub(crate) fn target_of(path: &str) -> Target {
     let Ok(info) = request_info(&segments) else {
         return Target::Unknown;
     };
-    ALLOWED
-        .iter()
-        .find(|e| e.group == info.group && e.version == info.version && e.resource == info.resource)
-        .map_or(Target::Unknown, Target::Entry)
+    entry_of(&info).map_or(Target::Unknown, Target::Entry)
 }
 
 /// The one path with `secrets` in it that is allowed: a GET of the namespace called `secrets`.
@@ -749,15 +949,15 @@ fn path_segments(uri: &Uri) -> Result<Vec<&str>, &'static str> {
 /// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, once each, with plain
 /// values. Every value is decoded once, as the server does, and the decoded text is checked: a `continue`
 /// token, a label selector and a field selector each have a short character set, so a `%26`, `%00`, `%25`
-/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` for the selector
-/// rule of the resource.
-fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
+/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` and `labelSelector`
+/// for the selector rule of the resource.
+fn check_query(query: Option<&str>) -> Result<(Option<String>, Option<String>), &'static str> {
     // kube writes a bare `?` when there are no parameters, and a `&` before the first one (`?&limit=5`).
     let Some(query) = query
         .map(|query| query.strip_prefix('&').unwrap_or(query))
         .filter(|query| !query.is_empty())
     else {
-        return Ok(None);
+        return Ok((None, None));
     };
     if query.len() > MAX_QUERY {
         return Err(RULE_QUERY);
@@ -768,6 +968,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
         return Err(RULE_QUERY);
     }
     let mut field_selector = None;
+    let mut label_selector = None;
     // A key twice is ambiguous: the server reads the first, a proxy may read the last.
     let mut seen: Vec<&str> = Vec::new();
     for pair in query.split('&') {
@@ -789,7 +990,9 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             }
             "labelSelector" => {
                 check_query_value(value)?;
-                check_label_selector(&decode_query_value(value)?)?;
+                let decoded = decode_query_value(value)?;
+                check_label_selector(&decoded)?;
+                label_selector = Some(decoded);
             }
             "fieldSelector" => {
                 check_query_value(value)?;
@@ -800,7 +1003,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             _ => return Err(RULE_QUERY),
         }
     }
-    Ok(field_selector)
+    Ok((field_selector, label_selector))
 }
 
 /// The longest decoded `continue` token, label selector or field selector.
@@ -963,7 +1166,21 @@ pub(super) fn request_info<'a>(segments: &[&'a str]) -> Result<RequestInfo<'a>, 
     })
 }
 
-fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
+/// The entry of [`ALLOWED`] that names the group, version and resource of `info`. An entry with
+/// [`ANY_RESOURCE`] admits every resource of its group and version.
+fn entry_of(info: &RequestInfo<'_>) -> Option<&'static Allowed> {
+    ALLOWED.iter().find(|e| {
+        e.group == info.group
+            && e.version == info.version
+            && (e.resource == info.resource || e.resource == ANY_RESOURCE)
+    })
+}
+
+fn check_get(
+    segments: &[&str],
+    field_selector: Option<&str>,
+    label_selector: Option<&str>,
+) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
     }
@@ -971,9 +1188,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
     if info.subresource.is_some() {
         return Err(RULE_SUBRESOURCE);
     }
-    let Some(entry) = ALLOWED.iter().find(|e| {
-        e.group == info.group && e.version == info.version && e.resource == info.resource
-    }) else {
+    let Some(entry) = entry_of(&info) else {
         return Err(RULE_NOT_ALLOWED);
     };
     let allowed = entry
@@ -983,6 +1198,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
+            (Access::GetInNamespace(only), Some(namespace), Some(_)) => only.admits(namespace),
             (
                 Access::GetIn {
                     namespace: ns,
@@ -997,7 +1213,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
         return Err(RULE_NOT_ALLOWED);
     }
     // A list (no name) must carry the field selector its entry names. A get by name needs none.
-    if info.name.is_none() && !entry.field_selector.met_by(field_selector) {
+    if info.name.is_none() && !entry.field_selector.met_by(field_selector, label_selector) {
         return Err(RULE_SELECTOR);
     }
     Ok(())

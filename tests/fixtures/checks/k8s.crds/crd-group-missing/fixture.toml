@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-group-missing"
+summary = "The cluster serves no API group of the definitions"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true
