@@ -54,6 +54,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -63,18 +64,23 @@ use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, Method, Request, Response, Uri};
 use http_body::Body as _;
 use kube::client::Body;
+#[cfg(test)]
 use rdy_engine::check::{Need, Os};
+#[cfg(test)]
 use rdy_engine::probe::Probe;
-use rdy_engine::testing::{Fixture, Replay, TestRun, fixtures_dir};
+use rdy_engine::testing::Replay;
+#[cfg(test)]
+use rdy_engine::testing::{Fixture, TestRun, fixtures_dir};
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
+use super::ImpersonateAs;
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
+#[cfg(test)]
 use super::{
-    ConnectionFacts, ImpersonateAs, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion,
-    from_kube_error,
+    ConnectionFacts, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion, from_kube_error,
 };
 
 #[cfg(test)]
@@ -104,6 +110,7 @@ pub(crate) enum MockError {
     #[error("api/reviews.json: {0}")]
     BadReviews(String),
     /// The fixture did not load.
+    #[cfg(test)]
     #[error("the fixture did not load: {0}")]
     Fixture(String),
 }
@@ -336,6 +343,7 @@ impl Mock {
         })
     }
 
+    #[cfg(test)]
     /// The next presentation of the `continue` token `token` (decoded) answers `410 Gone`, once.
     pub(crate) fn expire_once(&self, token: &str) {
         self.state().expire_once.insert(token.to_owned());
@@ -422,7 +430,7 @@ impl Mock {
             return self.not_recorded(&line);
         };
         if !record.delay.is_zero() {
-            tokio::time::sleep(record.delay).await;
+            rdy_engine::testing::sleep(record.delay).await;
         }
         respond_bytes(record.status, record.body.clone())
     }
@@ -624,7 +632,9 @@ pub(crate) fn audit(
                 "INV-14: the log holds a sent request for `{path}`, which no entry of ALLOWED names"
             )),
             Target::Entry(allowed) => {
-                if !check.is_some_and(|id| allowed.checks.contains(&id)) {
+                if let Some(id) = check.filter(|id| allowed.checks.contains(id)) {
+                    hits::record(allowed, id);
+                } else {
                     violations.push(format!(
                         "INV-14: `{path}` was read under {}, but its ALLOWED entry ({}) cites only {:?}",
                         check.map_or("no check id".to_owned(), |id| format!("`{id}`")),
@@ -647,8 +657,52 @@ pub(crate) fn audit(
     violations
 }
 
+/// The (`ALLOWED` entry, check) pairs that fixture runs on this thread have hit (M1-115). A test that sweeps
+/// the fixtures of one check reads it with [`hits::unhit`]; it is per thread so parallel tests do not mix.
+pub(crate) mod hits {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+
+    #[cfg(test)]
+    use crate::client::guard::ALLOWED;
+    use crate::client::guard::Allowed;
+
+    thread_local! {
+        static HITS: RefCell<BTreeSet<(String, String)>> = const { RefCell::new(BTreeSet::new()) };
+    }
+
+    fn key(entry: &Allowed) -> String {
+        format!("{}/{}/{}", entry.group, entry.version, entry.resource)
+    }
+
+    pub(super) fn record(entry: &Allowed, check: &str) {
+        HITS.with(|hits| hits.borrow_mut().insert((key(entry), check.to_owned())));
+    }
+
+    /// Forgets this thread's hits. Only the crate's own pair tests read the hits.
+    #[cfg(test)]
+    pub(crate) fn clear() {
+        HITS.with(|hits| hits.borrow_mut().clear());
+    }
+
+    /// The `ALLOWED` entries that cite `check` and that no run on this thread has read under it.
+    #[cfg(test)]
+    pub(crate) fn unhit(check: &str) -> Vec<String> {
+        HITS.with(|hits| {
+            let hits = hits.borrow();
+            ALLOWED
+                .iter()
+                .filter(|entry| entry.checks.contains(&check))
+                .map(key)
+                .filter(|entry| !hits.contains(&(entry.clone(), check.to_owned())))
+                .collect()
+        })
+    }
+}
+
 // ---- the harness --------------------------------------------------------------------------------------------
 
+#[cfg(test)]
 /// A fixture run: the mock, the run it logs into, and the audit that closes it.
 pub(crate) struct Harness {
     run: TestRun,
@@ -661,12 +715,14 @@ pub(crate) struct Harness {
     kubeconfig_impersonates: bool,
 }
 
+#[cfg(test)]
 impl fmt::Debug for Harness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Harness").finish_non_exhaustive()
     }
 }
 
+#[cfg(test)]
 impl Harness {
     /// Loads the fixture `name` under `tests/fixtures` (for example `checks/_kube/cluster`).
     ///
@@ -811,6 +867,7 @@ impl Harness {
     }
 }
 
+#[cfg(test)]
 impl Drop for Harness {
     fn drop(&mut self) {
         if self.audited.load(Ordering::SeqCst) || std::thread::panicking() {
@@ -825,5 +882,6 @@ impl Drop for Harness {
     }
 }
 
+#[cfg(test)]
 // The production paging helper, so the harness tests walk the same code a check does.
 pub(crate) use super::list::list_all;

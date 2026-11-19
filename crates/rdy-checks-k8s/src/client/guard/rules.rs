@@ -24,7 +24,7 @@
 //!
 //! For check authors: a list takes `limit`, `continue`, `labelSelector` and `fieldSelector` and nothing
 //! else. `resourceVersion` (so `ListParams::match_any()` too), `timeoutSeconds`, `watch` and the rest are
-//! refused as [`RULE_QUERY`]. A list of `pods` or `events` must also carry the field selector its
+//! refused as [`RULE_QUERY`]. A list of `events` must also carry the field selector its
 //! [`ALLOWED`] entry names, or it is refused as [`RULE_SELECTOR`]. A request carries only the headers
 //! `accept`, `content-type` and `content-length`; any other is refused as [`RULE_HEADER`].
 
@@ -134,7 +134,7 @@ pub enum FieldSelector {
 impl FieldSelector {
     /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
     /// `labelSelector` key) meet the requirement.
-    fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+    pub(super) fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
         if let Self::LabelEquals(key) = self {
             // A set expression (`app in (a,key=x)`) can hide a term after a comma: refuse any `(`.
             if labels.is_some_and(|text| text.contains('(')) {
@@ -229,15 +229,6 @@ pub const ALLOWED: &[Allowed] = &[
         checks: &["k8s.nodes", "k8s.version"],
         reads: "allocatable, conditions, taints, labels; providerID and kubeletVersion",
         field_selector: FieldSelector::NotRequired,
-    },
-    Allowed {
-        group: "",
-        version: "v1",
-        resource: "pods",
-        access: &[Access::List],
-        checks: &["k8s.nodes"],
-        reads: "requests, nodeName and phase only, with a status.phase field selector",
-        field_selector: FieldSelector::Key("status.phase"),
     },
     Allowed {
         group: "",
@@ -634,7 +625,7 @@ pub(crate) fn judge(
 }
 
 /// What a request path is, for the audit of a fixture run (`client::mock`).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Target {
     /// A path with no [`ALLOWED`] entry by design: `/version`, discovery and the three review POSTs.
@@ -647,7 +638,7 @@ pub(crate) enum Target {
 
 /// Classifies a path as written in the action log (no query string). Only the path is judged, so this
 /// says which entry a request belongs to, not whether the guard would allow it ([`judge`] does that).
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn target_of(path: &str) -> Target {
     const REVIEWS: [&str; 3] = [
         "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",

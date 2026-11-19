@@ -309,6 +309,7 @@ async fn execute(
         polled
     })
     .await;
+    line.clear(stderr);
     // A family's probe ended the run: no check ran. No report is written for a run that did not start.
     if let Some(fatal) = executed.fatal {
         discard_if_empty(dir);
@@ -318,7 +319,6 @@ async fn execute(
             hint: fatal.hint,
         }));
     }
-    line.clear(stderr);
 
     let finished_at = clock();
     let run = make_run(

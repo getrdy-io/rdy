@@ -1076,3 +1076,22 @@ fn the_info_is_registered_and_declares_what_the_check_needs() {
     // The generic remediation text passes the allow-list too.
     rdy_engine::fixtext::check(INFO.meta.remediation).expect("remediation text is clean");
 }
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    a_claim_pending_with_provisioning_failed_warns_and_names_the_describe_command();
+    a_driver_object_without_a_registration_warns_the_node_plugin_may_be_down();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.storageclass"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.storageclass is read by no fixture of the tests listed here"
+    );
+}

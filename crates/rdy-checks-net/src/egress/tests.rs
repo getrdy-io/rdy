@@ -1340,7 +1340,7 @@ fn the_info_declares_the_network_need_and_only_the_spec_hosts() {
 #[test]
 fn the_family_builds_the_check_with_exactly_the_endpoint_hosts() {
     let spec = rdy_spec::parse_unverified(
-        b"apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints:\n      - registry.acme.test:443\n      - https://api.acme.test:8443/v1?x=1\n      - registry.acme.test:443\n  - id: net.dns\n    names: [registry.acme.test]\n",
+        b"apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints:\n      - registry.acme.test:443\n      - https://api.acme.test:8443/v1?x=1\n      - registry.acme.test:443\n  - id: net.bandwidth\n",
     )
     .expect("a spec");
     let family = NetFamily;
@@ -1356,7 +1356,7 @@ fn the_family_builds_the_check_with_exactly_the_endpoint_hosts() {
         .collect();
     assert_eq!(hosts, ["registry.acme.test:443", "api.acme.test:8443"]);
     // The other net ids are not built, so the planner skips them as not in the build.
-    let other = spec.checks.get(1).expect("net.dns");
+    let other = spec.checks.get(1).expect("net.bandwidth");
     assert!(family.build(other, other.decode_params(), &spec).is_err());
 }
 

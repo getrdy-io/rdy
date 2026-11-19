@@ -1254,3 +1254,35 @@ fn the_info_is_the_one_the_registry_holds() {
     assert_eq!(INFO.default_timeout, Some(Duration::from_secs(30)));
     assert!(INFO.peers.is_empty());
 }
+
+#[tokio::test]
+async fn openshift_with_the_sync_off_and_no_labels_says_the_cluster_default_applies() {
+    let rig = rig("openshift-sync-off-no-labels");
+    let finding = rig
+        .finding(json!({"pod_security": "baseline", "scc": "anyuid"}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        notes(&finding).contains("so the cluster default applies"),
+        "{finding:?}"
+    );
+    rig.audit();
+}
+
+// ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
+
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
+const NOT_READ_YET: &[&str] = &[];
+
+#[test]
+fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
+    // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
+    // records each (entry, check) pair a recorded request hit.
+    crate::client::mock::hits::clear();
+    every_request_is_a_get_and_every_cluster_is_audited();
+    assert_eq!(
+        crate::client::mock::hits::unhit("k8s.admission"),
+        NOT_READ_YET,
+        "an ALLOWED entry citing k8s.admission is read by no fixture of the tests listed here"
+    );
+}
