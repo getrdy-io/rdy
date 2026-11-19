@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod check_pages;
 mod checks;
 mod docs;
 mod generate;

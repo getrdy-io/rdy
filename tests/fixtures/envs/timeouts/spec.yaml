@@ -1,0 +1,14 @@
+# Synthetic. The timeouts environment: a statvfs that never returns and an endpoint that never answers.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+  version: ">=1.0"
+checks:
+  - id: host.disk
+    path: /mnt/nfs/data
+    min: 20Gi
+    severity: block
+  - id: net.egress
+    endpoints: ["hole.acme.test:8080"]
+    severity: block
