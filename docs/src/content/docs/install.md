@@ -29,7 +29,7 @@ Find the tag on the [releases page](https://github.com/getrdy-io/rdy/releases). 
 ## Install
 
 ```sh install-only
-curl --proto '=https' --tlsv1.2 -sSf "${RDY_INSTALL_URL:?set RDY_INSTALL_URL to the install.sh address of a release}" | sh
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL "${RDY_INSTALL_URL:?set RDY_INSTALL_URL to the install.sh address of a release}" | sh
 ```
 
 The script checks the signature of the release's checksum list with cosign. Then it checks the hash of the archive. It installs nothing until both checks pass. It installs `rdy` to `$HOME/.local/bin`.
@@ -59,7 +59,7 @@ Put that line in your shell profile to keep it. The other pages assume `rdy` is 
 The script refuses to run as root. To install as root, add `--allow-root` after `sh -s --`:
 
 ```sh skip=network
-curl --proto '=https' --tlsv1.2 -sSf "$RDY_INSTALL_URL" | sh -s -- --allow-root
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL "$RDY_INSTALL_URL" | sh -s -- --allow-root
 ```
 
 A root install goes to `/usr/local/bin`. The script never runs `sudo`. It never edits a shell profile.
