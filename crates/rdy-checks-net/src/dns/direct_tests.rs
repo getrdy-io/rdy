@@ -74,6 +74,9 @@ pub(super) fn with_servers(case: &str, replay: Replay) -> Replay {
         "nsswitch-sss-mdns" => replay
             .dns_server(addr(NS1), zone(&[("svc.cluster.local", &["192.0.2.20"])]))
             .dns_server(addr(NS2), zone(&[("svc.cluster.local", &["192.0.2.20"])])),
+        "musl-sss-no-getent" => replay
+            .dns_server(addr(NS1), zone(&[("svc.acme.test", &["192.0.2.20"])]))
+            .dns_server(addr(NS2), zone(&[("svc.acme.test", &["192.0.2.20"])])),
         _ => replay,
     }
 }
@@ -640,6 +643,25 @@ async fn off_linux_a_note_says_direct_lookups_were_skipped() {
             .any(|n| n.contains("rdy sent no direct nameserver queries") && n.contains("M2-010")),
         "{:?}",
         ran.finding().notes
+    );
+}
+
+/// M1-154: an Alpine (musl) image has no `getent`, so rdy's own resolver answers, and a stray
+/// `nsswitch.conf` that lists `sss` still gets the documented warning, word for word.
+#[tokio::test(start_paused = true)]
+async fn musl_image_without_getent_with_sss_gets_the_documented_warning() {
+    let replay = with_servers("musl-sss-no-getent", case("musl-sss-no-getent"));
+    let ran = run_on(replay, names(&["svc.acme.test"]), json!({})).await;
+    let finding = ran.finding();
+    assert_eq!(finding.observed["names"][0]["source"], "rdy_resolver");
+    assert_eq!(finding.observed["direct"]["nsswitch_hosts"]["sss"], true);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.strip_suffix('.') == Some(SSS_WARNING)),
+        "{:?}",
+        finding.notes
     );
 }
 

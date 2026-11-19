@@ -3,8 +3,8 @@
 #
 # Usage:
 #   sh install.sh [--allow-root] [--help]
-#   curl --proto '=https' --tlsv1.2 -sSf <url of this file> | sh
-#   curl --proto '=https' --tlsv1.2 -sSf <url of this file> | sh -s -- --allow-root
+#   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL <url of this file> | sh
+#   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL <url of this file> | sh -s -- --allow-root
 #
 # In M1 the url is the pinned release asset:
 #   https://github.com/getrdy-io/rdy/releases/download/v<VERSION>/install.sh
@@ -103,7 +103,7 @@ Usage: install.sh [--allow-root] [--help]
 Installs to $HOME/.local/bin, or to RDY_INSTALL_DIR if you set it.
 RDY_VERSION picks a release.
 When you pipe the script into sh, pass flags after "-s --":
-  curl --proto '=https' --tlsv1.2 -sSf <url> | sh -s -- --allow-root
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL <url> | sh -s -- --allow-root
 EOF
 }
 
