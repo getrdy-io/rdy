@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-excluded"
+summary = "Three healthy nodes, and one NotReady, one cordoned, one Windows, one Fargate, one virtual, a GPU pool and a control plane"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

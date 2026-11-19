@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-pods-limit"
+summary = "Three EKS t3.medium nodes that allow 17 pods each"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

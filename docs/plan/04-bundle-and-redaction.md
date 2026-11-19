@@ -451,7 +451,7 @@ Patterns are sketches; the code is the source of truth and the corpus is its tes
 | `pem_private_key` | `private_keys` | 1 | `-----BEGIN [A-Z0-9 ]*PRIVATE KEY...-----` through the matching END, header and blank lines included, plain or literal `\n`. No END: to the end of the input (whole string) or entry (stream) | the block |
 | `kubeconfig_credential` | `kubeconfig` | 1 | keys `token`, `client-key-data`, `password`, `access-token`, `refresh-token`, `id-token`, `client-secret`. Public certificates stay | the value |
 | `rdy_share_token` | `rdy_tokens` | 1 | `rdy_st_[A-Za-z0-9]{20,}` up to 16 KiB | the token |
-| `jwt` | `jwt` | 1 | `eyJ...` three base64url parts | the token |
+| `jwt` | `jwt` | 1 | `eyJ...` three base64url parts; `k8s-aws-v1.<token>` (EKS plugin); `ya29.<token>` (Google plugin) | the token |
 | `secret_by_key` | `secrets_by_key` | 1 | a key containing `pass`, `secret`, `token`, `api_key`, `access_key`, `private_key`, `credential`, `auth`, `bearer` or `dsn` followed by `=` or `:`, in env, YAML, JSON, INI, `--flag=x`, systemd `Environment=`, connection strings | the value, no quotes |
 | `github_token`, `gitlab_token`, `slack_token`, `stripe_key`, `google_api_key`, `npm_token`, `pypi_token`, `docker_pat` | `saas_tokens` | 2 | documented prefixes (`gh[pousr]_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `[sr]k_live_`, `AIza`, `npm_`, `pypi-`, `dckr_pat_`) | the token |
 | `gcp_service_account_key`, `azure_credential` | `cloud_credentials` | 2 | service-account `"private_key"`, `client_secret`, SAS `sig=`, `AccountKey=` | the value |

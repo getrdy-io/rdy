@@ -224,6 +224,18 @@ another OS with a line on stderr. Every M1 environment is a Linux machine, so th
 and macOS and Windows skip them. M2-130 adds a `RunHooks` OS override, `None` in the shipped binary, and then
 every environment runs on all five legs (correction-48).
 
+An environment may hold a cluster (M1-185). When its `kube` cap is true, the harness serves the env's `api/`
+tree as a scripted cluster: the kube mock of `rdy-checks-k8s`, behind that crate's `testing` feature, stands
+where the kubeconfig and the socket would be. The read-only guard stays in front of it, so a request the guard
+refuses never reaches the files, and after the run the harness audits it (INV-14: every request the mock saw
+passes the guard's rules and pairs with one sent entry of the run's action log, cited by the check that sent it,
+and the files answered every request). A violation fails the env. A `base` env's `api/` files are replaced by
+path like any other file, so a child env changes one answer by writing the same file name. An env whose `kube`
+cap is false has no cluster and no kubeconfig, so its k8s checks are skipped `missing_need`. The `testing`
+feature is a dev-dependency feature of `rdy`: a release build with it does not compile, and CI checks that the
+binary's feature graph does not hold it. `scripts/gen-k8s-env-fixtures.py` writes the trees of `all-pass`,
+`warnings-only` and `all-block` (`--check` fails on drift).
+
 | Env | Milestone | Story | Verdict, exit |
 | --- | --- | --- | --- |
 | `all-pass` | M1 | RHEL 9 VM, 32 GiB nominal showing 31.3 GiB, xfs, direct egress, vanilla three-node cluster (the cluster from M1-185) | `ready`, 0 |

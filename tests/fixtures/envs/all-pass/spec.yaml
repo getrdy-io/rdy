@@ -67,3 +67,8 @@ checks:
     severity: block
   - id: net.mtu
     severity: warn
+  - id: k8s.version
+    min: "1.27"
+    max: "1.31"
+    severity: block
+    fix: "Upgrade the cluster to Kubernetes 1.27 or newer."

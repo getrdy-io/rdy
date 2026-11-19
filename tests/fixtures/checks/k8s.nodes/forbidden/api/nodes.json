@@ -12,9 +12,7 @@
     "status": "Failure",
     "message": "nodes is forbidden: User \"acme-reader\" cannot list resource \"nodes\" in API group \"\" at the cluster scope",
     "reason": "Forbidden",
-    "details": {
-      "kind": "nodes"
-    },
+    "details": {},
     "code": 403
   }
 }

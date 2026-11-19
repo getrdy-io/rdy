@@ -65,6 +65,14 @@ use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
+/// Waits `delay` on the tokio clock. Under a paused clock the wait costs no real time, and it uses no thread,
+/// so a single-thread runtime is never blocked by it. A scripted server that answers late (the `delay_ms` of
+/// a recorded API response) uses it, so a crate that may not depend on tokio can still wait.
+#[cfg(feature = "runtime")]
+pub async fn sleep(delay: std::time::Duration) {
+    tokio::time::sleep(delay).await;
+}
+
 /// The shared fixtures directory, `tests/fixtures` at the repo root (08 section 1). It resolves from
 /// this crate's manifest directory, so it works from any crate of the workspace and not from a
 /// crates.io tarball, which does not ship the fixtures.
@@ -259,6 +267,28 @@ impl TestRun {
         available: impl IntoIterator<Item = Need>,
     ) -> crate::sched::Scheduler {
         crate::sched::Scheduler::new(jobs, os, available).with_probes(self.hub.clone())
+    }
+
+    /// `text` as the run's redactor writes it, with every known secret of the run removed.
+    #[must_use]
+    pub fn redact(&self, text: &str) -> String {
+        self.hub.redactor().redact_str(text).to_string()
+    }
+
+    /// The context a family's probe gets, over this run's hub and its run-level probe. `checks` are the
+    /// checks of the family that will run, and `announce` takes the lines the probe prints.
+    #[must_use]
+    pub fn family_probe<'a>(
+        &'a self,
+        checks: &'a [&'static crate::check::CheckInfo],
+        announce: &'a (dyn Fn(&str) + Send + Sync),
+    ) -> crate::family::FamilyProbe<'a> {
+        crate::family::FamilyProbe::new(
+            self.hub.run_probe_for(Os::Linux),
+            self.hub.secret_sink(),
+            checks,
+            announce,
+        )
     }
 
     /// The action log so far.

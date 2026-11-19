@@ -41,6 +41,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "tests of the client module: a mock API server, kubeconfig files, plugin scripts",
     ),
     (
+        "crates/rdy-checks-k8s/tests/family.rs",
+        "tests of the k8s family probe against a mock API server, with kubeconfig files and a plugin script (M1-107)",
+    ),
+    (
         "crates/rdy-checks-k8s/tests/guard.rs",
         "tests of the read-only guard on the real client stack: a mock API server and kubeconfig files",
     ),

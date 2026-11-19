@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-kyverno-cel-image"
+summary = "Kyverno 1.16 to 1.19: policies.kyverno.io prefers v1 and serves ImageValidatingPolicy next to ValidatingPolicy"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

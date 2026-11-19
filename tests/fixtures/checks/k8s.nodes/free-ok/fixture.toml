@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-ok"
+summary = "Three healthy nodes with light requests, a finished pod and a pod with no node that do not count"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

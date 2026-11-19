@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-90pct"
+summary = "Three healthy nodes whose pods request 90% of the CPU"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true
