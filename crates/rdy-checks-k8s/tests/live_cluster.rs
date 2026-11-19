@@ -78,11 +78,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use k8s_openapi::api::apps::v1::DaemonSet;
 use k8s_openapi::api::admissionregistration::v1::{
     MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
     ValidatingWebhookConfiguration,
 };
+use k8s_openapi::api::apps::v1::DaemonSet;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
@@ -452,10 +452,6 @@ impl kube::Resource for GatewayClass {
     fn meta_mut(&mut self) -> &mut k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
         &mut self.metadata
     }
-    let run = TestRun::new(Replay::new());
-    let connected = readonly_connection(&run).await;
-    assert_expected_minor(&connected);
-    let cluster: Arc<dyn Cluster> = Arc::new(connected);
 }
 
 /// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,

@@ -370,7 +370,10 @@ fn every_get_in_entry_admits_its_own_pair_and_nothing_near_it() {
             }
         }
         let list = format!("{prefix}/namespaces/{namespace}/{resource}");
-        if !lists.iter().any(|(p, r, ns)| p == prefix && r == resource && ns == namespace) {
+        if !lists
+            .iter()
+            .any(|(p, r, ns)| p == prefix && r == resource && ns == namespace)
+        {
             assert_eq!(judge_get(&list), Err(RULE_NOT_ALLOWED), "{list}");
         }
         let status = format!("{ok}/status");

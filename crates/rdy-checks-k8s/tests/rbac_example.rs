@@ -127,12 +127,6 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())
                 }
-                // One object of one namespace: a Role of that namespace, granted by name.
-                Access::GetIn { namespace, name } => (
-                    "get",
-                    Some((*namespace).to_owned()),
-                    format!(" name={name}"),
-                ),
             };
             out.insert((
                 namespace,
