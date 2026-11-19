@@ -153,13 +153,22 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
 /// sleep and no real socket is involved, so a slow runner cannot change the result. At `jobs = 1` the
 /// checks run one after the other, so virtual time is the sum (5 s, then the black hole's 3 s). At
 /// `jobs = 8` both start at once.
+///
+/// M1-187: the env also holds a cluster whose `/version` does not answer while the cluster client is
+/// built (`api/version.json`, `delay_ms` of 10 minutes). The engine cuts the family probe at
+/// `FAMILY_PROBE_LIMIT` (10 s) and leaves the `kube_context` need unmet, so `k8s.version` is skipped
+/// `missing_need` in the `required_not_run` bucket and never starts a request of its own. Every check
+/// starts after the probe, so the run ends inside `deadline_ms` only because the limit is shorter than
+/// the 10 minute delay. A blocked worker would hang the paused test, not end it. The INV-14 audit
+/// (`run.violations`) passes.
 #[test]
 fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestResult {
-    use rdy_spec::result::Status;
+    use rdy_spec::result::{Bucket, SkipKind, Status};
     if Fixture::load(&fixtures_dir(), "envs/timeouts")?.os() != current_os() {
         eprintln!("env_harness: skipping timeouts: it is a Linux machine");
         return Ok(());
     }
+    let probe_ms = u64::try_from(rdy_engine::family::FAMILY_PROBE_LIMIT.as_millis())? - 1;
     for jobs in [1, 8] {
         let run = driver::run_env("timeouts", jobs)?;
         let report = &run.report;
@@ -192,6 +201,36 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             egress.message
         );
         assert!(egress.message.contains("blackhole"), "{}", egress.message);
+        // M1-187: the cluster client is built before any check runs, and the `/version` never answers, so
+        // the engine cuts the family probe at its limit. No check starts before that, and no worker is
+        // blocked: the paused one-thread-per-test clock would hang, not end.
+        let version = check("k8s.version")?;
+        assert_eq!(version.status, Status::Skipped, "jobs {jobs}");
+        assert_eq!(
+            version.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "jobs {jobs}"
+        );
+        assert_eq!(
+            version.bucket,
+            Bucket::RequiredNotRun,
+            "jobs {jobs}: {}",
+            version.message
+        );
+        assert!(
+            version
+                .needs
+                .iter()
+                .any(|n| n.need == rdy_spec::result::Need::KubeContext && !n.met),
+            "jobs {jobs}: {:?}",
+            version.needs
+        );
+        assert_eq!(version.duration_ms, 0, "jobs {jobs}: the check never ran");
+        assert!(
+            run.violations.is_empty(),
+            "jobs {jobs}: INV-14 audit: {:?}",
+            run.violations
+        );
         let end = report
             .checks
             .iter()
@@ -200,7 +239,7 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             .unwrap_or(0);
         let deadline = report.run.options.deadline_ms;
         assert!(
-            (5000..=deadline).contains(&end),
+            (probe_ms + 5000..=deadline).contains(&end),
             "jobs {jobs}: the checks ended at {end} ms of virtual time, deadline_ms is {deadline}"
         );
         // The jobs differ: one at a time the black hole waits behind the hung statvfs, eight at once both
@@ -209,7 +248,8 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             assert!(egress.started_ms > 0, "jobs 1: net.egress started at 0 ms");
         } else {
             assert!(
-                disk.started_ms < 100 && egress.started_ms < 100,
+                (probe_ms..probe_ms + 100).contains(&disk.started_ms)
+                    && (probe_ms..probe_ms + 100).contains(&egress.started_ms),
                 "jobs {jobs}: started at {} and {} ms",
                 disk.started_ms,
                 egress.started_ms
