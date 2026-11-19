@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-free-canary"
+summary = "A pod whose environment holds a credential-looking value that must never be held or shown"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

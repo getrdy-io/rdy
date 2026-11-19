@@ -184,6 +184,59 @@ def no_scaler(case):
     scaler_deployments(case)
 
 
+PODS_PATH = "/api/v1/pods"
+PHASE = "status.phase!=Succeeded,status.phase!=Failed"
+
+
+def container(name, cpu=None, memory=None, ephemeral=None, sidecar=False, env=None):
+    requests = {}
+    if cpu:
+        requests["cpu"] = cpu
+    if memory:
+        requests["memory"] = memory
+    if ephemeral:
+        requests["ephemeral-storage"] = ephemeral
+    out = {"name": name, "image": "registry.acme.example/acme/app:1", "resources": {"requests": requests}}
+    if sidecar:
+        out["restartPolicy"] = "Always"
+    if env:
+        out["env"] = env
+    return out
+
+
+def pod(name, node_name, containers, init=None, phase="Running", overhead=None, pod_level=None):
+    spec = {"containers": containers}
+    if node_name:
+        spec["nodeName"] = node_name
+    if init:
+        spec["initContainers"] = init
+    if overhead:
+        spec["overhead"] = overhead
+    if pod_level:
+        spec["resources"] = {"requests": pod_level}
+    return {"metadata": {"name": name, "namespace": "app"}, "spec": spec, "status": {"phase": phase}}
+
+
+def pods(case, items, cont=None, code=200, fails=True, node_name=None):
+    """The cluster-wide Pod list, or with `node_name` the list of one node (the fallback of a cut list)."""
+    selector = f"spec.nodeName={node_name},{PHASE}" if node_name else PHASE
+    file = f"pods-{node_name}" if node_name else "pods"
+    body = listing("PodList", "v1", items, cont) if code == 200 else status(
+        403, "Forbidden",
+        'pods is forbidden: User "acme-reader" cannot list resource "pods" in API group "" at the cluster scope')
+    put(case, file, PODS_PATH, body, code, f"limit=500&fieldSelector={selector}")
+    if cont and fails:
+        put(case, file + "-page-2", PODS_PATH,
+            status(503, "ServiceUnavailable", "the server is overloaded, try again"), 503,
+            f"continue={cont}&limit=500&fieldSelector={selector}")
+
+
+def loaded(prefix, per_node, cpu="500m", memory="512Mi", count=1):
+    """`count` pods on each of the first `per_node` nodes of `healthy()`."""
+    return [pod(f"{prefix}-{i + 1}-{j + 1}", f"acme-node-{i + 1}", [container("main", cpu, memory)])
+            for i in range(per_node) for j in range(count)]
+
+
 SUMMARIES = {}
 
 
@@ -392,6 +445,86 @@ put("paged", "nodes-page-2", NODES_PATH, listing("NodeList", "v1", [node("acme-n
 case("capped", "Two healthy nodes on page one and the server fails on page two")
 nodes("capped", [node("acme-node-1", zone="us-east-1a"), node("acme-node-2", zone="us-east-1b")], cont="tok-more")
 no_scaler("capped")
+
+# ---- free capacity (M1-159) -----------------------------------------------------------------------------------------
+case("free-ok", "Three healthy nodes with light requests, a finished pod and a pod with no node that do not count")
+nodes("free-ok", healthy())
+pods("free-ok", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "512Mi")]),
+    pod("web-2", "acme-node-1", [container("main", "500m", "512Mi")]),
+    pod("done-1", "acme-node-2", [container("main", "7", "20Gi")], phase="Succeeded"),
+    pod("waiting-1", None, [container("main", "7", "20Gi")], phase="Pending"),
+])
+
+case("free-90pct", "Three healthy nodes whose pods request 90% of the CPU")
+nodes("free-90pct", healthy())
+pods("free-90pct", [pod(f"big-{i + 1}", f"acme-node-{i + 1}", [container("main", "7100m", "1Gi")]) for i in range(3)])
+
+case("free-margin", "Three healthy nodes with 17 CPU left, which meets 16 and misses the 120% margin")
+nodes("free-margin", healthy())
+pods("free-margin", [pod("big-1", "acme-node-1", [container("main", "6730m", "1Gi")])])
+
+case("free-effective", "One 4 CPU node with a pod that has a sidecar, an init container and overhead, and a pod that finished")
+nodes("free-effective", [node("acme-node-1", cpu="4", memory="8Gi", ephemeral="100Gi", pods="110", cap_cpu="4",
+                              cap_memory="8Gi", zone="us-east-1a")])
+pods("free-effective", [
+    pod("web-1", "acme-node-1", [container("main", "1", "200Mi")],
+        init=[container("proxy", "1", "100Mi", sidecar=True), container("setup", "2", "500Mi")],
+        overhead={"cpu": "250m", "memory": "50Mi"}),
+    pod("done-1", "acme-node-1", [container("main", "3", "1Gi")], phase="Failed"),
+])
+
+case("free-forbidden", "Three healthy nodes and the identity may not list pods")
+nodes("free-forbidden", healthy())
+pods("free-forbidden", [], code=403)
+
+case("free-capped", "The cluster-wide pod list is cut, and each counted node is listed on its own")
+nodes("free-capped", healthy())
+pods("free-capped", loaded("big", 3, cpu="7100m"), cont="tok-more")
+for i in range(3):
+    pods("free-capped", [pod(f"big-{i + 1}", f"acme-node-{i + 1}", [container("main", "7100m", "1Gi")])],
+         node_name=f"acme-node-{i + 1}")
+
+case("free-capped-node", "The cluster-wide pod list is cut, and so is the list of the second node")
+nodes("free-capped-node", healthy())
+pods("free-capped-node", loaded("big", 3, cpu="7100m"), cont="tok-more")
+pods("free-capped-node", [pod("big-1", "acme-node-1", [container("main", "7100m", "1Gi")])],
+     node_name="acme-node-1")
+pods("free-capped-node", [pod("big-2", "acme-node-2", [container("main", "7100m", "1Gi")])],
+     node_name="acme-node-2", cont="tok-more")
+
+case("free-bad-request", "Light requests, and one pod whose CPU request is not a quantity")
+nodes("free-bad-request", healthy())
+pods("free-bad-request", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "512Mi")]),
+    pod("odd-1", "acme-node-2", [container("main", "lots", "512Mi")]),
+])
+
+case("free-pod-level", "One 4 CPU node and a pod whose pod-level request (3 CPU) is above its containers' (500m)")
+nodes("free-pod-level", [node("acme-node-1", cpu="4", memory="8Gi", ephemeral="100Gi", pods="110", cap_cpu="4",
+                              cap_memory="8Gi", zone="us-east-1a")])
+pods("free-pod-level", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "256Mi", ephemeral="1Gi")],
+        overhead={"cpu": "250m"}, pod_level={"cpu": "3", "memory": "1Gi"}),
+])
+
+CANARY = "canary-env-value-0a1b2c3d4e5f"
+case("free-canary", "A pod whose environment holds a credential-looking value that must never be held or shown")
+nodes("free-canary", healthy())
+pods("free-canary", [
+    pod("web-1", "acme-node-1", [container("main", "500m", "512Mi", env=[
+        {"name": "DB_PASSWORD", "value": CANARY},
+        {"name": "TOKEN", "valueFrom": {"secretKeyRef": {"name": "acme-secret", "key": "token"}}},
+    ])]),
+])
+
+case("free-many-nodes", "Twenty-six healthy nodes and a cut pod list: more nodes than are listed one by one")
+nodes("free-many-nodes", [node(f"acme-node-{i + 1}", zone=ZONES[i % 3]) for i in range(26)])
+pods("free-many-nodes", [pod("web-1", "acme-node-1", [container("main", "500m", "512Mi")])], cont="tok-more")
+
+case("free-odd-name", "One node whose name is not a DNS name and a cut pod list")
+nodes("free-odd-name", [node("Acme_Node_1", zone="us-east-1a")])
+pods("free-odd-name", [pod("web-1", "Acme_Node_1", [container("main", "500m", "512Mi")])], cont="tok-more")
 
 # ---- hostile text -----------------------------------------------------------------------------------------------------------
 case("hostile", "Node names, labels and quantities that try to reach the terminal or a command")

@@ -8,7 +8,7 @@ use k8s_openapi::api::authentication::v1::SelfSubjectReview;
 use k8s_openapi::api::authorization::v1::{
     NonResourceAttributes, ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
-use k8s_openapi::api::core::v1::{Event, Node};
+use k8s_openapi::api::core::v1::{Event, Node, Pod};
 use k8s_openapi::api::storage::v1::CSINode;
 use kube::api::{ListParams, PostParams};
 use rdy_spec::result::ActionOutcome;
@@ -261,6 +261,20 @@ async fn a_selector_written_in_plain_text_matches_the_query_kube_encodes() {
     // kube sends the encoded form, and the fixture holds the plain one.
     let line = harness.mock().seen()[0].line();
     assert!(line.contains("%3D"), "{line}");
+    harness.audit().expect("clean");
+}
+
+#[tokio::test]
+async fn the_pod_list_of_k8s_nodes_is_found_by_its_phase_selector() {
+    let harness = cluster();
+    let client = harness.client_for("k8s.nodes");
+    let params = ListParams::default().fields("status.phase!=Succeeded,status.phase!=Failed");
+    let pods = list_all(&client.all::<Pod>(), &params)
+        .await
+        .expect("recorded");
+    assert_eq!(pods.items.len(), 2);
+    let line = harness.mock().seen()[0].line();
+    assert!(line.contains("%21%3D"), "{line}");
     harness.audit().expect("clean");
 }
 

@@ -1,0 +1,63 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "limit=500&fieldSelector=status.phase!=Succeeded,status.phase!=Failed"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "web-0",
+          "namespace": "app"
+        },
+        "spec": {
+          "nodeName": "node-a",
+          "containers": [
+            {
+              "name": "main",
+              "resources": {
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "256Mi"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running"
+        }
+      },
+      {
+        "metadata": {
+          "name": "web-1",
+          "namespace": "app"
+        },
+        "spec": {
+          "nodeName": "node-b",
+          "containers": [
+            {
+              "name": "main",
+              "resources": {
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "256Mi"
+                }
+              }
+            }
+          ]
+        },
+        "status": {
+          "phase": "Pending"
+        }
+      }
+    ]
+  }
+}

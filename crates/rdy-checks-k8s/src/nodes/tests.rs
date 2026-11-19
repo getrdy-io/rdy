@@ -559,18 +559,247 @@ async fn absent_zone_labels_are_not_evaluated_never_a_pass() {
 
 // ---- free capacity ------------------------------------------------------------------------------------------------
 
+const PODS: &str = "/api/v1/pods";
+
 #[tokio::test]
-async fn free_is_not_evaluated_and_so_never_a_pass() {
-    let rig = rig("healthy");
+async fn requests_using_90_percent_of_the_cpu_block_a_16_cpu_free_need() {
+    let rig = rig("free-90pct");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert!(
+        finding
+            .message
+            .starts_with("Free CPU on the 3 counted nodes is 2430m, and the spec needs 16."),
+        "{}",
+        finding.message
+    );
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "2430m");
+    assert_eq!(finding.observed["free"]["cpu"]["requested"], "21300m");
+    assert_eq!(finding.expected["free"]["cpu"], "16");
+    assert!(finding.partial.is_none());
+    assert_eq!(rig.paths(), [NODES, PODS]);
+    assert_eq!(engine(&rig, finding, None).status, Status::Block);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn free_capacity_that_is_there_passes_and_finished_or_unplaced_pods_take_nothing() {
+    let rig = rig("free-ok");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16, "memory": "64Gi", "pods": 100}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(finding.partial.is_none());
+    // Two running pods count. The Succeeded one and the one with no node do not.
+    assert_eq!(finding.observed["free"]["pods_read"], 2);
+    assert_eq!(finding.observed["free"]["cpu"]["requested"], "1");
+    assert_eq!(finding.observed["free"]["pods"]["requested"], "2");
+    assert_eq!(finding.observed["free"]["pods"]["free"], "172");
+    assert_eq!(engine(&rig, finding, None).status, Status::Pass);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn free_capacity_inside_the_120_percent_margin_warns() {
+    let rig = rig("free-margin");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert!(
+        finding.message.contains("below the 120% margin"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "17");
+    // Exactly the need passes the block line, the margin is a warning only.
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn the_effective_request_counts_the_init_phase_the_sidecar_and_the_overhead() {
+    let rig = rig("free-effective");
+    // CPU: the sidecar (1) runs with the init container (2), so the init phase peaks at 3, which is more
+    // than app plus sidecar (2). Plus 250m overhead is 3250m, so 750m of 4 is left.
+    // Memory: peak 100Mi + 500Mi = 600Mi, plus 50Mi overhead is 650Mi of 8Gi.
+    let finding = rig
+        .finding(json!({"free": {"cpu": 1, "memory": "7Gi"}}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.observed["free"]["cpu"]["requested"], "3250m");
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "750m");
+    assert_eq!(finding.observed["free"]["memory"]["requested"], "650Mi");
+    // The failed pod takes nothing, so one pod is counted.
+    assert_eq!(finding.observed["free"]["pods_read"], 1);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_forbidden_pod_list_is_not_evaluated_never_a_pass() {
+    let rig = rig("free-forbidden");
     let finding = rig
         .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
         .await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
-    assert!(partial_note(&finding).contains("free capacity was not evaluated"));
+    let partial = finding.partial.as_ref().expect("a partial");
+    assert!(
+        partial.note.contains("free capacity was not evaluated"),
+        "{}",
+        partial.note
+    );
+    assert_eq!(partial.missing_grants, ["list pods"]);
     assert_eq!(finding.observed["free"], "not evaluated");
-    // No pod is listed: the pod list is M1-159's.
-    assert_eq!(rig.paths(), [NODES]);
+    assert!(
+        finding
+            .fix
+            .as_deref()
+            .is_some_and(|fix| fix.contains("kubectl auth can-i list pods"))
+    );
+    assert_eq!(rig.paths(), [NODES, PODS]);
     assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_cut_pod_list_is_read_node_by_node() {
+    let rig = rig("free-capped");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.observed["free"]["listed_per_node"], true);
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "2430m");
+    let paths = rig.paths();
+    // Nodes, the cut list (two pages), then one list per counted node.
+    assert_eq!(paths.len(), 1 + 2 + 3, "{paths:?}");
+    assert!(paths[3..].iter().all(|path| path == PODS));
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_node_whose_own_list_is_cut_makes_free_not_evaluated() {
+    let rig = rig("free-capped-node");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(partial_note(&finding).contains("a node has too many pods to list"));
+    assert_eq!(finding.observed["free"], "not evaluated");
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_request_that_is_not_a_quantity_makes_a_pass_partial() {
+    let rig = rig("free-bad-request");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(partial_note(&finding).contains("1 pods had a request that is not a quantity"));
+    assert_eq!(finding.observed["free"]["unreadable_requests"], 1);
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_pod_level_request_is_charged_for_the_resources_it_names() {
+    let rig = rig("free-pod-level");
+    // CPU: pod level 3 plus 250m overhead, not the container's 500m. Ephemeral storage is not a pod level
+    // resource, so the container's 1Gi stands.
+    let finding = rig
+        .finding(json!({"free": {"cpu": 1, "ephemeral": "10Gi"}}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.observed["free"]["cpu"]["requested"], "3250m");
+    assert_eq!(finding.observed["free"]["cpu"]["free"], "750m");
+    assert_eq!(finding.observed["free"]["ephemeral"]["requested"], "1Gi");
+    rig.audit();
+}
+
+#[tokio::test]
+async fn an_environment_value_is_never_held_or_shown() {
+    let rig = rig("free-canary");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.observed["free"]["pods_read"], 1);
+    let result = serde_json::to_string(&engine(&rig, finding.clone(), None)).expect("a result");
+    let shown = format!("{finding:?} {result}");
+    assert!(!shown.contains("canary-env-value"), "{shown}");
+    assert!(!shown.contains("DB_PASSWORD"), "{shown}");
+    rig.audit();
+    // The type that holds a pod cannot hold it either, whatever the server sends.
+    let pod: PodRequests = serde_json::from_value(json!({
+        "metadata": {"name": "web-1", "annotations": {"note": "canary-env-value"}},
+        "spec": {
+            "nodeName": "n1",
+            "containers": [{"name": "c", "env": [{"name": "X", "value": "canary-env-value"}],
+                "resources": {"requests": {"cpu": "1"}}}],
+            "volumes": [{"name": "v", "secret": {"secretName": "canary-env-value"}}]
+        }
+    }))
+    .expect("a pod");
+    assert!(!format!("{pod:?}").contains("canary-env-value"), "{pod:?}");
+    assert_eq!(pod.containers.len(), 1);
+}
+
+#[tokio::test]
+async fn more_counted_nodes_than_are_listed_one_by_one_is_not_evaluated() {
+    let rig = rig("free-many-nodes");
+    let finding = rig
+        .finding(json!({"min_ready": 3, "free": {"cpu": 16}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("26 counted nodes are more than the 25"),
+        "{}",
+        partial_note(&finding)
+    );
+    assert_eq!(finding.observed["free"], "not evaluated");
+    // The nodes, the cut cluster-wide list (two pages), and no list per node.
+    assert_eq!(rig.paths(), [NODES, PODS, PODS]);
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_node_name_that_is_not_a_dns_name_is_never_put_in_a_selector() {
+    let rig = rig("free-odd-name");
+    let finding = rig
+        .finding(json!({"min_ready": 1, "free": {"cpu": 1}}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("cannot go into a field selector"),
+        "{}",
+        partial_note(&finding)
+    );
+    assert_eq!(finding.observed["free"], "not evaluated");
+    assert_eq!(rig.paths(), [NODES, PODS, PODS]);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_spec_without_free_never_lists_pods() {
+    let rig = rig("healthy");
+    let finding = rig.finding(json!({"min_ready": 3})).await;
+    assert_eq!(finding.level, Level::Pass);
+    assert_eq!(finding.observed["free"], serde_json::Value::Null);
+    assert_eq!(rig.paths(), [NODES]);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn with_no_counted_node_free_is_not_evaluated_and_no_pod_is_listed() {
+    let rig = rig("empty");
+    let finding = rig.finding(json!({"free": {"cpu": 16}})).await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert!(partial_note(&finding).contains("no node counts"));
+    assert!(!rig.paths().iter().any(|path| path == PODS));
     rig.audit();
 }
 
@@ -811,8 +1040,8 @@ fn the_remediation_text_is_on_the_allow_list() {
 
 // ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
 
-/// The `ALLOWED` entries that cite this check and that no fixture run reads yet. None: the pod list entry
-/// was removed until M1-159 builds the free capacity half, and it comes back with its own fixture.
+/// The `ALLOWED` entries that cite this check and that no fixture run reads yet. None: the `pods` entry is
+/// read by the free capacity fixtures (M1-159).
 const NOT_READ_YET: &[&str] = &[];
 
 #[test]
@@ -821,6 +1050,7 @@ fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
     // records each (entry, check) pair a recorded request hit.
     crate::client::mock::hits::clear();
     a_block_becomes_a_warning_when_the_spec_says_severity_warn();
+    requests_using_90_percent_of_the_cpu_block_a_16_cpu_free_need();
     a_cut_list_makes_a_count_or_zone_shortfall_a_warning_with_a_partial();
     assert_eq!(
         crate::client::mock::hits::unhit("k8s.nodes"),
