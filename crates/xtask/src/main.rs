@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+mod agents;
 mod check_pages;
 mod checks;
 mod docs;
@@ -70,6 +71,16 @@ enum Command {
         #[command(subcommand)]
         action: GoldensAction,
     },
+    /// Fail when a security-software catalog entry was checked more than 180 days before today. The
+    /// release workflow runs it.
+    AgentsStale {
+        /// The day to count from, as YYYY-MM-DD. The workflow passes the date of the run.
+        #[arg(long, value_name = "YYYY-MM-DD", value_parser = agents::parse_today)]
+        today: String,
+        /// The oldest `checked_on` that still passes, in days.
+        #[arg(long, value_name = "DAYS", default_value_t = agents::MAX_AGE_DAYS)]
+        max_days: i64,
+    },
     /// Off in this build. Refuses and exits 64.
     Dist,
     /// Off in this build. Refuses and exits 64.
@@ -127,6 +138,7 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Goldens {
             action: GoldensAction::Check { used_dir },
         } => goldens::check(&root, used_dir.as_deref())?,
+        Command::AgentsStale { today, max_days } => agents::run(&today, max_days)?,
         Command::Dist => return Ok(refuse(DIST_OFF)),
         Command::Publish => return Ok(refuse(PUBLISH_OFF)),
     };

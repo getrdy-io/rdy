@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-classes-forbidden"
+summary = "The Gateway API is served and the identity may not list its classes"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

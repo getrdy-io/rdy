@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-policies-cut"
+summary = "The policy list has a second page"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

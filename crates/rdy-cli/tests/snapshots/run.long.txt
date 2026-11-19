@@ -80,6 +80,11 @@ Verdict:
   READY with warnings if only optional things are wrong.
   READY if every check ran and passed.
 
+Words in the list:
+  BLOCK: fix before install.
+  WARN: fix if you can.
+  SKIP: rdy could not check it.
+
 Examples:
   Run a spec your vendor signed:
     rdy run acme-platform.yaml

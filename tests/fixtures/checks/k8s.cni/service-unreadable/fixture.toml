@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-service-unreadable"
+summary = "The identity may read neither a ServiceCIDR nor kubeadm-config"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

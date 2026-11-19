@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-loop-crashloop"
+summary = "One of two CoreDNS pods crash-loops (last run ended 2 minutes ago) and the Corefile forwards to /etc/resolv.conf"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

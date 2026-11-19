@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-nginx-community"
+summary = "A community ingress-nginx class, the default: the retirement warning"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -40,6 +40,8 @@ pub mod panic_hook;
 pub mod password;
 
 #[doc(hidden)]
+pub mod progress;
+#[doc(hidden)]
 pub mod prompt;
 #[doc(hidden)]
 pub mod redaction;
@@ -62,7 +64,6 @@ pub mod terminal;
 
 mod spec_cmds;
 mod spec_load;
-mod static_line;
 
 #[doc(hidden)]
 pub mod trust;
@@ -281,9 +282,11 @@ where
                                 registry,
                                 color: cli.global.color,
                                 progress: cli.global.progress,
-                                quiet: cli.global.quiet,
-                                verbose: cli.global.verbose,
                                 rig,
+                                detail: terminal::Detail::from_flags(
+                                    cli.global.quiet,
+                                    cli.global.verbose,
+                                ),
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
                         }

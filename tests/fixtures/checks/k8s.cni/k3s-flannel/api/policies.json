@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/networking.k8s.io/v1/namespaces/acme-system/networkpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicyList",
+    "metadata": {
+      "resourceVersion": "9001"
+    },
+    "items": []
+  }
+}

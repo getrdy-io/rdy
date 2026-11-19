@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-lb-forbidden"
+summary = "The identity may not list services"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

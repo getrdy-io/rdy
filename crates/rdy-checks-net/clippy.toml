@@ -18,6 +18,7 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
 disallowed-types = [
+    { path = "indicatif::MultiProgress", reason = "draws on stderr and takes over the screen, and `default()` cannot be named on its own; rdy draws one line through progress::Progress (M1-142)", allow-invalid = true },
     # Process.
     { path = "std::process::Command", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
     # Files and directories.
@@ -64,6 +65,25 @@ disallowed-methods = [
     { path = "anstream::stdout", reason = "chooses colour itself; stdout is data and is never coloured", allow-invalid = true },
     { path = "anstream::stderr", reason = "chooses colour itself; use AutoStream::always or never after use_color", allow-invalid = true },
     { path = "colorchoice::ColorChoice::write_global", reason = "sets a process-wide colour choice that anstream would read; colour is decided once in use_color", allow-invalid = true },
+    # The live progress line draws on stderr only, through progress.rs (M1-142, SEC-60-1). Where the
+    # one allowed call lives, none of these is called.
+    { path = "indicatif::ProgressDrawTarget::stdout", reason = "draws on stdout, which is data; the live line is stderr only (M1-142)", allow-invalid = true },
+    { path = "indicatif::ProgressDrawTarget::stdout_with_hz", reason = "draws on stdout, which is data; the live line is stderr only (M1-142)", allow-invalid = true },
+    { path = "indicatif::ProgressDrawTarget::stderr", reason = "unlimited rate and no gate of ours; use progress::Target::draw_target (stderr_with_hz(10)) after live_line_allowed", allow-invalid = true },
+    { path = "indicatif::ProgressDrawTarget::term", reason = "takes any Term, stdout included; use progress::Target::draw_target", allow-invalid = true },
+    { path = "indicatif::ProgressBar::new", reason = "draws on stderr at once with indicatif's own TTY check, which ignores --quiet, TERM and RUST_LOG; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressBar::new_spinner", reason = "draws on stderr at once with indicatif's own TTY check, which ignores --quiet, TERM and RUST_LOG; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressBar::enable_steady_tick", reason = "starts a thread that ticks on real time; progress::Progress ticks on tokio time", allow-invalid = true },
+    { path = "indicatif::ProgressBar::println", reason = "writes a line above the bar; result text goes through the one stderr writer", allow-invalid = true },
+    { path = "indicatif::ProgressBar::suspend", reason = "runs code with the bar hidden; clear the line with Progress::clear instead", allow-invalid = true },
+    { path = "indicatif::MultiProgress::new", reason = "draws on stderr and takes over the screen; rdy draws one line", allow-invalid = true },
+    { path = "console::Term::stdout", reason = "a terminal handle on stdout, which is data", allow-invalid = true },
+    { path = "console::Term::buffered_stdout", reason = "a terminal handle on stdout, which is data", allow-invalid = true },
+    { path = "console::set_colors_enabled", reason = "sets a process-wide colour choice; colour is decided once in use_color", allow-invalid = true },
+    { path = "console::set_colors_enabled_stderr", reason = "sets a process-wide colour choice; colour is decided once in use_color", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress_count", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress_with_style", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
     # Process.
     { path = "std::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },

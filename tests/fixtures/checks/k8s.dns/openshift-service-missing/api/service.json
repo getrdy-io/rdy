@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/openshift-dns/services/dns-default"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "services \"dns-default\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "dns-default",
+      "kind": "services"
+    },
+    "code": 404
+  }
+}

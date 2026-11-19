@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-flannel"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "namespaces \"kube-flannel\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "kube-flannel",
+      "kind": "namespaces"
+    },
+    "code": 404
+  }
+}

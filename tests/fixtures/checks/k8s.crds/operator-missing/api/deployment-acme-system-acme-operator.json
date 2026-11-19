@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/acme-system/deployments/acme-operator"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "deployments.apps \"acme-operator\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "acme-operator",
+      "group": "apps",
+      "kind": "deployments"
+    },
+    "code": 404
+  }
+}

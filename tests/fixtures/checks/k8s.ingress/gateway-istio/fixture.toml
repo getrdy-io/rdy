@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-istio"
+summary = "Gateway API v1 with an Istio class that a controller accepted"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

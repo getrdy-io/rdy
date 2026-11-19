@@ -117,6 +117,10 @@ fn hooks(terminal: bool) -> RunHooks {
     hooks.stderr_columns = Some(100);
     // Not the developer's NO_COLOR or CLICOLOR_FORCE.
     hooks.style_env = Some(rdy_cli::style::StyleEnv::default());
+    // Not the developer's TERM or RUST_LOG, and a line that draws goes to a buffer, never to the real
+    // stderr (M1-142).
+    hooks.progress_env = Some(rdy_cli::progress::ProgressEnv::default());
+    hooks.progress_capture = Some(rdy_cli::progress::ProgressCapture::default());
     hooks
 }
 

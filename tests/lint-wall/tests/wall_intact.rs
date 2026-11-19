@@ -455,10 +455,12 @@ fn files_named_ext(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The four clippy commands of CI, exactly. A fifth, or a change to one (`--config`, `--exclude`,
-/// `--cap-lints`, a dropped `--all-targets`), is a change to this list, which is in CODEOWNERS.
+/// The six clippy commands of CI, exactly. A seventh, or a change to one (`--config`, `--exclude`,
+/// `--cap-lints`, a dropped `--all-targets` or `--lib`), is a change to this list, which is in CODEOWNERS.
 const CLIPPY_COMMANDS: &[&str] = &[
     "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --lib -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --features html --lib -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings",
@@ -527,7 +529,7 @@ fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
 }
 
 #[test]
-fn no_workflow_sets_flags_and_the_clippy_steps_are_the_four_pinned_ones() {
+fn no_workflow_sets_flags_and_the_clippy_steps_are_the_six_pinned_ones() {
     let files = workflow_files();
     assert!(files.len() >= 4, "found only {files:?}");
     let mut commands = Vec::new();
@@ -552,6 +554,53 @@ fn no_workflow_sets_flags_and_the_clippy_steps_are_the_four_pinned_ones() {
             "{c}"
         );
     }
+}
+
+/// The release gate for a stale security-agent catalog (M1-173), line for line. No `--max-days`: a
+/// workflow that loosens the limit is a change to this test, which is in CODEOWNERS.
+const AGENTS_STALE_STEP: &str =
+    "run: cargo run --locked --quiet --package xtask -- agents-stale --today \"$(date -u +%F)\"";
+
+#[test]
+fn the_release_workflow_gates_on_a_stale_agent_catalog_with_the_pinned_command() {
+    let text = read(&root().join(".github/workflows/check-release-artifacts.yml"));
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter(|l| l.contains("agents-stale"))
+        .collect();
+    let steps: Vec<&&str> = lines.iter().filter(|l| l.starts_with("run:")).collect();
+    assert_eq!(
+        steps,
+        [&AGENTS_STALE_STEP],
+        "check-release-artifacts.yml must run exactly the pinned agents-stale command (AGENTS_STALE_STEP)"
+    );
+    for file in workflow_files() {
+        let body = read(&file);
+        for line in body.lines().filter(|l| !l.trim_start().starts_with('#')) {
+            assert!(
+                !(line.contains("agents-stale") && line.contains("--max-days")),
+                "{}: `{line}` loosens the staleness limit",
+                file.display()
+            );
+        }
+    }
+    // The job has no `if:`: a condition could skip the gate, and a skipped job counts as passed.
+    let job = text
+        .split("\n  agents-stale:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  check:").next())
+        .expect("the agents-stale job is missing");
+    assert!(
+        job.lines().all(|l| !l.trim_start().starts_with("if:")),
+        "the agents-stale job must not have an `if:` line"
+    );
+    // The step sits in a job of the same reusable workflow, so release.yml's check job fails with it.
+    assert!(
+        text.contains("agents-stale:\n    name:"),
+        "the agents-stale job is missing"
+    );
 }
 
 #[test]

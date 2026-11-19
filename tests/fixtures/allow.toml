@@ -89,6 +89,283 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 
 [[allow]]
 rule = "host"
+value = "cilium.io"
+reason = "An API group name of the Cilium network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.projectcalico.org"
+reason = "An API group name of the Calico network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "crd.antrea.io"
+reason = "An API group name of the Antrea network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.ovn.org"
+reason = "An API group name of the OVN-Kubernetes network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+value = "k8s.cni.cncf.io"
+reason = "An API group name of the Multus network plugin that discovery lists, not a host a test contacts (k8s.cni)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-explicit-upstream/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-no-finish-time/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-old/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-oom/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-skew/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/cut/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/default-replicas/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/domain-other/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/kubeadm-ok/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/kubeadm-restarts-recent-but-running/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/label-noise/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/loop-crashloop/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/loop-without-loop-plugin/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/nodelocal/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/not-ready/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/scaled-to-zero/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-forbidden/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-headless/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-missing/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-no-port/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-no-tcp/api/configmap.json"
+value = "in-addr.arpa"
+reason = "The IPv4 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-explicit-upstream/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-no-finish-time/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-old/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-oom/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/crashloop-skew/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/cut/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/default-replicas/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/domain-other/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/kubeadm-ok/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/kubeadm-restarts-recent-but-running/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/label-noise/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/loop-crashloop/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/loop-without-loop-plugin/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/nodelocal/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/not-ready/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/scaled-to-zero/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-forbidden/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-headless/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-missing/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-no-port/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.dns/service-no-tcp/api/configmap.json"
+value = "ip6.arpa"
+reason = "The IPv6 reverse zone that the kubernetes plugin line of this Corefile names; a reserved zone, not a host a test contacts (k8s.dns)"
+
+[[allow]]
+rule = "host"
 path = "tests/fixtures/reports/golden/five-sections-exec-plugin.html"
 value = "getrdy.io"
 reason = "The product's own site: the report page holds its footer link on purpose (07 D.4), not a host a test contacts"
@@ -115,6 +392,39 @@ reason = "The product's own site: the report page holds its footer link on purpo
 rule = "host"
 value = "metadata.name"
 reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"
+
+[[allow]]
+rule = "host"
+value = "nginx.org"
+reason = "The controller name of the F5 NGINX ingress controller (nginx.org/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "traefik.io"
+reason = "The controller name of Traefik (traefik.io/ingress-controller) that an IngressClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/gateway-istio/api/gatewayclasses.json"
+value = "istio.io"
+reason = "The controller name of the Istio Gateway API class (istio.io/gateway-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+value = "gateway.envoyproxy.io"
+reason = "The controller name of the Envoy Gateway class (gateway.envoyproxy.io/gatewayclass-controller) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/gateway-gke/api/gatewayclasses.json"
+value = "networking.gke.io"
+reason = "The controller name of the GKE Gateway class (networking.gke.io/gateway) that a GatewayClass carries, not a host a test contacts (k8s.ingress)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/lb-metallb/api/discovery-apis.json"
+value = "metallb.io"
+reason = "The API group of MetalLB's custom resources, listed in the group discovery document, not a host a test contacts (k8s.ingress)"
 
 [[allow]]
 rule = "ip"
@@ -242,3 +552,9 @@ rule = "host"
 path = "tests/fixtures/readme/refusal-unsigned.txt"
 value = "docs.getrdy.io"
 reason = "The 07 C.5 refusal fix line names the product's own docs page (docs.getrdy.io/unsigned) on purpose, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/checks/k8s.ingress/aks-app-routing/api/ingressclasses.json"
+value = "webapprouting.kubernetes.azure.com"
+reason = "The name of the IngressClass that AKS application routing creates, not a host a test contacts (k8s.ingress)"

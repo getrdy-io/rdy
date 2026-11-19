@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-warn-only"
+summary = "Everything is served, and one operator is not ready"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-kubeadm-restarts-recent-but-running"
+summary = "A ready pod whose last run ended 5 minutes ago and is Running again"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

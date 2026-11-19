@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/azure-npm"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"azure-npm\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "azure-npm",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

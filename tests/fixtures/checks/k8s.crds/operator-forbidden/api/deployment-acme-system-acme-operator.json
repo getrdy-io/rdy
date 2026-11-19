@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/acme-system/deployments/acme-operator"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "deployments.apps \"acme-operator\" is forbidden: User \"acme-installer\" cannot get resource \"deployments\" in API group \"apps\" in the namespace \"acme-system\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

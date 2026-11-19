@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-classes-hostile"
+summary = "A class with a hostile name and a hostile controller"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

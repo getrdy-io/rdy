@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-any-version"
+summary = "The definition is served at v1beta1 and not at the preferred v1, and the spec names no version"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

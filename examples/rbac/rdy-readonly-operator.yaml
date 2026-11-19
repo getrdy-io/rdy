@@ -1,0 +1,40 @@
+# OPTIONAL: lets rdy read one operator Deployment, for the `k8s.crds` check. This is a template.
+#
+# `k8s.crds` reads the replica counts, the image tags and the version label of each operator that the
+# vendor's spec names. Without this Role it still checks the CRDs, and reports each operator as not
+# evaluated with a hint to check by hand. The Deployment spec holds environment values, which often hold
+# credentials. rdy drops them while parsing, but the grant is the grant, so it is a Role of one namespace
+# and one name, `get` only, and the main file does not hold it.
+#
+# Use it once per operator in the vendor's spec (`operators:` of the `k8s.crds` entry):
+#   sed -e 's/<operator-namespace>/cert-manager/g' -e 's/<operator-deployment>/cert-manager/g' \
+#     rdy-readonly-operator.yaml | kubectl apply -f -
+# Apply rdy-readonly.yaml first: the binding names its service account. Delete the Role and the binding
+# when you are done.
+#
+# Check it: kubectl auth can-i get deployments.apps/<operator-deployment> -n <operator-namespace> \
+#   --as=system:serviceaccount:rdy-system:rdy-readonly
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-operator
+  namespace: <operator-namespace>
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["<operator-deployment>"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-operator
+  namespace: <operator-namespace>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-operator
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
