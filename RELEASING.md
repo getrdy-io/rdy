@@ -35,7 +35,9 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
 1. **Preflight.** `main` is green. The checks in `.github/workflows/ci.yml` passed on the last merge
    commit. The `kind` workflow (`.github/workflows/kind.yml`, live Kubernetes tests, not a required
    check: ADR 0039) is green on that same commit, or on the nightly run after it. A red `kind` run means
-   the client or the read-only role broke against a real API server. Fix it before you tag. No release PR
+   the client or the read-only role broke against a real API server. The `macos-intel` workflow
+   (`.github/workflows/macos-intel.yml`, the x86_64-apple-darwin tests, not a required check: ADR 0050)
+   is green on that same commit, or on the nightly run after it. Fix a red run of either before you tag. No release PR
    is open.
 2. **Release PR.** Branch `release/v0.1.0-alpha.1` from `main`, one commit.
    - Set `version` in `crates/rdy-cli/Cargo.toml` to `0.1.0-alpha.1`. The tag must equal the `rdy` package
@@ -120,7 +122,7 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    ```sh
    dest=$(mktemp -d)
    PATH="$HOME/.cargo/bin:$PATH" RDY_INSTALL_DIR="$dest" sh -c \
-     "curl --proto '=https' --tlsv1.2 -sSf https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/install.sh | sh"
+     "curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/install.sh | sh"
    echo "exit $?"        # must be 0
    "$dest/rdy" version   # rdy 0.1.0-alpha.1
    ```

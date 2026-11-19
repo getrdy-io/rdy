@@ -42,6 +42,15 @@ static RDY_SHARE_TOKEN: LazyLock<Result<Regex, regex::Error>> =
 static JWT: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*"));
 
+/// The bearer token `aws eks get-token` prints: `k8s-aws-v1.` and the base64url of a presigned STS URL. It
+/// is a credential for the cluster for about 15 minutes, and a kubeconfig plugin hands it to kube.
+static EKS_TOKEN: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"k8s-aws-v1\.[A-Za-z0-9_-]{16,}"));
+
+/// A Google OAuth access token, which `gke-gcloud-auth-plugin` prints: `ya29.` and base64url text.
+static GOOGLE_ACCESS_TOKEN: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"ya29\.[A-Za-z0-9._-]{16,}"));
+
 /// Pushes every match of `pattern`. A pattern that failed to compile (a bug a unit test catches) removes
 /// the whole text.
 fn find_all(
@@ -65,9 +74,12 @@ pub(super) fn find_rdy_share_token(text: &str, out: &mut Vec<Range<usize>>) {
     find_all(&RDY_SHARE_TOKEN, text, out);
 }
 
-/// JSON Web Tokens, such as a service account token in an error text.
+/// JSON Web Tokens, such as a service account token in an error text, and the two cloud plugin tokens
+/// that are not JWTs: EKS `k8s-aws-v1.` and Google `ya29.` (M1-107). They share the `jwt` rule.
 pub(super) fn find_jwt(text: &str, out: &mut Vec<Range<usize>>) {
     find_all(&JWT, text, out);
+    find_all(&EKS_TOKEN, text, out);
+    find_all(&GOOGLE_ACCESS_TOKEN, text, out);
 }
 
 /// A private key block: from `-----BEGIN <label>-----` through `-----END <label>-----`, where the label

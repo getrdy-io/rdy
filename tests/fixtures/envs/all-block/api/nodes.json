@@ -1,0 +1,86 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-node-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.24.9",
+            "kubeProxyVersion": "v1.24.9",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-node-2",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.24.9",
+            "kubeProxyVersion": "v1.24.9",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-node-3",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.24.9",
+            "kubeProxyVersion": "v1.24.9",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}

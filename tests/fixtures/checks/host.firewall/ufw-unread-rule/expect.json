@@ -13,7 +13,7 @@
         10250
       ]
     },
-    "fix": "Run `ufw status verbose` as root and check that 6443/tcp and 10250/tcp is allowed.",
+    "fix": "Run `ufw status verbose` as root and check that 6443/tcp and 10250/tcp are allowed.",
     "level": "warn",
     "message": "Cannot confirm 6443/tcp and 10250/tcp in ufw: a rule line is not in the form rdy reads.",
     "notes": [
@@ -24,16 +24,18 @@
         {
           "interface": "eth0",
           "manager": "ufw",
-          "ports": {
-            "10250": {
+          "ports": [
+            {
               "detail": "a rule line is not in the form rdy reads",
+              "port": 6443,
               "verdict": "unknown"
             },
-            "6443": {
+            {
               "detail": "a rule line is not in the form rdy reads",
+              "port": 10250,
               "verdict": "unknown"
             }
-          },
+          ],
           "zone": null
         }
       ]

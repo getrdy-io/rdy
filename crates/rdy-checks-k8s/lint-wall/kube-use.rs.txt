@@ -1,8 +1,9 @@
 // The use file for the kube entries of the lint wall. It is NOT compiled here: the `.txt` name keeps
 // cargo away from it, and `Cargo.toml` leaves it out of the published package.
 //
-// It exists for M1-107 (backlog correction-11), which carries the proof that the kube entries of
-// `../clippy.toml` still bite. M1-044 builds the lint-wall test crate for the std and facade entries.
+// It is the proof that the kube entries of `../clippy.toml` still bite (M1-107, backlog correction-11).
+// `tests/lint-wall` includes it as a module under its `use-kube` feature, and `tests/kube_wall.rs` runs
+// clippy over it and checks every `// EXPECT` line. M1-044 proves the std and facade entries the same way.
 //
 // How to use it:
 //
@@ -18,9 +19,9 @@
 //   5. When a kube bump renames or removes an item, clippy warns that the path does not exist. Fix
 //      `../clippy.toml` and this file together.
 //
-// Last run: 2026-10-29 against kube 4.2.0, clippy 0.1.99. All `// EXPECT` lines fired.
+// Last run: 2026-11-17 against kube 4.2.0, clippy 1.99.1, by `tests/lint-wall/tests/kube_wall.rs`. All `// EXPECT` lines fired.
 
-#![allow(unused, clippy::let_underscore_future)]
+#![allow(unused, clippy::let_underscore_future, clippy::unwrap_used)]
 
 use std::convert::Infallible;
 

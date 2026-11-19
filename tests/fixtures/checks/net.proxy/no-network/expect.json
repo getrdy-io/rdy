@@ -1,0 +1,74 @@
+{
+  "entry": {
+    "id": "net.proxy"
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "The proxy `http://proxy.acme.test:3128` from HTTPS_PROXY is set and nothing in the settings conflicts.",
+    "notes": [
+      "NO_PROXY is not set, so every destination, cluster-internal ones included, goes through the proxy."
+    ],
+    "observed": {
+      "conflicts": [],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "sources": "/etc/systemd/system/docker.service.d/http-proxy.conf",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "set": false
+      },
+      "no_proxy_coverage": [],
+      "os": "linux",
+      "reach": {
+        "state": "not_tried",
+        "why": "--no-network is set"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        }
+      ]
+    },
+    "partial": {
+      "missing": [
+        "Network"
+      ],
+      "note": "the proxy was not contacted: --no-network is set"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "fieldSelector=status.phase!=Succeeded,status.phase!=Failed&labelSelector=k8s-app=kube-dns&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": []
+  }
+}

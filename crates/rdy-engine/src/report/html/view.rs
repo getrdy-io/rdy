@@ -22,6 +22,33 @@ pub(super) const LEGEND: &str =
 /// How the verdict is decided, in plain words (01 section 6 item 2, 07 D.7).
 pub(super) const RULE: &str = "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.";
 
+/// The sentence after "What to do next" that is the same for every verdict (07 D.7).
+pub(super) const SHARE: &str = "To share this result, send the .json file from the same folder.";
+
+/// What to do next, by verdict (07 D.7). Fixed product text, so it is not shown in `<bdi>`.
+fn next_step(
+    verdict: Verdict,
+    reason: Option<&rdy_spec::result::VerdictReason>,
+    summary: &Summary,
+) -> String {
+    use rdy_spec::result::VerdictReason;
+    match (verdict, reason) {
+        (Verdict::Ready, _) => "Everything the spec asks for passed.".to_owned(),
+        (Verdict::ReadyWithWarnings, Some(VerdictReason::NothingVerified)) => "rdy checked nothing on this machine. Each check in the spec is for another OS, or is optional and was not run. Ask the vendor if that is expected, or follow the fix for each skipped check.".to_owned(),
+        (Verdict::ReadyWithWarnings, _) => "Nothing blocks the install. Read the warnings.".to_owned(),
+        _ if summary.block > 0 => format!(
+            "Fix the {} {} below, then run rdy again.",
+            summary.block,
+            if summary.block == 1 { "block" } else { "blocks" }
+        ),
+        _ => format!(
+            "rdy could not check {} required {}. Follow the fix for each, then run rdy again.",
+            summary.required_not_run,
+            if summary.required_not_run == 1 { "item" } else { "items" }
+        ),
+    }
+}
+
 /// A banner at the top of the page.
 pub(super) struct Banner {
     /// The first line, in capitals.
@@ -36,8 +63,9 @@ pub(super) struct Line {
 }
 
 /// A piece of a line. `untrusted` text is shown in `<bdi>`, which limits how far a bidi control in it can
-/// reorder the words around it. A U+2069 inside the text can still close the isolate early, so M1-141
-/// escapes the controls (SEC-149-11). Our own words stay outside the `<bdi>`.
+/// reorder the words around it. A U+2069 inside the text can still close the isolate early, so the text is
+/// made with [`shown`], which writes every format character as an escape (M1-141, SEC-149-11). Our own
+/// words stay outside the `<bdi>`.
 #[derive(Clone)]
 pub(super) struct Span {
     pub text: String,
@@ -68,15 +96,20 @@ impl Span {
 
     fn untrusted(text: &str) -> Self {
         Self {
-            text: text.to_owned(),
+            text: shown(text).as_str().to_owned(),
             untrusted: true,
         }
     }
 }
 
 mod actions;
+mod facts;
+mod shown;
+
+pub(super) use shown::{Shown, shown};
 
 use actions::ActionLog;
+use facts::{Fact, facts};
 
 /// One section of checks, from one [`BucketGroup`].
 pub(super) struct Section {
@@ -95,14 +128,14 @@ pub(super) struct PartialView {
     /// "Checked in part. Could not read: ...", with the names that came from the report marked.
     pub summary: Vec<Span>,
     /// The check's own note, which can be empty.
-    pub note: String,
+    pub note: Shown,
 }
 
 /// A fix and who it is from.
 pub(super) struct FixView {
     /// "From acme-platform", "From the spec file (not verified)" or "From rdy". The product is untrusted.
     pub label: Vec<Span>,
-    pub text: String,
+    pub text: Shown,
 }
 
 /// One check.
@@ -113,57 +146,80 @@ pub(super) struct CheckView {
     pub status_word: &'static str,
     /// The class that draws the left border.
     pub status_class: &'static str,
-    pub id: String,
-    pub name: Option<String>,
-    pub message: String,
+    pub id: Shown,
+    pub name: Option<Shown>,
+    pub message: Shown,
     /// Why a check that did not run did not run.
     pub not_run_reason: Option<Vec<Span>>,
+    /// "required by acme-platform", or "required by the spec file" when the signature is not verified
+    /// by a pinned key, on a required check that did not run (01 section 6, 07 D.7).
+    pub required_by: Option<Vec<Span>>,
     pub fix: Option<FixView>,
-    pub builtin_fix: Option<String>,
+    pub builtin_fix: Option<Shown>,
+    /// What the check saw (`observed`), as labels and plain values.
+    pub found: Vec<Fact>,
+    /// What the check wanted (`expected`).
+    pub needed: Vec<Fact>,
+    /// Fact lines the page size cap left out of this check (07 D.4). The embedded JSON has them.
+    pub facts_more: usize,
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
     pub partial: Option<PartialView>,
-    pub notes: Vec<String>,
+    pub notes: Vec<Shown>,
     /// How long the check took. Left out for a check that did not run, where it is always zero.
     pub took_ms: Option<u64>,
 }
 
 /// A row of the capabilities table.
 pub(super) struct CapabilityView {
-    pub label: String,
+    pub label: Shown,
     pub state: &'static str,
-    pub detail: String,
-    pub hint: String,
+    pub detail: Shown,
+    pub hint: Shown,
 }
 
 /// A label and its value in the run and spec details.
 pub(super) struct Row {
     pub label: &'static str,
-    pub value: String,
+    pub value: Shown,
 }
 
 /// Everything the template prints. `templates/report.html` is compiled against these fields.
 #[derive(Template)]
 #[template(path = "report.html")]
 pub(super) struct View {
-    pub product: String,
-    /// The product for the `<title>`, which cannot hold `<bdi>`: wrapped in Unicode isolates instead.
+    pub product: Shown,
+    /// The product for the `<title>`, which cannot hold `<bdi>`: the escaped product between one U+2068
+    /// and one U+2069 of ours. It is a `String` because those two are the only format characters the page
+    /// writes raw, and `shown` would escape them. It is built from a `Shown` only.
     pub title_product: String,
-    pub version: Option<String>,
+    pub version: Option<Shown>,
     pub serial: Option<u64>,
-    pub hostname: String,
+    pub hostname: Shown,
     pub verdict_word: String,
     pub verdict_class: &'static str,
     pub summary_line: String,
     /// True when no check has status block: the header then says "No blocks." (07 D.7).
     pub no_blocks: bool,
+    /// "What to do next" for this verdict (07 D.7).
+    pub next_step: String,
+    /// The sentence on how to share the result, the same for every verdict (07 D.7).
+    pub share: &'static str,
+    /// The spec's `metadata.contact`, shown as plain text, never a link. It comes from the
+    /// spec, so the template wraps it in `<bdi>`.
+    pub contact: Option<Shown>,
     pub legend: &'static str,
     pub rule: &'static str,
-    pub run_when: String,
-    pub rdy_version: String,
-    pub user: Option<String>,
+    pub run_when: Shown,
+    pub rdy_version: Shown,
+    pub user: Option<Shown>,
     pub run_as: &'static str,
     pub banners: Vec<Banner>,
+    /// Our own banner titles joined, which print in the top margin of every page, or `None` with no
+    /// banner. Only fixed words: never text from the report.
+    pub print_mark: Option<String>,
+    /// `https://getrdy.io/?ref=report&product=<product>`: the only link out, with the product encoded.
+    pub product_link: String,
     pub sections: Vec<Section>,
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
@@ -176,7 +232,42 @@ pub(super) struct View {
     pub json_sha256: String,
 }
 
+/// The Found and Needed lists of every check, in page order: what the size cap starts from.
+pub(super) type FactLists = Vec<(Vec<Fact>, Vec<Fact>)>;
+
 impl View {
+    /// A copy of every check's Found and Needed lists.
+    pub(super) fn fact_lists(&self) -> FactLists {
+        self.sections
+            .iter()
+            .flat_map(|section| &section.checks)
+            .map(|check| (check.found.clone(), check.needed.clone()))
+            .collect()
+    }
+
+    /// Keeps the first `keep` fact lines of `all` (counting Found, then Needed, check by check) and
+    /// counts the rest on the check as left out. This is how the page stays under its size cap when the
+    /// action rows are gone and it is still over (07 D.4).
+    pub(super) fn keep_fact_lines(&mut self, all: &FactLists, keep: usize) {
+        let mut budget = keep;
+        let checks = self
+            .sections
+            .iter_mut()
+            .flat_map(|section| section.checks.iter_mut());
+        for (check, (found, needed)) in checks.zip(all) {
+            let before: usize = found.iter().chain(needed).map(|f| f.lines.len()).sum();
+            check.found = take_lines(found, &mut budget);
+            check.needed = take_lines(needed, &mut budget);
+            let after: usize = check
+                .found
+                .iter()
+                .chain(&check.needed)
+                .map(|f| f.lines.len())
+                .sum();
+            check.facts_more = before - after;
+        }
+    }
+
     /// Builds the page for `report`. The verdict and the counts come from the check results through the
     /// same rule as the terminal, never from the stored `verdict`; the sections come from
     /// [`group_by_bucket`], so the HTML, the terminal and the portal share one order (01 section 5.2).
@@ -200,40 +291,47 @@ impl View {
             // `Verdict` is non_exhaustive. A verdict this version does not know is the worst case.
             _ => "verdict-not-ready",
         };
+        let banners = banners(report);
+        let summary = Summary::from_checks(&report.checks);
         Ok(Self {
-            product: report.spec.product.clone(),
-            title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
-            version: report.spec.version.clone(),
+            product: shown(&report.spec.product),
+            title_product: format!("\u{2068}{}\u{2069}", shown(&report.spec.product)),
+            version: report.spec.version.as_deref().map(shown),
             serial: report.spec.serial,
-            hostname: report.host.hostname.clone(),
+            hostname: shown(&report.host.hostname),
             // The terminal's words: `READY`, `READY with warnings`, `NOT READY` (ADR 0003 decision 6).
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
             summary_line: summary_line(&report.checks),
-            no_blocks: Summary::from_checks(&report.checks).block == 0,
+            no_blocks: summary.block == 0,
+            next_step: next_step(judgement.verdict, judgement.reason.as_ref(), &summary),
+            share: SHARE,
+            contact: report.spec.contact.as_deref().map(shown),
             legend: LEGEND,
             rule: RULE,
-            run_when: utc_text(&report.run.started_at),
-            rdy_version: report.producer.version.clone(),
-            user: report.identity.user.clone(),
+            run_when: shown(&utc_text(&report.run.started_at)),
+            rdy_version: shown(&report.producer.version),
+            user: report.identity.user.as_deref().map(shown),
             run_as: if report.identity.elevated {
                 "root"
             } else {
                 "not root"
             },
-            banners: banners(report),
+            product_link: product_link(&report.spec.product),
+            print_mark: print_mark(&banners),
+            banners,
             sections: group_by_bucket(&report.checks)
                 .iter()
-                .map(|group| section(report, group))
+                .map(|group| section(report, &on_page, group))
                 .collect(),
             capabilities: report
                 .capabilities
                 .iter()
                 .map(|cap| CapabilityView {
-                    label: need_label(&cap.need, cap.name.as_deref()),
+                    label: shown(&need_label(&cap.need, cap.name.as_deref())),
                     state: available_word(cap.available),
-                    detail: cap.detail.clone().unwrap_or_default(),
-                    hint: cap.hint.clone().unwrap_or_default(),
+                    detail: shown(cap.detail.as_deref().unwrap_or_default()),
+                    hint: shown(cap.hint.as_deref().unwrap_or_default()),
                 })
                 .collect(),
             details: details(report),
@@ -242,6 +340,23 @@ impl View {
             json_sha256,
         })
     }
+}
+
+/// The first lines of `facts` that fit in `budget`, which is used up as they are taken.
+fn take_lines(facts: &[Fact], budget: &mut usize) -> Vec<Fact> {
+    let mut out = Vec::new();
+    for fact in facts {
+        let take = fact.lines.len().min(*budget);
+        if take == 0 {
+            break;
+        }
+        *budget -= take;
+        out.push(Fact {
+            label: fact.label.clone(),
+            lines: fact.lines[..take].to_vec(),
+        });
+    }
+    out
 }
 
 /// The embedded result, printed raw. It is the one value in the page that skips askama's escaping, and
@@ -269,6 +384,34 @@ fn sha256_hex(bytes: &[u8]) -> String {
         out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
     }
     out
+}
+
+/// The link in the footer. It holds `ref=report` and the product, which the spec already shows, and
+/// nothing else: no run id, host, version or date (ADR 0003 decision 8). The product is percent-encoded,
+/// so nothing in it can add a parameter or a character the page would have to escape.
+fn product_link(product: &str) -> String {
+    let mut link = String::from("https://getrdy.io/?ref=report&product=");
+    for byte in product.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            link.push(char::from(byte));
+        } else {
+            link.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    link
+}
+
+/// The words that print in the top margin of every page when the page has a banner (07 D.3). They are the
+/// titles of the banners, which are fixed text of ours, so a printed page 2 still says that the spec was
+/// not verified. Text from the report never goes here.
+fn print_mark(banners: &[Banner]) -> Option<String> {
+    (!banners.is_empty()).then(|| {
+        banners
+            .iter()
+            .map(|banner| banner.title)
+            .collect::<Vec<_>>()
+            .join(" / ")
+    })
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).
@@ -337,13 +480,27 @@ fn key_is_pinned(report: &Report) -> bool {
         )
 }
 
+/// Who requires a check that is required and did not run. The product name is the vendor's own claim, so
+/// it is named only when the signature verified and the key is pinned (01 section 2.6), like a fix.
+fn required_by(report: &Report, check: &CheckResult) -> Option<Vec<Span>> {
+    match check.bucket {
+        Bucket::Blocker | Bucket::Warning | Bucket::Passed | Bucket::NotApplicable => None,
+        // `required_not_run`, and a bucket this version does not know, which sits with it.
+        _ if key_is_pinned(report) => Some(vec![
+            Span::own("required by "),
+            Span::untrusted(&report.spec.product),
+        ]),
+        _ => Some(vec![Span::own("required by the spec file")]),
+    }
+}
+
 /// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
 /// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
 /// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
 /// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
 /// for the vendor's.
 fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
-    let text = check.fix.clone()?;
+    let text = shown(check.fix.as_deref()?);
     let label = match &check.fix_source {
         Some(FixSource::Rdy) => vec![Span::own("From rdy")],
         Some(FixSource::FromSpec) if key_is_pinned(report) => {
@@ -365,7 +522,7 @@ pub(super) fn short_fingerprint(fingerprint: &str) -> String {
     format!("{head}...{tail}")
 }
 
-fn section(report: &Report, group: &BucketGroup<'_>) -> Section {
+fn section(report: &Report, on_page: &Report, group: &BucketGroup<'_>) -> Section {
     let (id, title, nav_title) = match group.bucket {
         Bucket::Blocker => ("blocks", "Blocks", "Blocks"),
         Bucket::Warning => (
@@ -393,12 +550,33 @@ fn section(report: &Report, group: &BucketGroup<'_>) -> Section {
         checks: group
             .checks
             .iter()
-            .map(|check| check_view(report, check))
+            .map(|check| check_view(report, on_page, check))
             .collect(),
     }
 }
 
-fn check_view(report: &Report, check: &CheckResult) -> CheckView {
+/// The check of `on_page`, the report the JSON holds, that is `check` of `report`. Found and Needed come
+/// from it, never from `check`: the JSON writer cuts text, nesting and whole maps, and the page must not
+/// show what the embedded JSON dropped (SEC-81).
+fn on_page_check<'a>(
+    on_page: &'a Report,
+    index: usize,
+    check: &CheckResult,
+) -> Option<&'a CheckResult> {
+    on_page
+        .checks
+        .get(index)
+        .filter(|candidate| candidate.key == check.key && candidate.id == check.id)
+}
+
+fn check_view(report: &Report, on_page: &Report, check: &CheckResult) -> CheckView {
+    let index = index_of(report, check);
+    let in_json = on_page_check(on_page, index, check);
+    // The writer keeps every check in order, so a miss is a bug. In release the lists are left out.
+    debug_assert!(
+        in_json.is_some(),
+        "check {index} is not in the report the JSON holds"
+    );
     let (status_word, status_class) = match check.status {
         Status::Pass => ("PASS", "status-pass"),
         Status::Warn => ("WARN", "status-warn"),
@@ -410,15 +588,19 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         _ => ("NOT RUN", "status-skip"),
     };
     CheckView {
-        index: index_of(report, check),
+        index,
         status_word,
         status_class,
-        id: check.id.clone(),
-        name: check.name.clone(),
-        message: check.message.clone(),
+        id: shown(&check.id),
+        name: check.name.as_deref().map(shown),
+        message: shown(&check.message),
         not_run_reason: not_run_reason(check),
+        required_by: required_by(report, check),
         fix: fix_view(report, check),
-        builtin_fix: check.builtin_fix.clone(),
+        builtin_fix: check.builtin_fix.as_deref().map(shown),
+        found: facts(in_json.and_then(|c| c.observed.as_ref())),
+        needed: facts(in_json.and_then(|c| c.expected.as_ref())),
+        facts_more: 0,
         requires: check
             .needs
             .iter()
@@ -450,10 +632,10 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
             };
             PartialView {
                 summary,
-                note: partial.note.clone(),
+                note: shown(&partial.note),
             }
         }),
-        notes: check.notes.clone(),
+        notes: check.notes.iter().map(|note| shown(note)).collect(),
         took_ms: (!matches!(check.status, Status::Skipped)).then_some(check.duration_ms),
     }
 }
@@ -584,7 +766,10 @@ fn details(report: &Report) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut add = |label: &'static str, value: Option<String>| {
         if let Some(value) = value {
-            rows.push(Row { label, value });
+            rows.push(Row {
+                label,
+                value: shown(&value),
+            });
         }
     };
     let run = &report.run;
@@ -704,4 +889,51 @@ fn details(report: &Report) -> Vec<Row> {
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/reports/not-ready-7.2.json");
+        let text = std::fs::read_to_string(path).expect("the sample report is in the repo");
+        serde_json::from_str(&text).expect("the sample is JSON")
+    }
+
+    /// The print rule puts `print_mark` in a CSS string. The template escapes HTML but does not escape
+    /// CSS, so every banner title must be capitals, spaces and colons, and nothing else.
+    #[test]
+    fn every_banner_title_is_capitals_spaces_and_colons() {
+        let mut titles = Vec::new();
+        for (unsigned, complete) in [(true, true), (false, true), (false, false), (true, false)] {
+            let mut doc = sample();
+            if unsigned {
+                doc["signature"] = serde_json::json!({"state": "unsigned"});
+            } else {
+                // Verified with a key given for one run: the not-pinned banner.
+                doc["signature"]["trust_source"] = serde_json::json!("flag");
+            }
+            doc["complete"] = serde_json::json!(complete);
+            let report: Report = serde_json::from_value(doc).expect("a report");
+            titles.extend(banners(&report).iter().map(|banner| banner.title));
+        }
+        for expected in [
+            "WARNING: UNSIGNED SPEC",
+            "WARNING: KEY NOT PINNED",
+            "INCOMPLETE",
+        ] {
+            assert!(titles.contains(&expected), "{expected} is not a title");
+        }
+        for title in titles {
+            assert!(
+                !title.is_empty()
+                    && title
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c == ' ' || c == ':'),
+                "{title:?} is not safe in a CSS string"
+            );
+        }
+    }
 }

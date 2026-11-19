@@ -10,26 +10,45 @@ nextest-version = "0.9.145"
 # minutes instead of two, and run one at a time so they do not fight over the target directory.
 # Every other test keeps the default limit. Name a new trybuild test binary `*_guarantee`.
 #
-# Tests at the real key derivation cost (scrypt N = 2^20, 1 GiB, a second or two each) run one at a
-# time too (M1-125, ADR 0022). nextest runs every test in its own process, so the mutexes inside the
-# test binaries do not stop two of them from running together. This group does. Add a test that
-# derives a key at `KdfCost::STANDARD` to the filter in `profile.default` below.
+# Tests that run the real key derivation (scrypt N = 2^20, 1 GiB, a second or two each) run one at a
+# time (M1-125, ADR 0022). nextest runs every test in its own process, so the mutex inside a test binary
+# does not stop two of its tests from running together. This group does that job for the binaries it
+# lists in the filter below. Add a binary or a test that derives a key at `KdfCost::STANDARD` to it.
 [test-groups]
 trybuild = { max-threads = 1 }
 real-kdf = { max-threads = 1 }
 etc-rdy = { max-threads = 1 }
+pty-probe = { max-threads = 1 }
+spec-read = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | test(a_key_made_at_the_standard_cost)'
+filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | binary(sign_verify_page) | test(a_key_made_at_the_standard_cost)'
 test-group = 'real-kdf'
 # One key derivation takes a few seconds on a busy runner. This is the slack for a slow one.
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# The spec-read tests time each exit at one second (M1-183). One at a time, so a busy runner does not
+# make a correct exit look slow.
+[[profile.default.overrides]]
+filter = 'binary(spec_read_special) | binary(spec_read_special_windows)'
+test-group = 'spec-read'
+
+# The prompt_pty tests run the `prompt_probe` example, and each test process runs its own nested
+# `cargo build` of it first (the Once and the mutex in the test file only cover one process). Twelve
+# processes at once queue on the cargo lock, and on the Intel macOS runner the build alone can pass the
+# default 120 s limit, so four tests were killed together with no panic text (PRs #27 and #35). One at a
+# time, the first test builds and the rest find a fresh binary. The longer limit is only for that first
+# build: a hung pty read still fails after 20 s on its own deadline (TIMEOUT_MS in the test file).
+[[profile.default.overrides]]
+filter = 'binary(prompt_pty)'
+test-group = 'pty-probe'
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 # Root tests that use the real `/etc/rdy` (M1-131): one asserts `/etc/rdy/trust.yaml` is absent while the
 # other creates it, and nextest runs each test in its own process, so they must not overlap. Add a root
 # test that touches `/etc/rdy` to the filter below.
 [[profile.default.overrides]]
-filter = 'binary(trust_commands) & test(/(^|::)root_[^:]*$/)'
+filter = '(binary(trust_commands) | binary(root_trust_strace)) & test(/(^|::)root_[^:]*$/)'
 test-group = 'etc-rdy'
 
 # Root tests. Convention (docs/plan/08-testing.md, section 6): a test that needs uid 0 has a name whose
@@ -57,6 +76,13 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 # takes a minute or two on a cold runner. The later three take a few seconds. It is killed at five minutes.
 [[profile.ci.overrides]]
 filter = 'binary(clippy_wall)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The kube entries of the lint wall (tests/lint-wall/tests/kube_wall.rs, M1-107) run `cargo clippy` over a
+# fixture under the k8s clippy.toml, the same way. On the Intel macOS runner that passed the default two
+# minutes, so it gets the same five.
+[[profile.ci.overrides]]
+filter = 'binary(kube_wall)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
 # The spec parser's property tests (crates/rdy-spec/tests/parse_properties.rs, 08 section 4) run 10,000

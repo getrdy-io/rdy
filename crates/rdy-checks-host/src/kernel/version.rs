@@ -5,6 +5,15 @@
 //! machine reports more: a distribution suffix (`.el9`), an architecture (`.x86_64`), a flavour
 //! (`-generic`, `-aws`). The reader takes the leading numbers before and after the first `-` and drops
 //! the rest. Comparing is the shared dotted compare, part by part as numbers, never as semver.
+//!
+//! **A release candidate meets its base.** `6.1.0-rc3` reads as base `6.1.0` with no build number, so it
+//! meets a `min` of `6.1.0` (and of anything lower), as the final `6.1.0` does. A `min` with a build
+//! number (`6.1.0-5`) cannot be compared to it and warns.
+//!
+//! **The build number belongs to a kernel flavour.** `5.14.0-362` is a Red Hat build, `5.15.0-91` is an
+//! Ubuntu build, and the numbers mean nothing across the two. A `min` that carries a build number
+//! therefore only makes sense for one distribution, so a spec that needs one sets it in `distro_min`
+//! for that distribution and leaves `min` to the upstream numbers.
 
 use std::cmp::Ordering;
 

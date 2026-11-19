@@ -1,0 +1,131 @@
+{
+  "entry": {
+    "id": "net.proxy",
+    "required_no_proxy": [
+      ".svc",
+      ".cluster.local",
+      "10.0.0.0/8",
+      "172.16.0.0/12"
+    ]
+  },
+  "result": {
+    "expected": {
+      "daemons_need_proxy": false,
+      "required_no_proxy": [
+        ".svc",
+        ".cluster.local",
+        "10.0.0.0/8",
+        "172.16.0.0/12"
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "The proxy `http://proxy.acme.test:3128` from HTTPS_PROXY is reachable, and NO_PROXY and the daemons agree with it.",
+    "notes": [],
+    "observed": {
+      "conflicts": [],
+      "daemons": [
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": 4,
+          "present": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "sources": "/etc/systemd/system/docker.service.d/http-proxy.conf",
+          "unit": "docker",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "containerd",
+          "unreadable": false
+        },
+        {
+          "environment_files_not_read": "",
+          "no_proxy_entries": null,
+          "present": false,
+          "sources": "",
+          "unit": "kubelet",
+          "unreadable": false
+        }
+      ],
+      "no_proxy": {
+        "entries": 4,
+        "set": true,
+        "truncated": false,
+        "var": "NO_PROXY"
+      },
+      "no_proxy_coverage": [
+        {
+          "by": ".svc",
+          "covered": true,
+          "entry": ".svc",
+          "scope": "shell"
+        },
+        {
+          "by": ".cluster.local",
+          "covered": true,
+          "entry": ".cluster.local",
+          "scope": "shell"
+        },
+        {
+          "by": "10.0.0.0/8",
+          "covered": true,
+          "entry": "10.0.0.0/8",
+          "scope": "shell"
+        },
+        {
+          "by": "172.16.0.0/12",
+          "covered": true,
+          "entry": "172.16.0.0/12",
+          "scope": "shell"
+        },
+        {
+          "by": ".svc",
+          "covered": true,
+          "entry": ".svc",
+          "scope": "docker"
+        },
+        {
+          "by": ".cluster.local",
+          "covered": true,
+          "entry": ".cluster.local",
+          "scope": "docker"
+        },
+        {
+          "by": "10.0.0.0/8",
+          "covered": true,
+          "entry": "10.0.0.0/8",
+          "scope": "docker"
+        },
+        {
+          "by": "172.16.0.0/12",
+          "covered": true,
+          "entry": "172.16.0.0/12",
+          "scope": "docker"
+        }
+      ],
+      "os": "linux",
+      "reach": {
+        "ms": 0,
+        "proxy": "http://proxy.acme.test:3128",
+        "state": "connected"
+      },
+      "shell_proxy": {
+        "proxy": "http://proxy.acme.test:3128",
+        "var": "HTTPS_PROXY"
+      },
+      "variables": [
+        {
+          "has_user_info": true,
+          "proxy": "http://proxy.acme.test:3128",
+          "state": "proxy",
+          "var": "HTTPS_PROXY"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

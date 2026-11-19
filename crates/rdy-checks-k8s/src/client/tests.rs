@@ -847,7 +847,10 @@ fn an_unknown_issuer_hint_depends_on_whether_the_kubeconfig_has_a_ca() {
         without.contains("names no certificate authority"),
         "{without}"
     );
-    assert!(without.contains("not this machine's store"), "{without}");
+    assert!(
+        without.contains("read from this machine's store"),
+        "{without}"
+    );
     assert!(without.contains("--kubeconfig"), "{without}");
     assert!(!without.contains("VPN"), "{without}");
     let with = unknown(true);

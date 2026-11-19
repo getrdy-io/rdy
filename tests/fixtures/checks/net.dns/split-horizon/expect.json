@@ -1,0 +1,73 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "web.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "`web.acme.test` gets different answers from different resolvers. The system resolver, which software on this machine uses, is the one that counts: check the order of the `nameserver` lines in `/etc/resolv.conf` (or the DNS servers of the network connection) and ask the DNS team which view should answer for `acme.test`.",
+    "level": "warn",
+    "message": "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives no address the system resolver gives",
+    "notes": [
+      "`web.acme.test` resolves differently by nameserver (split horizon): nameserver 2 gives no address the system resolver gives"
+    ],
+    "observed": {
+      "direct": {
+        "nameservers_asked": 2,
+        "nsswitch_hosts": {
+          "dns": true,
+          "mdns_return_before_dns": false,
+          "sss": false
+        },
+        "resolv_conf": {
+          "nameservers": 2,
+          "stub_first": false
+        }
+      },
+      "names": [
+        {
+          "addresses": [
+            "192.0.2.10"
+          ],
+          "addresses_total": 1,
+          "ipv4": 1,
+          "ipv6": 0,
+          "ms": 0,
+          "name": "web.acme.test",
+          "nameservers": [
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "192.0.2.10"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 1,
+              "rcode": "NOERROR",
+              "status": "replied"
+            },
+            {
+              "aaaa_asked": false,
+              "addresses": [
+                "198.51.100.7"
+              ],
+              "addresses_total": 1,
+              "ms": 0,
+              "position": 2,
+              "rcode": "NOERROR",
+              "status": "replied"
+            }
+          ],
+          "result": "found",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

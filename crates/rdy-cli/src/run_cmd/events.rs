@@ -70,58 +70,64 @@ impl EventQueue {
 
 /// The engine as `rdy run` calls it. Without `--verbose` it is the engine. With it, [`Narrated::execute`]
 /// also writes the queue's lines to stderr while the checks run.
-pub(super) struct Narrated<'a> {
+pub(super) struct Narrated {
     engine: Engine,
-    events: Option<(EventQueue, Look, &'a mut dyn Write)>,
+    events: Option<(EventQueue, Look)>,
 }
 
-impl<'a> Narrated<'a> {
-    /// With `verbose`, puts the finish hook in `options` and keeps `stderr` for the lines.
+impl Narrated {
+    /// With `verbose`, puts the finish hook in `options`.
     pub(super) fn new(
         engine: Engine,
         verbose: bool,
         look: Look,
         options: &mut EngineOptions,
-        stderr: &'a mut dyn Write,
     ) -> Self {
         let events = verbose.then(|| {
             let queue = EventQueue::default();
             options.on_progress = Some(queue.hook(look.styler()));
-            (queue, look, stderr)
+            (queue, look)
         });
         Self { engine, events }
     }
 
-    /// [`Engine::execute`]. When any line was written, one blank line follows, so the lines are a block of
-    /// their own above the report text.
+    /// [`Engine::execute`]. `after_poll` runs after every poll of the engine, with `stderr`: the run uses
+    /// it for the lines a family announces (ADR 0031) and to clear the live line. With `--verbose`, the
+    /// event lines are written before each poll. When any was written, one blank line follows, so the
+    /// lines are a block of their own above the report text.
     pub(super) async fn execute(
         &mut self,
         spec: &LoadedSpec,
         plan: RunPlan,
         privilege: &Privilege,
         options: &EngineOptions,
+        stderr: &mut dyn Write,
+        after_poll: &mut dyn FnMut(&mut dyn Write),
     ) -> Executed {
         let work = self.engine.execute(spec, plan, privilege, options);
-        let Some((queue, look, stderr)) = self.events.as_mut() else {
-            return work.await;
-        };
-        let (queue, look) = (&*queue, *look);
         let mut work = pin!(work);
+        let events = self.events.as_ref().map(|(queue, look)| (queue, *look));
         let mut written = false;
         let output = poll_fn(|cx| {
-            for line in queue.take(Some(cx.waker())) {
-                say(&mut **stderr, look, &line);
-                written = true;
+            if let Some((queue, look)) = events {
+                for line in queue.take(Some(cx.waker())) {
+                    say(&mut *stderr, look, &line);
+                    written = true;
+                }
             }
-            work.as_mut().poll(cx)
+            let polled = work.as_mut().poll(cx);
+            after_poll(&mut *stderr);
+            polled
         })
         .await;
-        for line in queue.take(None) {
-            say(&mut **stderr, look, &line);
-            written = true;
-        }
-        if written {
-            say(&mut **stderr, look, "\n");
+        if let Some((queue, look)) = events {
+            for line in queue.take(None) {
+                say(&mut *stderr, look, &line);
+                written = true;
+            }
+            if written {
+                say(&mut *stderr, look, "\n");
+            }
         }
         output
     }

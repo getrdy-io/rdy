@@ -1,0 +1,4 @@
+24 1 253:0 / / rw,relatime shared:1 - xfs /dev/mapper/vg0-root rw,seclabel
+25 24 0:6 / /dev rw,nosuid shared:2 - devtmpfs devtmpfs rw,seclabel
+27 24 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:6 - sysfs sysfs rw,seclabel
+31 27 0:27 / /sys/fs/selinux rw,nosuid,noexec,relatime shared:12 - selinuxfs selinuxfs rw

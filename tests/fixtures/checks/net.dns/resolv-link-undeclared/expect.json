@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "net.dns",
+    "names": [
+      "slow.acme.test"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_latency_ms": 500,
+      "names": []
+    },
+    "fix": "No nameserver answered for `slow.acme.test` in time. Check the `nameserver` lines of `/etc/resolv.conf`: a dead first nameserver adds its timeout to every lookup. Ask the network team to allow udp/53 and tcp/53 from this machine to them.",
+    "level": "fail",
+    "message": "1 of 1 names do not resolve: `slow.acme.test` (timed out)",
+    "notes": [
+      "`slow.acme.test` timed out: getent is stopped after 5 s.",
+      "rdy sent no direct nameserver queries: rdy cannot read the nameserver list on this machine."
+    ],
+    "observed": {
+      "names": [
+        {
+          "ms": 5000,
+          "name": "slow.acme.test",
+          "result": "timeout",
+          "source": "getent"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

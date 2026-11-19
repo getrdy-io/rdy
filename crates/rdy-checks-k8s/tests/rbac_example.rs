@@ -2,7 +2,8 @@
 //!
 //! The role is the second line behind the guard. If the two drift, either rdy asks for something the
 //! role does not grant (a check fails with 403 on a cluster that uses the role) or the role grants
-//! something rdy never reads. Both directions are tested.
+//! something rdy never reads. Both directions are tested. The role is two files: the main one, and the
+//! optional OpenShift DNS Role (`rdy-readonly-openshift-dns.yaml`, M1-162), which is read together with it.
 
 #![allow(clippy::expect_used)]
 // This test reads the example role file from the repository, which the lint wall bans in the rest of
@@ -16,13 +17,23 @@ use std::path::Path;
 use rdy_checks_k8s::client::guard::{ALLOWED, Access, Only};
 use serde_json::Value;
 
-/// The documents of the example, parsed.
+/// The example files, under `examples/rbac/`.
+const FILES: [&str; 2] = ["rdy-readonly.yaml", "rdy-readonly-openshift-dns.yaml"];
+
+/// The documents of the example files, parsed.
 fn documents() -> Vec<Value> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/rbac/rdy-readonly.yaml");
-    let text = std::fs::read_to_string(path).expect("examples/rbac/rdy-readonly.yaml exists");
-    text.split("\n---\n")
-        .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML"))
-        .collect()
+    let mut out = Vec::new();
+    for file in FILES {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/rbac")
+            .join(file);
+        let text = std::fs::read_to_string(path).expect("the example file exists");
+        out.extend(
+            text.split("\n---\n")
+                .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML")),
+        );
+    }
+    out
 }
 
 /// `group/resource verb` for every rule of the documents of `kind`, and the namespace of the role.
@@ -77,6 +88,12 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())
                 }
+                // One object of one namespace: a Role of that namespace, granted by name.
+                Access::GetIn { namespace, name } => (
+                    "get",
+                    Some((*namespace).to_owned()),
+                    format!(" name={name}"),
+                ),
             };
             out.insert((
                 namespace,
@@ -115,7 +132,22 @@ fn the_role_never_writes_reads_secrets_or_uses_a_wildcard() {
     let docs = documents();
     let text = serde_json::to_string(&docs).expect("json");
     assert!(!text.contains("secrets"), "the role must not name Secrets");
-    assert!(!text.contains('*'), "the role must not use a wildcard");
+    // The one wildcard is the list of every Gatekeeper constraint kind (ADR 0042). Anything else with a `*`
+    // fails.
+    let without_gatekeeper = text.replace(
+        r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#,
+        "",
+    );
+    let rule = r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#;
+    assert_eq!(
+        text.matches(rule).count(),
+        1,
+        "the Gatekeeper rule is there, once"
+    );
+    assert!(
+        !without_gatekeeper.contains('*'),
+        "the role must not use a wildcard but the Gatekeeper constraints rule"
+    );
     for kind in ["ClusterRole", "Role"] {
         for (_, grant) in grants(&docs, kind) {
             let verb = grant.split(' ').nth(1).expect("verb");
@@ -147,7 +179,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings.len(), 3);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]

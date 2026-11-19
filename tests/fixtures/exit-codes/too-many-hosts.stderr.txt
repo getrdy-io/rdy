@@ -1,0 +1,2 @@
+error: too-many-hosts-across-checks.yaml: 65 endpoints. The limit is 64.
+fix: remove hosts, or split the spec in two. A host counts once, however many checks name it.

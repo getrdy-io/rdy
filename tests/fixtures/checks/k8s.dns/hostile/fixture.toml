@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-hostile"
+summary = "Hostile names, a hostile Corefile and an odd pod; text from the server must stay inert"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

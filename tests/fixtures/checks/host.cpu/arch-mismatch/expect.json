@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "arch": [
+      "arm64"
+    ],
+    "id": "host.cpu",
+    "min": 2
+  },
+  "result": {
+    "expected": {
+      "arch": [
+        "aarch64"
+      ],
+      "min": 2
+    },
+    "fix": "Use a host or instance type with aarch64. This product does not run on x86_64.",
+    "level": "fail",
+    "message": "8 vCPUs found, 2 needed; arch is x86_64, the spec allows aarch64",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": null
+  }
+}

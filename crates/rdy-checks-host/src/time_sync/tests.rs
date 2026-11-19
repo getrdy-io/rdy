@@ -208,7 +208,17 @@ fn run_replay_within(
     give_hosts: bool,
     timeout: Option<Duration>,
 ) -> Run {
-    let test_run = TestRun::new(replay);
+    run_on(fixture, check, TestRun::new(replay), give_hosts, timeout)
+}
+
+/// Like `run_replay_within`, on a run the caller built (for `--no-network`).
+fn run_on(
+    fixture: &Fixture,
+    check: TimeSync,
+    test_run: TestRun,
+    give_hosts: bool,
+    timeout: Option<Duration>,
+) -> Run {
     let scheduler = test_run.scheduler(1, fixture.os(), fixture.available_needs());
     let hosts = HostSet::new(check.servers().iter().cloned());
     let mut planned = Planned::new(Arc::new(check), "host.time_sync");
@@ -411,6 +421,88 @@ fn a_server_in_a_refused_range_is_not_queried_and_chronyc_gives_the_offset() {
         connects[0].fields.get("rule").and_then(Value::as_str),
         Some(RULE_UDP_ADDRESS)
     );
+}
+
+/// `case` run with `--no-network`: the servers are scripted, so a datagram that got through would be
+/// answered and show.
+fn run_offline(case: &str) -> Run {
+    let fixture = load(case);
+    let replay = add_servers(fixture.replay().clone(), &servers(case));
+    run_on(
+        &fixture,
+        time_sync(&entry_of(case)),
+        TestRun::new(replay).offline(),
+        true,
+        None,
+    )
+}
+
+#[test]
+fn offline_the_timedatectl_verdict_stays_and_the_offset_is_not_measured() {
+    let run = run_offline("synced");
+    let finding = run.finding();
+    // The check does not end in an error because the facade refused the network.
+    assert_eq!(finding.level, Level::Warn);
+    assert_eq!(finding.message, "Offset not measured, --no-network is set.");
+    assert_eq!(finding.observed["state"], "synchronized");
+    assert_eq!(finding.observed["timedatectl"], "ok");
+    assert_eq!(finding.observed["chronyc"], "not run: --no-network is set");
+    assert_eq!(finding.observed["servers"][0]["result"], "offline");
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n == "`192.0.2.10`: offset not measured, --no-network is set."),
+        "{:?}",
+        finding.notes
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n == "chronyc was not run, because --no-network is set."),
+        "{:?}",
+        finding.notes
+    );
+    // Through the engine's mapping it is a warning, not an error or a skip.
+    let result = mapped(&entry_of("synced"), run.outcome().clone());
+    assert_eq!(result.status, Status::Warn);
+}
+
+#[test]
+fn offline_no_datagram_is_sent_and_chronyc_does_not_run() {
+    let run = run_offline("synced");
+    let connects = run.connects();
+    assert_eq!(connects.len(), 1);
+    assert_eq!(connects[0].outcome, ActionOutcome::Denied);
+    let program = |a: &Action| {
+        (a.kind == ActionKind::Exec)
+            .then(|| a.fields.get("program").and_then(Value::as_str))
+            .flatten()
+            .map(str::to_owned)
+    };
+    for action in &run.log.actions {
+        assert!(
+            program(action).as_deref() != Some("chronyc")
+                || action.outcome == ActionOutcome::Denied,
+            "{action:?}"
+        );
+    }
+    // The sync flag still came from timedatectl, which ran.
+    assert!(
+        run.log
+            .actions
+            .iter()
+            .any(|a| program(a).as_deref() == Some("timedatectl")
+                && a.outcome == ActionOutcome::Ok)
+    );
+}
+
+#[test]
+fn offline_an_unsynchronized_clock_still_blocks() {
+    let run = run_offline("not-synced-required");
+    let result = mapped(&entry_of("not-synced-required"), run.outcome().clone());
+    assert_eq!(result.status, Status::Block);
 }
 
 #[test]

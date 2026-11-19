@@ -42,9 +42,16 @@ ring = { version = "0.17", default-features = false }
 regex = { version = "1", default-features = false }
 # The parsed form of a pattern, to read the shortest text it can match (01 section 2.8).
 regex-syntax = { version = "0.8", default-features = false }
+# Reads the issuer and subject names of a presented TLS chain, for net.tls_intercept (M1-100). Parser only: no
+# `verify` feature, so it pulls in neither ring nor aws-lc. Only rdy-checks-net may list it (ci/check-crate-deps.toml).
+x509-parser = { version = "0.18", default-features = false }
+# The test oracle for the hand-written DNS codec of net.dns (M1-155, ADR 0052). A dev-dependency of rdy-checks-net only,
+# never a normal dependency: the shipped binary parses replies with its own reader.
+hickory-proto = { version = "0.26", default-features = false }
 # The scheduler (M1-034). Each crate names the features it uses.
 tokio = { version = "1", default-features = false }
 rpassword = { version = "7.5", default-features = false }
+winapi-util = { version = "0.1.11", default-features = false }
 # Pseudo-terminal driver for the prompt tests (M1-123). Test-only, Unix only.
 rexpect = { version = "0.7", default-features = false }
 sha2 = { version = "0.10", default-features = false }
@@ -84,6 +91,8 @@ secrecy = { version = "0.10", default-features = false }
 # tree already through kube; the versions are the ones kube-client uses.
 http = { version = "1", default-features = false }
 http-body = { version = "1", default-features = false }
+futures-util = { version = "0.3", default-features = false }
+tower = { version = "0.5", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 # Test-only: a TLS server with a throwaway CA for the client tests (M1-102) and for the loopback servers of
@@ -135,6 +144,11 @@ unicode-width = { version = "0.2", default-features = false }
 anstream = { version = "1", default-features = false }
 # Named by the lint wall only, so the entry for `ColorChoice::write_global` can fire (M1-086).
 colorchoice = { version = "1", default-features = false }
+# The live progress line (M1-142, 07 section 3 and D.5). No default features: `wasmbind` and `unicode-width` are
+# not needed for one ASCII line. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)`, `term_like` or
+# `hidden()`. `console` is named directly only for the Windows terminal width (`size_checked`).
+indicatif = { version = "0.18", default-features = false }
+console = { version = "0.16", default-features = false, features = ["std"] }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).

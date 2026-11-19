@@ -281,6 +281,30 @@ pub struct CheckInfo {
     pub peers: &'static [PeerClass],
 }
 
+impl CheckInfo {
+    /// Whether the check declared a peer class that goes over the network: spec hosts, NTP servers,
+    /// the Kubernetes API or the system resolver. A unix socket and a proxy alone do not count.
+    #[must_use]
+    pub fn reaches_network(&self) -> bool {
+        self.peers.iter().any(|peer| match peer {
+            PeerClass::SpecHosts
+            | PeerClass::NtpServers
+            | PeerClass::KubeApi
+            | PeerClass::SystemResolver => true,
+            PeerClass::Proxy | PeerClass::UnixSocket(_) => false,
+        })
+    }
+
+    /// Whether the check names the `network` or `kube_context` need, hard or soft. A check that
+    /// reaches the network and does not is skipped under `--no-network` only by the facade's refusal
+    /// (`RULE_NO_NETWORK`), so it has to handle that refusal itself.
+    #[must_use]
+    pub fn gates_on_network(&self) -> bool {
+        let is_net = |need: &Need| matches!(need, Need::Network | Need::KubeContext);
+        self.needs.iter().any(is_net) || self.wants.iter().any(|want| is_net(&want.need))
+    }
+}
+
 /// How a finding sits against the requirement, before severity.
 ///
 /// The engine turns `Warn` and `Fail` into `warn` or `block` using the spec's severity.
@@ -463,6 +487,8 @@ impl CheckError {
         match self {
             Self::MissingNeed(_) => Some(SkipKind::MissingNeed),
             Self::Unsupported(_) => Some(SkipKind::NotYetOnOs),
+            // The check reached for a socket under `--no-network`: the same skip as a missing need.
+            Self::Probe(error) if error.is_no_network() => Some(SkipKind::MissingNeed),
             Self::Probe(_) | Self::Failed { .. } => None,
         }
     }
@@ -561,6 +587,15 @@ impl CheckContext {
     #[must_use]
     pub fn has(&self, need: &Need) -> bool {
         self.available.contains(need)
+    }
+
+    /// Runs `work` for at most `limit` and returns `None` when the limit passed first. The work is
+    /// dropped at that point, so a check that holds its state outside the future keeps what it had
+    /// gathered. The scheduler's own timeout still applies. A check uses this to give one endpoint or
+    /// one object a budget of its own, so a slow one cannot take the whole check's time.
+    #[cfg(feature = "runtime")]
+    pub async fn within<F: Future>(&self, limit: Duration, work: F) -> Option<F::Output> {
+        tokio::time::timeout(limit, work).await.ok()
     }
 
     /// How long this check has left before the scheduler gives up on it.

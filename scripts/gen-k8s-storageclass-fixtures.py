@@ -128,10 +128,18 @@ def listing(kind, api_version, items, cont=None):
     return {"apiVersion": api_version, "kind": kind, "metadata": meta, "items": items}
 
 
-def classes(case, items, cont=None, code=200):
+def next_page_fails(case, file, path, token="tok-more"):
+    """The server fails on the page after `token`: the paging helper keeps page one and marks it partial."""
+    body = status(503, "ServiceUnavailable", "the server is overloaded, try again")
+    put(case, f"{file}-page-2", path, body, 503, f"continue={token}&limit=500")
+
+
+def classes(case, items, cont=None, code=200, fails=True):
     body = listing("StorageClassList", "storage.k8s.io/v1", items, cont) if code == 200 \
         else forbidden("storageclasses.storage.k8s.io")
     put(case, "storageclasses", SC_PATH, body, code, "limit=500")
+    if cont and fails:
+        next_page_fails(case, "storageclasses", SC_PATH, cont)
 
 
 def csinode(name, drivers):
@@ -145,6 +153,8 @@ def csinodes(case, nodes, code=200, cont=None):
     body = listing("CSINodeList", "storage.k8s.io/v1", nodes, cont) if code == 200 \
         else forbidden("csinodes.storage.k8s.io")
     put(case, "csinodes", "/apis/storage.k8s.io/v1/csinodes", body, code, "limit=500")
+    if cont:
+        next_page_fails(case, "csinodes", "/apis/storage.k8s.io/v1/csinodes", cont)
 
 
 def csidrivers(case, names, code=200):
@@ -287,8 +297,14 @@ classes("two-defaults", [
     sc("acme-new", ACME, beta=True, created="2026-03-01T00:00:00Z"),
 ])
 
-case("capped", "The first page of the class list has no default and the server has more")
+case("capped", "The class list has no default on page one and the server fails on page two")
 classes("capped", [sc("acme-a", ACME)], cont="tok-more")
+
+case("paged", "The default class is on the second page of the class list")
+classes("paged", [sc("acme-a", ACME)], cont="tok-more", fails=False)
+put("paged", "storageclasses-page-2", SC_PATH,
+    listing("StorageClassList", "storage.k8s.io/v1", [sc("acme-b", ACME, default=True)]),
+    200, "continue=tok-more&limit=500")
 
 # ---- evidence ---------------------------------------------------------------------------------------------------
 case("driver-object-only", "A CSIDriver object exists and no CSINode lists the driver")
@@ -316,7 +332,7 @@ classes("csidriver-forbidden", [sc("gp3", EBS, default=True)])
 csinodes("csidriver-forbidden", [csinode("node-a", [])])
 csidrivers("csidriver-forbidden", [], code=403)
 
-case("csinode-capped", "The first CSINode page has no hit and there are more pages, and no CSIDriver object")
+case("csinode-capped", "The first CSINode page has no hit, the server fails on page two, and no CSIDriver object")
 classes("csinode-capped", [sc("gp3", EBS, default=True)])
 csinodes("csinode-capped", [csinode("node-a", [])], cont="tok-more")
 csidrivers("csinode-capped", [])
