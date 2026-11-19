@@ -8,7 +8,7 @@ use k8s_openapi::api::authentication::v1::SelfSubjectReview;
 use k8s_openapi::api::authorization::v1::{
     NonResourceAttributes, ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
-use k8s_openapi::api::core::v1::{Node, Pod};
+use k8s_openapi::api::core::v1::{Event, Node};
 use k8s_openapi::api::storage::v1::CSINode;
 use kube::api::{ListParams, PostParams};
 use rdy_spec::result::ActionOutcome;
@@ -245,11 +245,11 @@ fn a_query_is_found_by_its_decoded_sorted_pairs() {
 #[tokio::test]
 async fn a_selector_written_in_plain_text_matches_the_query_kube_encodes() {
     let harness = cluster();
-    let client = harness.client_for("k8s.nodes");
+    let client = harness.client_for("k8s.storageclass");
     let params = ListParams::default()
-        .fields("status.phase!=Succeeded,status.phase!=Failed")
+        .fields("involvedObject.kind=PersistentVolumeClaim")
         .limit(500);
-    let pods = list_all(&client.all::<Pod>(), &params)
+    let pods = list_all(&client.namespaced::<Event>("app"), &params)
         .await
         .expect("recorded");
     let pod_names: Vec<_> = pods
@@ -260,20 +260,20 @@ async fn a_selector_written_in_plain_text_matches_the_query_kube_encodes() {
     assert_eq!(pod_names, ["web-0", "web-1"]);
     // kube sends the encoded form, and the fixture holds the plain one.
     let line = harness.mock().seen()[0].line();
-    assert!(line.contains("%21%3D"), "{line}");
+    assert!(line.contains("%3D"), "{line}");
     harness.audit().expect("clean");
 }
 
 #[tokio::test]
 async fn another_selector_is_another_request_and_the_fixture_has_no_answer_for_it() {
     let harness = cluster();
-    let client = harness.client_for("k8s.nodes");
-    // The guard admits this selector (it names `status.phase`), the fixture does not hold it.
+    let client = harness.client_for("k8s.storageclass");
+    // The guard admits this selector (it holds the required term), the fixture does not hold it.
     let params = ListParams::default()
-        .fields("status.phase=Running")
+        .fields("involvedObject.kind=PersistentVolumeClaim,reason=Other")
         .limit(500);
     let error = client
-        .all::<Pod>()
+        .namespaced::<Event>("app")
         .list(&params)
         .await
         .expect_err("not recorded");
@@ -285,7 +285,7 @@ async fn another_selector_is_another_request_and_the_fixture_has_no_answer_for_i
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("no answer") && v.contains("status.phase%3DRunning")),
+            .any(|v| v.contains("no answer") && v.contains("reason%3DOther")),
         "{violations:?}"
     );
 }

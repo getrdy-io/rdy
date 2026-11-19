@@ -1291,7 +1291,7 @@ one clippy rule.
 Global rules, because `call` runs on kube's buffer worker without a check id.
 
 1. **Path pre-filter.** (M1-103 built the frame: method, POST rules, the fixed body, this pre-filter,
-   the query keys, the field selectors that `pods` and `events` lists must carry, the request header
+   the query keys, the field selectors that `pods` (with M1-159) and `events` lists must carry, the request header
    allow list of rule 8 and the table in section 4. M1-104 added the request-info parser of rule 2, the
    `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation test and the checks on
    decoded values. kube writes `?&k=v`, with a `&` before the first parameter and a bare `?` for none,
@@ -1333,7 +1333,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
-| core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
+| core `pods` (not in `ALLOWED` until M1-159) | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes` free capacity, M1-159: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
 | core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |

@@ -36,7 +36,10 @@
 //!   hardened profile defaults to `restricted`.
 //! - OpenShift without an `scc` in the spec warns with the SCC text. With one, it passes and says how to
 //!   bind it. Pod Security labels still apply on OpenShift, but only `warn` and `audit` are synced from the
-//!   SCCs, so the SCC is the real gate.
+//!   SCCs, so the SCC is the real gate. The sync never runs for `default`, `kube-*` and `openshift`, and
+//!   it starts off for `openshift-*` namespaces other than `openshift-operators` (a label `true` turns it on), so there the `warn` and
+//!   `audit` labels are the namespace's own. With the sync off and neither label set, the cluster default
+//!   applies and is not readable (a note).
 //! - A policy engine group warns with the engine's name, the groups and the kinds. A group is evidence of
 //!   an install, not of an enforcing policy; the policy lists name the ones that reject.
 //! - A `Fail` webhook that applies to a pod create and has no ready endpoint blocks. What may exempt a pod
@@ -86,7 +89,7 @@ mod tests;
 mod unit_tests;
 
 use engines::{Found, FoundGroup, Group, OPENSHIFT_GROUP};
-use judge::{Gathered, NsFacts, Openshift};
+use judge::{Gathered, NsFacts, Openshift, SyncLabel};
 use level::{Labels, need_of};
 use matching::NsLabels;
 use policies::{ApiKind, EnginePolicies, PolicyList, PolicyRead};
@@ -796,9 +799,11 @@ async fn read_namespace(
                 .and_then(|annotations| annotations.get("openshift.io/sa.scc.uid-range"))
                 .and_then(|range| scc::uid_range(range));
             NsFacts {
-                label_sync_off: labels
-                    .get("security.openshift.io/scc.podSecurityLabelSync")
-                    .is_some_and(|value| value == "false"),
+                sync_label: SyncLabel::from_value(
+                    labels
+                        .get("security.openshift.io/scc.podSecurityLabelSync")
+                        .map(String::as_str),
+                ),
                 labels: Labels::from_map(&labels),
                 all_labels: labels,
                 uid_range,
