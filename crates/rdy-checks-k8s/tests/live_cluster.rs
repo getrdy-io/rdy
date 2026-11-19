@@ -37,7 +37,8 @@
 //!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
 //!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding. The
 //!   same review's `nonResourceRules` hold only the `get` of the URLs of the default ClusterRoles
-//!   `system:discovery` and `system:public-info-viewer` (`NON_RESOURCE_DEFAULTS`).
+//!   `system:discovery`, `system:public-info-viewer` and `system:service-account-issuer-discovery`
+//!   (`NON_RESOURCE_DEFAULTS`).
 //!   The guard's refusals need no cluster and are tested without one.
 //!
 //! Not covered here, and carried:
@@ -74,7 +75,7 @@ use k8s_openapi::api::authorization::v1::{
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, ResourceQuota, Secret, Service,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
@@ -408,7 +409,6 @@ type Grant = (String, String, String, String);
 const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("get", "", "namespaces", ""),
     ("list", "", "nodes", ""),
-    ("list", "", "pods", ""),
     ("list", "", "persistentvolumeclaims", ""),
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
@@ -487,7 +487,10 @@ const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
 /// `system:authenticated`. `/healthz/*`, `/livez/*`, `/readyz/*` and `/metrics` belong to
 /// `system:monitoring` only, so they are surprises here. They are discovery, health and version documents, and hold no secret. The role
 /// file has no `nonResourceURLs` rule of its own, so any other URL, any other verb and any wildcard verb
-/// is a grant the role file did not make.
+/// is a grant the role file did not make. The identity is a service account, so it also gets the
+/// ClusterRole `system:service-account-issuer-discovery`, which Kubernetes binds to the group
+/// `system:serviceaccounts` by default: the public OIDC discovery document and its key set, which hold no
+/// secret either.
 const NON_RESOURCE_DEFAULTS: &[&str] = &[
     "/api",
     "/api/*",
@@ -500,6 +503,10 @@ const NON_RESOURCE_DEFAULTS: &[&str] = &[
     "/version/",
     "/openapi",
     "/openapi/*",
+    "/.well-known/openid-configuration",
+    "/.well-known/openid-configuration/",
+    "/openid/v1/jwks",
+    "/openid/v1/jwks/",
 ];
 
 /// What the server grants the identity on non-resource URLs in `namespace`, one entry per verb and URL.
@@ -614,10 +621,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     let check = run.context("k8s.nodes", Os::Linux, []);
     let client = connected.read_only(check.probe());
     let all = ListParams::default().limit(50);
-    // The selectors the guard requires on these two lists (02 Appendix B, section 4).
-    let pods = all
-        .clone()
-        .fields("status.phase!=Succeeded,status.phase!=Failed");
+    // The selector the guard requires on the event list (02 Appendix B, section 4).
     let events = all
         .clone()
         .fields("involvedObject.kind=PersistentVolumeClaim");
@@ -626,7 +630,6 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     //    the rules review are GA on every supported minor, so a 404 there fails too. The one tolerated
     //    404 is the get of a storage class that does not exist (the point is that it is not a 403).
     assert_served("nodes", false, &client.all::<Node>().list(&all).await);
-    assert_served("pods", false, &client.all::<Pod>().list(&pods).await);
     assert_served(
         "pvc",
         false,
@@ -906,7 +909,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     }
     assert!(
         unexpected_urls.is_empty(),
-        "the server grants the rdy-readonly identity non-resource URLs beyond the discovery and public-info-viewer defaults: {unexpected_urls:#?}"
+        "the server grants the rdy-readonly identity non-resource URLs beyond the discovery, public-info-viewer and issuer-discovery defaults: {unexpected_urls:#?}"
     );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
@@ -929,10 +932,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 18 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 17 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 18 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 17 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

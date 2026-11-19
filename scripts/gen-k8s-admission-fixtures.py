@@ -356,6 +356,15 @@ namespace(
 )
 scc_list("openshift-sync-off", SCCS)
 
+case("openshift-sync-off-no-labels", "OpenShift where label sync is off and the namespace sets no warn or audit label, so the cluster default applies")
+apis("openshift-sync-off-no-labels", OPENSHIFT)
+namespace(
+    "openshift-sync-off-no-labels",
+    {"security.openshift.io/scc.podSecurityLabelSync": "false"},
+    RANGE,
+)
+scc_list("openshift-sync-off-no-labels", SCCS)
+
 case("openshift-scc-forbidden", "OpenShift where the identity may not list the SCCs")
 apis("openshift-scc-forbidden", OPENSHIFT)
 namespace("openshift-scc-forbidden", SYNCED, RANGE)
@@ -398,6 +407,7 @@ KYVERNO_V2 = [
 ]
 EXCEPTION = [("PolicyException", "policyexceptions")]
 KYVERNO_CEL = [("ValidatingPolicy", "validatingpolicies"), ("MutatingPolicy", "mutatingpolicies")]
+KYVERNO_IMAGE = [("ImageValidatingPolicy", "imagevalidatingpolicies")]
 CONSTRAINTS = [("K8sAllowedRepos", "k8sallowedrepos"), ("K8sRequiredLabels", "k8srequiredlabels")]
 
 case("kyverno", "Kyverno 1.12 to 1.19: kyverno.io prefers v2 and keeps ClusterPolicy in v1, and the CEL group is served")
@@ -889,8 +899,19 @@ kinds("kyverno-exception-only", "kyverno.io", "v2", EXCEPTION)
 case("kyverno-cel-alpha", "Kyverno 1.14 or 1.15: policies.kyverno.io serves ValidatingPolicy only as v1alpha1")
 apis("kyverno-cel-alpha", [("policies.kyverno.io", ["v1alpha1"])])
 namespace("kyverno-cel-alpha", dict({PSA + "enforce": "baseline"}, **NS_LABELS))
-kinds("kyverno-cel-alpha", "policies.kyverno.io", "v1alpha1", KYVERNO_CEL)
+kinds("kyverno-cel-alpha", "policies.kyverno.io", "v1alpha1", KYVERNO_CEL + KYVERNO_IMAGE)
 policy_list("kyverno-cel-alpha", "policies.kyverno.io", "v1alpha1", "ValidatingPolicy", "validatingpolicies", [cel_policy("no-host-network")])
+
+
+case("kyverno-cel-image", "Kyverno 1.16 to 1.19: policies.kyverno.io prefers v1 and serves ImageValidatingPolicy next to ValidatingPolicy")
+apis("kyverno-cel-image", [("policies.kyverno.io", ["v1"])])
+namespace("kyverno-cel-image", dict({PSA + "enforce": "baseline"}, **NS_LABELS))
+kinds("kyverno-cel-image", "policies.kyverno.io", "v1", KYVERNO_CEL + KYVERNO_IMAGE)
+
+case("kyverno-cel-beta", "Kyverno 1.20: policies.kyverno.io prefers v1beta1 and serves both ValidatingPolicy and ImageValidatingPolicy there")
+apis("kyverno-cel-beta", [("policies.kyverno.io", ["v1beta1"])])
+namespace("kyverno-cel-beta", dict({PSA + "enforce": "baseline"}, **NS_LABELS))
+kinds("kyverno-cel-beta", "policies.kyverno.io", "v1beta1", KYVERNO_CEL + KYVERNO_IMAGE)
 
 
 # ---- the lists every case needs ---------------------------------------------------------------------------------
