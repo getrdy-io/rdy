@@ -232,9 +232,10 @@ type OffRow<'a> = (&'a str, bool, ProgressEnv, &'a [&'a str]);
 
 #[test]
 fn every_off_switch_draws_nothing_on_a_slow_run() {
-    let cases: [OffRow; 6] = [
+    let cases: [OffRow; 7] = [
         ("pipe", false, env(&[]), &[]),
         ("--quiet", true, env(&[]), &["--quiet"]),
+        ("--verbose", true, env(&[]), &["--verbose"]),
         ("--progress never", true, env(&[]), &["--progress", "never"]),
         ("TERM=dumb", true, env(&[("TERM", "dumb")]), &[]),
         ("RUST_LOG", true, env(&[("RUST_LOG", "rdy=debug")]), &[]),

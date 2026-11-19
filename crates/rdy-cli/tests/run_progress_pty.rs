@@ -200,9 +200,10 @@ type OffRow<'a> = (
 #[test]
 fn every_off_switch_writes_no_progress_byte() {
     let _guard = lock();
-    let rows: [OffRow; 6] = [
+    let rows: [OffRow; 7] = [
         ("a pipe", false, Some("xterm"), &[], &[]),
         ("--quiet", true, Some("xterm"), &[], &["--quiet"]),
+        ("--verbose", true, Some("xterm"), &[], &["--verbose"]),
         (
             "--progress never",
             true,
