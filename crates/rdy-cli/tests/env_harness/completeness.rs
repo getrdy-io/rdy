@@ -13,6 +13,9 @@
 //!
 //! A note names the hang when it holds `timed out` or `no reply within` (`HANG_NOTES`). A hang with neither
 //! `timed_out_ms` nor such a note proves nothing about how the check ended, so it does not count.
+//! The rule does not link the hang to the host a note names, so a case with a blackhole for one host and an
+//! unrelated `timed out` note also counts. The reviewed `expect.json` of each case keeps that honest.
+//! `has_silent_peer` reads only `chain.json`, which only `net.tls_intercept` has.
 //!
 //! A case counts only through its `expect.json`, the reviewed result. A case that loads but has no
 //! `expect.json` proves nothing about what the check says, so it is not counted. The shape of the `result`
