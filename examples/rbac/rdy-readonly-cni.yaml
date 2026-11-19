@@ -1,0 +1,181 @@
+# OPTIONAL: reads for the `k8s.cni` check. Apply it after rdy-readonly.yaml, which makes the service
+# account these bindings name. Nothing in the main file changes: this file is a set of small Roles.
+#
+# `k8s.cni` names the network plugin, says whether it enforces NetworkPolicy, finds default-deny egress
+# policies in the install namespace, and reads the pod and service ranges. Without this file it still runs.
+# It names the plugin from the node list the main file already grants (the NetworkUnavailable condition) and
+# from API discovery (no grant needed), and it reports each read it could not make with the grant to ask
+# for. This file adds the rest, and keeps each grant as small as it can be:
+#
+# - A DaemonSet holds environment values, which often hold credentials, so no Role in this file lists DaemonSets. (The optional kube-system Role in
+#   rdy-readonly.yaml already lists DaemonSets there for k8s.dns, env values included.)
+#   Each is a `get` by name (`resourceNames`) in the namespace its project documents: the node agent of
+#   each network plugin in kube-system, calico-system (Calico installed by its operator) and kube-flannel
+#   (Flannel's own manifest). rdy keeps the ready counts, and the value of ENABLE_NETWORK_POLICY of the AWS
+#   VPC CNI. It drops every other env value, the args and the annotations while parsing. rdy asks for a
+#   DaemonSet only when the node conditions and the API groups did not name the plugin, or the plugin is the
+#   VPC CNI.
+# - The ConfigMap kubeadm-config is a `get` by name. It holds the service range of a kubeadm cluster. rdy
+#   keeps only its ClusterConfiguration key.
+# - `servicecidrs` (the service ranges, GA in Kubernetes 1.33) and the OpenShift `Network` object named
+#   `cluster` are cluster scoped and hold nothing but ranges and the network type.
+# - The NetworkPolicy list is a Role of the install namespace only. A policy holds selectors and rules,
+#   no secret, and rdy keeps its name, its selector shape and the shape of its egress rules.
+#
+# Each part is independent. Delete the documents you do not want. Applying a document whose namespace does
+# not exist fails for that document only: that is expected for calico-system on a cluster without Calico's
+# operator, and for kube-flannel on a cluster without Flannel's own manifest. The other documents apply.
+# `kubectl apply` keeps going and exits non-zero at the end.
+#
+# Use it, once for the install namespace of the spec:
+#   sed -e 's/<target-namespace>/acme-system/g' rdy-readonly-cni.yaml | kubectl apply -f -
+# Delete the Roles and the bindings when you are done:
+#   sed -e 's/<target-namespace>/acme-system/g' rdy-readonly-cni.yaml | kubectl delete --ignore-not-found -f -
+#
+# The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test keeps
+# the two in step.
+#
+# Check one: kubectl auth can-i get daemonsets.apps/aws-node -n kube-system \
+#   --as=system:serviceaccount:rdy-system:rdy-readonly
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rdy-readonly-cni
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["servicecidrs"]
+    verbs: ["list"]
+  - apiGroups: ["config.openshift.io"]
+    resources: ["networks"]
+    resourceNames: ["cluster"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rdy-readonly-cni
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rdy-readonly-cni
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-cni
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames:
+      - calico-node
+      - cilium
+      - anetd
+      - canal
+      - rke2-canal
+      - azure-cns
+      - rke2-cilium
+      - aws-node
+      - azure-npm
+      - kube-flannel-ds
+      - weave-net
+      - antrea-agent
+      - kube-router
+      - kube-ovn-cni
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kubeadm-config"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-cni
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-cni
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-cni
+  namespace: calico-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["calico-node"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-cni
+  namespace: calico-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-cni
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-cni
+  namespace: kube-flannel
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["kube-flannel-ds"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-cni
+  namespace: kube-flannel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-cni
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-cni
+  namespace: <target-namespace>
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-cni
+  namespace: <target-namespace>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-cni
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system

@@ -356,8 +356,9 @@ impl Scheduler {
             };
             drivers.spawn(async move {
                 let result = drive(item, &run).await;
-                run.observer.finished(index, &result);
+                // The permit goes back first, so an observer that is slow does not hold a job slot.
                 drop(permit);
+                run.observer.finished(index, &result);
                 (index, result)
             });
         }

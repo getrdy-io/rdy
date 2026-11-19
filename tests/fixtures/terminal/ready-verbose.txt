@@ -1,0 +1,46 @@
+  .. finished host.memory (PASS, 1 ms)
+  .. finished host.cpu (PASS, 2 ms)
+  .. finished host.disk/root (PASS, 3 ms)
+  .. finished net.egress (PASS, 190 ms)
+
+rdy 0.1.0
+spec    acme-quickstart >=1.0   (acme-quickstart.yaml)
+sig     verified, key 9F3A6C21D4E87B05, trusted by you, signed 2027-03-02
+host    acme-vm-03.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+proxy   http://proxy.corp.example:3128
+needs   network: available
+
+  PASS     host.cpu          8 vCPUs found, 4 needed
+                             expected  min=4
+                             observed  arch=x86_64 hypervisor=true logical_cores=8 physical_cores=4
+                             took      2 ms
+  PASS     host.memory       15.4 GiB found, 8 GiB needed
+                             expected  band_bytes=429496729 min_bytes=8589934592
+                             observed  available_bytes=12884901888 cgroup_limit_bytes=null
+                                       swap_total_bytes=0 total_bytes=16496934912
+                             took      1 ms
+  PASS     host.disk/root    60.0 GiB free on /, 20 GiB needed
+                             expected  min_free_bytes=21474836480 recommended_free_bytes=25769803776
+                             observed  free_bytes=64424509440 free_inodes=31205120 fstype=xfs
+                                       mount=/ options=list(2) path=/
+                             took      3 ms
+  PASS     net.egress        2 of 2 endpoints reachable through the proxy
+                             expected  reachable=list(2) via_proxy=auto
+                             observed  endpoints=list(2) proxy=http://proxy.corp.example:3128
+                                       via=proxy
+                             took      190 ms
+  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+                             took      0 ms
+
+actions 11 recorded; the JSON report lists them
+took    241 ms
+
+0 blocks, 0 warnings, 4 passed, 1 not applicable
+
+Report written to ./rdy-report-acme-quickstart-20270309T101502Z/
+  rdy-report-acme-quickstart-20270309T101502Z.html
+  rdy-report-acme-quickstart-20270309T101502Z.json
+  spec.yaml
+  spec.yaml.minisig
+READY

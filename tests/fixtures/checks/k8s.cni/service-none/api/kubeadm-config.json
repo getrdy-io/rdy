@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/configmaps/kubeadm-config"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "configmaps \"kubeadm-config\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "kubeadm-config",
+      "kind": "configmaps"
+    },
+    "code": 404
+  }
+}

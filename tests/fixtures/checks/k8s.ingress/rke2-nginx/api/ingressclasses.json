@@ -1,0 +1,40 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/networking.k8s.io/v1/ingressclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "IngressClassList",
+    "metadata": {
+      "resourceVersion": "9100"
+    },
+    "items": [
+      {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "IngressClass",
+        "metadata": {
+          "name": "nginx",
+          "uid": "00000000-0000-4000-8000-0000000000a1",
+          "resourceVersion": "4711",
+          "generation": 1,
+          "creationTimestamp": "2026-09-01T08:00:00Z",
+          "labels": {
+            "app.kubernetes.io/managed-by": "Helm",
+            "app.kubernetes.io/name": "rke2-ingress-nginx",
+            "helm.sh/chart": "rke2-ingress-nginx-4.12.1"
+          },
+          "annotations": {
+            "meta.helm.sh/release-name": "rke2-ingress-nginx",
+            "meta.helm.sh/release-namespace": "kube-system"
+          }
+        },
+        "spec": {
+          "controller": "k8s.io/ingress-nginx"
+        }
+      }
+    ]
+  }
+}

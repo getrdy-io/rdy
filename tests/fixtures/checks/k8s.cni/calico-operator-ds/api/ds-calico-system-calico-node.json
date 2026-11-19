@@ -1,0 +1,75 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/calico-system/daemonsets/calico-node"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DaemonSet",
+    "metadata": {
+      "name": "calico-node",
+      "namespace": "calico-system",
+      "labels": {
+        "k8s-app": "calico-node"
+      },
+      "annotations": {
+        "deprecated.daemonset.template.generation": "1",
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\": [{\"name\": \"SYNTHETIC_TOKEN\", \"value\": \"ENV-VALUE-MARKER-4f9c2a7e1b3d\"}]}"
+      }
+    },
+    "spec": {
+      "selector": {
+        "matchLabels": {
+          "k8s-app": "calico-node"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "k8s-app": "calico-node"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "calico-node",
+              "image": "registry.example/calico/node:v3.28.0",
+              "env": [
+                {
+                  "name": "NODE_NAME",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "fieldPath": "spec.nodeName"
+                    }
+                  }
+                },
+                {
+                  "name": "SYNTHETIC_TOKEN",
+                  "value": "ENV-VALUE-MARKER-4f9c2a7e1b3d"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "info"
+                }
+              ],
+              "args": [
+                "--token=ENV-VALUE-MARKER-4f9c2a7e1b3d"
+              ]
+            }
+          ],
+          "hostNetwork": true
+        }
+      }
+    },
+    "status": {
+      "currentNumberScheduled": 3,
+      "desiredNumberScheduled": 3,
+      "numberMisscheduled": 0,
+      "numberReady": 3,
+      "numberAvailable": 3,
+      "observedGeneration": 1,
+      "updatedNumberScheduled": 3
+    }
+  }
+}

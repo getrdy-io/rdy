@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-rke2-nginx"
+summary = "RKE2 ships the community ingress-nginx as the class nginx"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

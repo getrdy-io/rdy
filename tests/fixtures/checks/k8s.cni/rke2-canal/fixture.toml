@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-rke2-canal"
+summary = "RKE2 with its default Canal: Flannel condition, Calico API group, RKE2 kubelet"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

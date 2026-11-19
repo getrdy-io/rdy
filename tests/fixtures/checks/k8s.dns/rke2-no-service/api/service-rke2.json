@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/services/rke2-coredns-rke2-coredns"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "services \"rke2-coredns-rke2-coredns\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "rke2-coredns-rke2-coredns",
+      "kind": "services"
+    },
+    "code": 404
+  }
+}

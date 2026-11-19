@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-aggregated"
+summary = "An aggregated API (metrics.k8s.io) is listed, so a name from it passes: installed means served"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

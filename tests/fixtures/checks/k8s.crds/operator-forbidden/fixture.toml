@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-forbidden"
+summary = "The identity may not get the operator Deployment"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

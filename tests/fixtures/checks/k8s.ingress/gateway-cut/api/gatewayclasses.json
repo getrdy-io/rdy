@@ -1,0 +1,48 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/gateway.networking.k8s.io/v1/gatewayclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "gateway.networking.k8s.io/v1",
+    "kind": "GatewayClassList",
+    "metadata": {
+      "resourceVersion": "9200",
+      "continue": "page-2"
+    },
+    "items": [
+      {
+        "apiVersion": "gateway.networking.k8s.io/v1",
+        "kind": "GatewayClass",
+        "metadata": {
+          "name": "eg",
+          "uid": "00000000-0000-4000-8000-0000000000b1",
+          "resourceVersion": "5120",
+          "generation": 1,
+          "creationTimestamp": "2026-09-01T08:00:00Z",
+          "annotations": {
+            "gateway.networking.k8s.io/bundle-version": "v1.2.0",
+            "gateway.networking.k8s.io/channel": "standard"
+          }
+        },
+        "spec": {
+          "controllerName": "gateway.envoyproxy.io/gatewayclass-controller"
+        },
+        "status": {
+          "conditions": [
+            {
+              "type": "Accepted",
+              "status": "Unknown",
+              "observedGeneration": 1,
+              "lastTransitionTime": "2026-09-01T08:00:00Z",
+              "reason": "Pending",
+              "message": "Waiting for controller"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

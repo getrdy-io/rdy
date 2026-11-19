@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-two-groups"
+summary = "Two groups: one is missing and one serves only an old version"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crds-present"
+summary = "Two definitions served at v1, and an operator at 1.14.5 with its pods ready"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

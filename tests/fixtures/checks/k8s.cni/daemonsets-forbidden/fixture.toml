@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-daemonsets-forbidden"
+summary = "Nothing names a plugin and the identity may read no DaemonSet"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

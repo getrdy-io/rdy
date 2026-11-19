@@ -18,7 +18,7 @@ dist = false
 # --workspace` stays clean. `tests/clippy_wall.rs` runs clippy with this feature on, once for the root
 # clippy.toml and once for each check crate's, and expects every item to fail.
 # Do not build the workspace with `--all-features`: that turns this on, and then clippy fails by design.
-use-all = ["dep:anstream", "dep:askama", "dep:clap", "dep:colorchoice", "dep:rdy-engine", "dep:rdy-spec", "dep:rustls", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
+use-all = ["dep:anstream", "dep:askama", "dep:clap", "dep:colorchoice", "dep:console", "dep:indicatif", "dep:rdy-engine", "dep:rdy-spec", "dep:rustls", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
 
 # The kube entries of `crates/rdy-checks-k8s/clippy.toml` are proven the same way, with the use file
 # `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt` (M1-107, ADR 0031). A separate feature keeps kube out of
@@ -31,6 +31,8 @@ anstream = { workspace = true, features = ["auto"], optional = true }
 askama = { workspace = true, features = ["derive", "std"], optional = true }
 clap = { workspace = true, features = ["std", "derive", "error-context"], optional = true }
 colorchoice = { workspace = true, optional = true }
+console = { workspace = true, optional = true }
+indicatif = { workspace = true, optional = true }
 rdy-engine = { path = "../../crates/rdy-engine", optional = true }
 rdy-spec = { path = "../../crates/rdy-spec", optional = true }
 rustls = { workspace = true, features = ["std"], optional = true }

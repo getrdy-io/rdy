@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-nginx-f5"
+summary = "An F5 NGINX controller class, the default: no retirement warning"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true
