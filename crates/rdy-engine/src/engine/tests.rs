@@ -125,7 +125,7 @@ checks:
     endpoints: [\"registry.acme.example:443\"]
 ";
 
-fn loaded(text: &str) -> LoadedSpec {
+pub(super) fn loaded(text: &str) -> LoadedSpec {
     rdy_spec::load(
         text.as_bytes(),
         None,
@@ -135,7 +135,7 @@ fn loaded(text: &str) -> LoadedSpec {
     .expect("the spec loads")
 }
 
-fn privilege(elevated: bool) -> Privilege {
+pub(super) fn privilege(elevated: bool) -> Privilege {
     let (euid, elevation) = if elevated {
         (0, Elevation::Root)
     } else {
@@ -167,7 +167,7 @@ async fn run_with(replay: Replay, elevated: bool, options: &RunOptions) -> Execu
         .await
 }
 
-fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
+pub(super) fn find<'a>(done: &'a Executed, key: &str) -> &'a CheckResult {
     done.results
         .iter()
         .find(|r| r.key == key)
@@ -313,17 +313,17 @@ static NET_CHECK: CheckInfo = CheckInfo {
     family: "net",
     ..info("net.egress", &[Need::Network])
 };
-static KUBE_CHECK: CheckInfo = CheckInfo {
+pub(super) static KUBE_CHECK: CheckInfo = CheckInfo {
     family: "k8s",
     ..info("k8s.version", &[Need::KubeContext])
 };
-static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
-static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
+pub(super) static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
+pub(super) static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
 
 /// Counts the checks that ran in both test families, net and k8s.
 static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-struct Counting(&'static CheckInfo);
+pub(super) struct Counting(pub(super) &'static CheckInfo);
 
 impl Check for Counting {
     fn info(&self) -> &'static CheckInfo {
@@ -338,7 +338,10 @@ impl Check for Counting {
     }
 }
 
-struct CountingFamily(&'static str, &'static [&'static CheckInfo]);
+pub(super) struct CountingFamily(
+    pub(super) &'static str,
+    pub(super) &'static [&'static CheckInfo],
+);
 
 impl Family for CountingFamily {
     fn name(&self) -> &'static str {
@@ -693,4 +696,78 @@ fn a_host_set_later_replaces_the_stand_in_in_the_partial_report() {
     )));
     let (report, _counts) = board.partial_report(Duration::from_secs(1));
     assert_eq!(report.host.hostname, "real-host");
+}
+
+/// What a progress hook was told: key, status and duration.
+type Heard = Arc<std::sync::Mutex<Vec<(String, Status, u64)>>>;
+
+// The enum is `non_exhaustive` for other crates only, so inside this crate the pattern always matches.
+#[allow(irrefutable_let_patterns)]
+fn listener() -> (ProgressHook, Heard) {
+    let heard: Heard = Arc::default();
+    let sink = Arc::clone(&heard);
+    let hook = ProgressHook::new(move |event| {
+        if let Progress::Finished(done) = event {
+            sink.lock().expect("lock").push((
+                done.key.to_owned(),
+                done.status.clone(),
+                done.duration_ms,
+            ));
+        }
+    });
+    (hook, heard)
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_finish_hook_hears_each_scheduled_check_once_with_its_final_status() {
+    let (hook, heard) = listener();
+    let mut options = RunOptions::new();
+    options.on_progress = Some(hook);
+    let done = run_with(Replay::new(), false, &options).await;
+    let heard = heard.lock().expect("lock").clone();
+    // Six checks were scheduled. `net.egress` was skipped by the plan and never ran, so it is not here.
+    let mut keys: Vec<&str> = heard.iter().map(|(key, _, _)| key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "host.cpu",
+            "host.cpu/boom",
+            "host.cpu/slow",
+            "host.disk",
+            "host.memory",
+            "host.memory/leak"
+        ]
+    );
+    for (key, status, _) in &heard {
+        assert_eq!(*status, find(&done, key).status, "{key}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_finish_hook_and_the_board_work_together() {
+    let engine = engine(Replay::new());
+    let spec = loaded(SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let (hook, heard) = listener();
+    let mut options = RunOptions::new();
+    let board = engine.board(&spec, &plan, watch_base(), options.deadline, "<spec>");
+    options.board = Some(Arc::clone(&board));
+    options.on_progress = Some(hook);
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    assert_eq!(heard.lock().expect("lock").len(), 6);
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert_eq!(report.checks, done.results);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_finish_hook_changes_nothing() {
+    let (hook, _heard) = listener();
+    let mut with = RunOptions::new();
+    with.on_progress = Some(hook);
+    let hooked = run_with(Replay::new(), false, &with).await;
+    let plain = run_with(Replay::new(), false, &RunOptions::new()).await;
+    assert_eq!(hooked.results, plain.results);
 }

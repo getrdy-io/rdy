@@ -14,7 +14,8 @@
     "level": "fail",
     "message": "1 of 1 names do not resolve: `slow.acme.test` (timed out)",
     "notes": [
-      "`slow.acme.test` timed out: getent is stopped after 5 s."
+      "`slow.acme.test` timed out: getent is stopped after 5 s.",
+      "rdy sent no direct nameserver queries: rdy cannot read the nameserver list on this machine."
     ],
     "observed": {
       "names": [

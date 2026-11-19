@@ -105,17 +105,27 @@ ADR 0010 stays as a second line.
 
 - Root is root. Read-only behaviour, a small dependency set and the action log shrink the trust needed.
   They do not remove it.
+- The guard does not narrow Service lists by name or namespace (M1-163 folded the services entry for
+  `k8s.admission`, `k8s.dns` and `k8s.ingress`). M2-126 pins them per check.
 - The address rule (INV-12) is a list, not a classifier (M1-094). It names the metadata and host-service
   addresses of the clouds Rdy checks: AWS, GCP (`fd20:ce::254`), Azure, and Alibaba Cloud. A provider
   that is not listed is not protected, and a private-range service on the customer's network is allowed
   on purpose, because a spec may name a server there. Decision on `168.63.129.16`, the Azure host-services
   address (WireServer and the virtual DNS address): refused. Its HTTP side serves the VM agent's extension
   settings and certificates, which is the same class of secret as the metadata service, and no spec host
-  has a reason to be it. It is also the `resolv.conf` nameserver on every Azure VM, so one narrow door is
-  planned (02 "Network", 03 `net.dns`, backlog M1-155): the `SystemResolver` peer class may reach it on
-  port 53 (UDP and TCP) and only when the address came from the OS nameserver list. A spec host on any
-  port, and ports 80 and 32526 (the WireServer ports), stay refused. Until that class exists, the
-  `net.dns` direct lookup of such a nameserver reports Skipped, "nameserver in a refused range". Name
+  has a reason to be it. It is also the `resolv.conf` nameserver on every Azure VM, so one narrow door was
+  built in M1-155 (02 "Network", 03 `net.dns`, ADR 0051): `Probe::nameserver_exchange` may reach it on
+  port 53 (UDP and TCP) and only when the exact IPv4 address came from the OS nameserver list, which the
+  facade reads itself, so a check passes an index and never an address (INV-11). A spec host on any
+  port, ports 80 and 32526 (the WireServer ports), and the IPv4-mapped and NAT64 forms stay refused, each
+  with a test. Any other nameserver in a refused range (the GCE metadata address 169.254.169.254, for
+  one) is refused with "nameserver in a refused range"; the check marks that nameserver's row skipped with those words and the result is partial (the check is not skipped, and the system answer is still reported). The payload must be
+  one plain DNS query of type A, AAAA, CNAME or SOA and class IN, ending right after the question (or a
+  bare OPT record), and its name must be one of the check's spec hosts or the configured proxy's name,
+  made of letters, digits, `-` and `_` only. So the door cannot carry other bytes to port 53 (SEC-155-1).
+  The facade's read guard names `/etc/resolv.conf` and the exact files it may link to, in
+  `/run/systemd/resolve`, `/run/resolvconf` and `/run/NetworkManager`, and no other file (SEC-155-2,
+  SEC-155-3). Name
   lookups through the system resolver (`lookup`, `getaddrinfo`, `getent`) work on an Azure VM today,
   because the OS makes that connection, not the facade. Cost today: a spec that names that address as an
   endpoint or NTP server is refused with the address rule's text. Residual: a name server on the
@@ -511,6 +521,36 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     calls and passing the codes through; that changes how the codes are drawn, never whether they are. Untrusted text is escaped by `style::untrusted` before it is written, so the strip
     pass never has to remove a sequence that came from the machine or the spec.
 
+- `indicatif` 0.18.6, `console` 0.16.6, `unit-prefix` 0.5.2 and, for Windows, `encode_unicode` 1.0.0 (M1-142,
+  07 D.5). `indicatif` is a direct dependency of the `rdy` binary crate (`rdy-cli`), without default features.
+  `console` is in the binary on all five targets, because `indicatif` depends on it with `std` and
+  `ansi-parsing`; `rdy-cli` names it directly on non-Unix targets only, for the console width. `portable-atomic`
+  was in the tree already. **Approved by security-reviewer, PR #60 (SEC-60-1 to SEC-60-3 fixed).** RustSec was
+  clean on 2026-11-17.
+  - Purpose: the live progress line (07 section 3) and the Windows console width.
+  - Maintainers (crates.io owners): `indicatif` and `console` by mitsuhiko and djc, `unit-prefix` by
+    decathorpe, `encode_unicode` by tormol (last release 2022-08-07; Windows only, with its `ascii` feature
+    off).
+  - `unsafe`: `indicatif` has none but does not declare `deny(unsafe_code)`. `unit-prefix` has
+    `#![deny(unsafe_code)]`. `console` uses it for terminal and Windows console calls, and `encode_unicode` in
+    a few iterator and trait helpers. Our crates keep `#![forbid(unsafe_code)]`.
+  - `build.rs`: none in the four.
+  - License: MIT for `indicatif`, `console` and `unit-prefix`; Apache-2.0 OR MIT for `encode_unicode`. All
+    allowed in `deny.toml`.
+  - Features: `deny.toml` holds `indicatif` to no features and `console` to `alloc`, `ansi-parsing` and `std`
+    (`exact = true`, SEC-60-3).
+  - How rdy uses it: the line is drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()`
+    (tests use `term_like` and `term_like_with_hz`), only after the gate of
+    `rdy_cli::progress::live_line_allowed`, and only on stderr. indicatif's own steady-tick thread is not
+    used. The template is a constant with no style spec, so `console` never reads `NO_COLOR` or `CLICOLOR`
+    for it and never changes the Windows console mode (a test holds this). The other ways to draw
+    (`ProgressDrawTarget::{stdout, stdout_with_hz, stderr, term}`, `ProgressBar::{new, new_spinner,
+    enable_steady_tick, println, suspend}`, `MultiProgress::new` and the type `MultiProgress` (so `default()` is covered too, since a trait method cannot be named on its own),
+    `ProgressIterator::{progress, progress_count, progress_with_style}`, `console::Term::{stdout, buffered_stdout}`,
+    `console::set_colors_enabled{,_stderr}`) are on the clippy `disallowed-methods` wall, root and check
+    crates, and the lint-wall crate proves each one fires (SEC-60-1). `ProgressDrawTarget::stdout_nohz` and
+    `stderr_nohz` do not exist in indicatif 0.18, so they have no entry.
+
 ## SECURITY.md
 
 `SECURITY.md` at the repo root covers versions, scope, reporting, timelines and safe harbor.
@@ -540,7 +580,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | E2 | Privilege-carrying install | `rdy` installed setuid, setgid or with file capabilities | L | H | `[M1]` Exit 70 before the spec is read, as INV-10 says. | M1-042 |
 | E3 | Self-escalation | `rdy` calls `sudo` | L | H | `[M1]` `sudo`, `su`, `doas`, `pkexec`, `runas` are refused. Root-only checks report Skipped. | SEC-18 (M1-039) |
 | E4 | Memory corruption from crafted input | Crafted spec, command output, HTTP response | L | H | `[M1]` Workspace `unsafe_code = "forbid"`, one named FFI module. `[M2+]` fuzzing. | fold: workspace skeleton (M1-003), SEC-45 (M2-063) |
-| E5 | kubeconfig exec plugin | `aws eks get-token` runs with the user's env | L | H | `[M1]` Named exception (ADR 0010 decision 7). kubeconfig only from `--kubeconfig`, `KUBECONFIG` or the default path. The report names the binary run. | SEC-24 (M1-103), SEC-63 (M1-041) |
+| E5 | kubeconfig exec plugin | `aws eks get-token` runs with the user's env | L | H | `[M1]` Named exception (ADR 0010 decision 7). kubeconfig only from `--kubeconfig`, `KUBECONFIG` or the default path. The report names the binary run. M1-107: the plugin's token is registered as a known secret by a layer under kube's auth layer before the request is sent, and EKS and Google plugin token shapes are in the `jwt` rule. | SEC-24 (M1-103), SEC-63 (M1-041) |
 | E6 | A spec `as:` borrows the operator's `impersonate` right | A vendor spec names `as: system:serviceaccount:kube-system:admin-sa`, or a person, to read what that identity may do | L | M | `[M1]` `as:` is a service account only (`rdy-spec` and `ImpersonateAs::new` both refuse any other value), so a person's rules are never listed. The header rides on the two read-only review POSTs only, once, with exactly that value; any other `Impersonate-*` header and any other request is refused by the guard. The check first asks whether the identity may `impersonate` the service account, and sends nothing as it without that grant. The run-level log entry says when the kubeconfig itself impersonates. | M1-111 (ADR 0038) |
 
 ## Appendix B: Surface 2 STRIDE

@@ -1,0 +1,41 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/app/events",
+    "query": "limit=500&fieldSelector=involvedObject.kind=PersistentVolumeClaim"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "EventList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "web-0",
+          "namespace": "app"
+        },
+        "involvedObject": {
+          "kind": "PersistentVolumeClaim",
+          "name": "data-web-0"
+        },
+        "reason": "ProvisioningFailed",
+        "type": "Warning"
+      },
+      {
+        "metadata": {
+          "name": "web-1",
+          "namespace": "app"
+        },
+        "involvedObject": {
+          "kind": "PersistentVolumeClaim",
+          "name": "data-web-1"
+        },
+        "reason": "ProvisioningFailed",
+        "type": "Warning"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+schema = 1
+name = "acme-platform"
+summary = "The all-pass machine run against the real examples/specs/acme-platform.yaml, with no kubeconfig: three required checks are not run, and the two 443 endpoints block because the harness server cannot finish a TLS handshake"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "all-pass"
+answers = ["host.disk", "net.egress"]
+spec = "../../../../examples/specs/acme-platform.yaml"
+
+[caps]
+root = true
+network = true
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000006"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "not_ready"
+exit_code = 2

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-flannel-default-deny"
+summary = "A default-deny egress policy on Flannel, which does not enforce it"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

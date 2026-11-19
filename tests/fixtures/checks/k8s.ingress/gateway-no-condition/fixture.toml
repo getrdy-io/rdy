@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-no-condition"
+summary = "A class with no Accepted condition at all"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

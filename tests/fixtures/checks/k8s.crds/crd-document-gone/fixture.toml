@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-crd-document-gone"
+summary = "The group lists v1 but its document answers 404, as a CRD does that was just deleted"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

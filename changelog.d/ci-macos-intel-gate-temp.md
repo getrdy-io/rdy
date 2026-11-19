@@ -1,0 +1,1 @@
+- CI: the macOS PR legs run on the Intel image for now, because the arm64 macOS image gets no runners (ADR 0050, "Suspended").

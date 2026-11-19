@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets",
+    "query": "labelSelector=k8s-app in (kube-dns,node-local-dns)&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "DaemonSetList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "DaemonSet",
+        "metadata": {
+          "name": "node-local-dns",
+          "namespace": "kube-system",
+          "labels": {
+            "k8s-app": "node-local-dns"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+          }
+        },
+        "spec": {
+          "selector": {
+            "matchLabels": {
+              "k8s-app": "node-local-dns"
+            }
+          },
+          "template": {
+            "metadata": {
+              "labels": {
+                "k8s-app": "node-local-dns"
+              }
+            },
+            "spec": {
+              "containers": [
+                {
+                  "name": "node-cache",
+                  "image": "registry.acme.example/dns/node-cache:1.0",
+                  "env": [
+                    {
+                      "name": "ACME_TOKEN",
+                      "value": "ENV-VALUE-MUST-NOT-APPEAR"
+                    }
+                  ],
+                  "args": [
+                    "-conf",
+                    "/etc/coredns/Corefile"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "status": {
+          "currentNumberScheduled": 3,
+          "desiredNumberScheduled": 3,
+          "numberMisscheduled": 0,
+          "numberReady": 2
+        }
+      }
+    ]
+  }
+}

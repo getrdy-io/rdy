@@ -711,6 +711,7 @@ fn plain_out() -> super::Out {
         spec: "acme.yaml".to_owned(),
         kubeconfig: None,
         out_dir_given: false,
+        detail: crate::terminal::Detail::Normal,
     }
 }
 
@@ -948,6 +949,7 @@ fn header_host_row(host: Host) -> String {
         kubeconfig: None,
         styler: crate::style::Styler::new(false),
         width: 100,
+        detail: crate::terminal::Detail::Normal,
     };
     let text = crate::terminal::render(&view);
     text.lines()

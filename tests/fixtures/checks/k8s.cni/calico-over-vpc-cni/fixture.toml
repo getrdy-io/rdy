@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-calico-over-vpc-cni"
+summary = "Calico policy on EKS, where the VPC CNI is the base plugin"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

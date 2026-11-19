@@ -48,6 +48,13 @@ const ALIYUN_METADATA: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
 /// connect. The decision and its residual are in 05 (M1-094).
 const AZURE_HOST_SERVICES: Ipv4Addr = Ipv4Addr::new(168, 63, 129, 16);
 
+/// Whether `addr` is exactly the Azure virtual DNS address, as an IPv4 address. Only the nameserver
+/// call asks, and only about an address that the OS list gave (M1-155, ADR 0051). The IPv4-mapped and
+/// NAT64 forms are not it.
+pub(crate) fn is_azure_dns(addr: IpAddr) -> bool {
+    addr == IpAddr::V4(AZURE_HOST_SERVICES)
+}
+
 /// The GCP IPv6 metadata address `fd20:ce::254`.
 const GCP_METADATA_V6: Ipv6Addr = Ipv6Addr::new(0xfd20, 0x00ce, 0, 0, 0, 0, 0, 0x0254);
 

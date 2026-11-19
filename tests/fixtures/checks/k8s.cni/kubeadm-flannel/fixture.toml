@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-kubeadm-flannel"
+summary = "Flannel on a kubeadm cluster, which is not k3s: Flannel alone does not enforce"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

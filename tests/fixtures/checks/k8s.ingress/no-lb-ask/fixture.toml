@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-no-lb-ask"
+summary = "A cluster with a pending LoadBalancer that the spec does not ask about: no service request is sent"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

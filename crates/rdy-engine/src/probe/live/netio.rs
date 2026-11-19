@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use crate::probe::ProbeError;
-use crate::probe::sock::UdpReply;
+use crate::probe::sock::{DnsTransport, UdpReply};
 
 /// Resolves a spec host name through the system resolver.
 pub(super) async fn resolve(host: &str, port: u16, timeout: Duration) -> io::Result<Vec<IpAddr>> {
@@ -76,6 +76,57 @@ pub(super) async fn udp(
             Ok(reply)
         }
         Ok(Err(error)) => Err(udp_error(&error)),
+        Err(_elapsed) => Err(ProbeError::Timeout),
+    }
+}
+
+/// Sends one DNS query and reads one reply. UDP is [`udp`]. TCP adds the two byte length prefix of
+/// RFC 1035 and reads the prefix of the reply, then at most `max_reply` bytes of the message. A reply
+/// cut at the cap sets `truncated`, and the connection is dropped. The whole call, connect included,
+/// takes at most `timeout`.
+pub(super) async fn dns(
+    to: SocketAddr,
+    payload: &[u8],
+    transport: DnsTransport,
+    max_reply: usize,
+    timeout: Duration,
+) -> Result<UdpReply, ProbeError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    if transport == DnsTransport::Udp {
+        return udp(to, payload, max_reply, timeout).await;
+    }
+    let exchange = async {
+        let length = u16::try_from(payload.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "query too long"))?;
+        let mut stream = TcpStream::connect(to).await?;
+        let _ = stream.set_nodelay(true);
+        let mut framed = Vec::with_capacity(payload.len() + 2);
+        framed.extend_from_slice(&length.to_be_bytes());
+        framed.extend_from_slice(payload);
+        stream.write_all(&framed).await?;
+        let mut prefix = [0_u8; 2];
+        stream.read_exact(&mut prefix).await?;
+        let size = usize::from(u16::from_be_bytes(prefix));
+        if size == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "the server sent an empty message",
+            ));
+        }
+        let keep = size.min(max_reply);
+        let mut buf = vec![0_u8; keep];
+        stream.read_exact(&mut buf).await?;
+        io::Result::Ok((buf, size > keep))
+    };
+    match tokio::time::timeout(timeout, exchange).await {
+        Ok(Ok((bytes, truncated))) => {
+            let mut reply = UdpReply::new(bytes, to.ip());
+            reply.truncated = truncated;
+            Ok(reply)
+        }
+        Ok(Err(error)) => Err(ProbeError::from_io(&error)),
         Err(_elapsed) => Err(ProbeError::Timeout),
     }
 }

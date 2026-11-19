@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-cilium-crd"
+summary = "Cilium: the node condition and the API group name it"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

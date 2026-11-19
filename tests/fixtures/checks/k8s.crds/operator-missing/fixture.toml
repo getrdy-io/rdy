@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-missing"
+summary = "The operator Deployment does not exist"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

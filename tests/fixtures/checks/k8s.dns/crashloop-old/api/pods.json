@@ -1,0 +1,109 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/pods",
+    "query": "fieldSelector=status.phase!=Succeeded,status.phase!=Failed&labelSelector=k8s-app=kube-dns&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PodList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "coredns-aaa",
+          "namespace": "kube-system",
+          "labels": {
+            "k8s-app": "kube-dns"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "coredns",
+              "env": [
+                {
+                  "name": "ACME_TOKEN",
+                  "value": "ENV-VALUE-MUST-NOT-APPEAR"
+                }
+              ]
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "coredns",
+              "ready": false,
+              "restartCount": 9,
+              "state": {
+                "waiting": {
+                  "reason": "CrashLoopBackOff",
+                  "message": "back-off 5m0s restarting failed container"
+                }
+              },
+              "lastState": {
+                "terminated": {
+                  "exitCode": 1,
+                  "reason": "Error",
+                  "finishedAt": "2026-11-17T06:50:00Z"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+          "name": "coredns-bbb",
+          "namespace": "kube-system",
+          "labels": {
+            "k8s-app": "kube-dns"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "coredns",
+              "env": [
+                {
+                  "name": "ACME_TOKEN",
+                  "value": "ENV-VALUE-MUST-NOT-APPEAR"
+                }
+              ]
+            }
+          ]
+        },
+        "status": {
+          "phase": "Running",
+          "containerStatuses": [
+            {
+              "name": "coredns",
+              "ready": true,
+              "restartCount": 0,
+              "state": {
+                "running": {
+                  "startedAt": "2026-11-14T08:01:00Z"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

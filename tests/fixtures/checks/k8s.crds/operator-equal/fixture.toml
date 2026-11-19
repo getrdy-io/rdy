@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-equal"
+summary = "An operator at exactly the minimum, with a distro suffix on the tag"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true

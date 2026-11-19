@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-nodes-scaler-deployment"
+summary = "One node, no Karpenter, and a cluster-autoscaler deployment in kube-system"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.nodes"]
+
+[caps]
+root = false
+network = true
+kube = true

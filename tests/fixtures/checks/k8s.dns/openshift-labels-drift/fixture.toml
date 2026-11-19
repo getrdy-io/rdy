@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-openshift-labels-drift"
+summary = "OpenShift where the DNS labels changed: the daemon set is found by the name dns-default"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

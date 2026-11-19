@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-eks"
+summary = "EKS with the AWS Load Balancer Controller Gateway class and an ingress class"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true

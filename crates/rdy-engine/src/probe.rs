@@ -633,6 +633,21 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
     }
 
+    /// Sends one DNS query to the nameserver at `to` over `transport` and reads one reply of at most
+    /// `max_reply` bytes within `timeout`. Over TCP the backend adds and strips the two byte length
+    /// prefix. The probe has already applied the admission rules (M1-155). The provided body refuses.
+    fn dns_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        transport: sock::DnsTransport,
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        let _ = (to, payload, transport, max_reply, timeout);
+        Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
+    }
+
     /// Sends `GET path` over the unix socket at `socket` and reads the reply within `timeout`. The
     /// probe has already checked the socket, the method and the path against the policy. The provided
     /// body refuses.
@@ -798,6 +813,13 @@ impl ProbeHub {
         self.probe(Some(key.to_owned()), os, info)
     }
 
+    /// A handle that can only add to the known-secret set. A family's probe gets this and not the hub, so
+    /// it cannot change the network option or the proxy of the run (M1-107).
+    #[must_use]
+    pub fn secret_sink(&self) -> SecretSink {
+        SecretSink(self.clone())
+    }
+
     /// Adds a secret to the run-scoped known-secret set (ADR 0015 decision 3). Every string the log, the
     /// report and the CLI redact from now on has the exact value removed. The kubeconfig token and
     /// client key data and the proxy password come in through here. Returns `false` if the value was
@@ -872,7 +894,8 @@ impl ProbeHub {
         refused
     }
 
-    /// The redactor every string of this hub's log passes.
+    /// The redactor every string of this hub's log passes. The engine and the `testing` helpers read it.
+    #[cfg(any(feature = "runtime", feature = "testing"))]
     pub(crate) fn redactor(&self) -> &Redactor {
         self.log.redactor()
     }
@@ -1202,6 +1225,26 @@ impl fmt::Debug for Probe {
     }
 }
 
+/// The one thing a family's probe may do to the run's hub: add a known secret. It is a clone of the hub
+/// that offers a single method, so the network option, the proxy and the log stay out of reach.
+#[derive(Clone)]
+pub struct SecretSink(ProbeHub);
+
+impl SecretSink {
+    /// Adds `secret` to the run's known-secret set. `false` when the set refused it (too short, too long or
+    /// no room): the caller treats that as fatal. Never log the value.
+    #[must_use]
+    pub fn add(&self, secret: &str) -> bool {
+        self.0.add_known_secret(secret)
+    }
+}
+
+impl fmt::Debug for SecretSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretSink(..)")
+    }
+}
+
 /// A call that passed the handle checks and the read denylist.
 struct Gate<'a> {
     hub: &'a ProbeHub,
@@ -1312,6 +1355,66 @@ impl Probe {
         );
         let (_, entry) = self.begin(ActionKind::Kube, fields, path)?;
         Ok(KubeCall { entry })
+    }
+
+    /// Records that the run itself read `path`: the kubeconfig and the files it names, which the
+    /// kube client reads on its own (ADR 0031 decision 2). One `read` entry with `check: null`, outcome
+    /// `ok`, and the path as the log shows it. It reads nothing. A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_read(&self, path: &Path) -> Result<(), ProbeError> {
+        let what = self.hub.as_ref().map_or_else(
+            || path.to_string_lossy().into_owned(),
+            |hub| hub.log.display_path(path),
+        );
+        let mut fields = Map::new();
+        fields.insert("path".to_owned(), what.clone().into());
+        let (_, entry) = self.begin(ActionKind::Read, fields, &what)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, &what));
+        }
+        entry.finish(ActionOutcome::Ok);
+        Ok(())
+    }
+
+    /// Records a program that a library will run for the run, with `program` as the resolved path and
+    /// `argv` as the arguments (both pass the redactor with the rest of the log). One `exec` entry with
+    /// `check: null`, the `outcome` you give (the real end of the plugin) and `form` `delegated`: rdy does not start the process and does not
+    /// see its output (the kube credential plugin, 02 "The action log"). A check's probe is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a check's probe or a probe with no hub.
+    pub fn record_run_exec(
+        &self,
+        program: &str,
+        argv: &[String],
+        outcome: ActionOutcome,
+    ) -> Result<(), ProbeError> {
+        // The program as the log shows it: a path under the home directory is `~/...` (S8).
+        let shown = self.hub.as_ref().map_or_else(
+            || program.to_owned(),
+            |hub| hub.log.display_path(Path::new(program)),
+        );
+        let mut fields = Map::new();
+        fields.insert("program".to_owned(), shown.into());
+        fields.insert(
+            "argv".to_owned(),
+            Value::Array(argv.iter().cloned().map(Value::String).collect()),
+        );
+        let (_, mut entry) = self.begin(ActionKind::Exec, fields, program)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_NO_PROBE, program));
+        }
+        entry.set("form", "delegated");
+        entry.set(
+            "note",
+            "run by the kube client, output not captured, may run again on token refresh",
+        );
+        entry.finish(outcome);
+        Ok(())
     }
 
     /// The OS this probe's command table and privilege snapshot are read for.

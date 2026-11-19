@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-ingress-gateway-v1beta1-only"
+summary = "An old Gateway API bundle that serves v1beta1 and v1alpha2 only"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.ingress"]
+
+[caps]
+root = false
+network = true
+kube = true
