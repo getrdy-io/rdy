@@ -244,7 +244,7 @@ binary's feature graph does not hold it. `scripts/gen-k8s-env-fixtures.py` write
 | `warnings-only` | M1 | Swap on, port inside the ephemeral range, one `NO_PROXY` gap, no default StorageClass (M1-185) | `ready_with_warnings`, 1 |
 | `all-block` | M1 | 8 GiB RAM, disk full, 6443 held, egress refused, TLS interception (M2-152), cluster too old, RBAC denied (M1-185) | `not_ready`, 2 |
 | `no-privileges` | M1 | Not root, audit log unreadable, no kubeconfig: partial results and `missing_need` skips | `not_ready`, 2 |
-| `timeouts` | M1 | A black-hole endpoint and a hung `statvfs`; M1-185 adds a slow `/version` while the cluster client is built (correction-50, correction-58) | `not_ready`, 2 |
+| `timeouts` | M1 | A black-hole endpoint and a hung `statvfs`; M1-187 adds a slow `/version` while the cluster client is built, from M1-185's `_kube/slow-version` tree (correction-50, correction-58, correction-59) | `not_ready`, 2 |
 | `net-airgapped` | M2 (M2-153), first to add back | No default route, internal DNS only, public endpoints refused, mirror reachable; runs `acme-airgap-host.yaml` | per spec |
 | `host-ubuntu2204-container` | M2 | `memory.max` 8 GiB on a 64 GiB host, `cpu.max` quota, overlayfs, `noexec` tmpfs | per spec |
 | `net-corp-proxy` | M2 | 407 Basic proxy, CONNECT ok, `NO_PROXY` gap, private-CA interception | `not_ready`, 2 |

@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-58: M1 183 tickets, 404.5 h, 344.5 h core; M2 153 tickets, 509.75 h; all milestones 436 tickets,
-1427.75 h, 1367.75 h core.
+correction-59: M1 184 tickets, 405 h, 345 h core; M2 154 tickets, 510.75 h; all milestones 438 tickets,
+1429.25 h, 1369.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -293,6 +293,12 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   their M1 rows are stubs. M2-142 takes the pending-claim age and `run.clock`. M1-154 depends on M1-155.
   New M2-146 (release macOS arm64 on `macos-15`) and M2-147 (docs-test runs the signing pages). M1-101's
   progress line gets #104. Merged M1-101, M1-112, M1-124, M1-169, M1-170, M1-174 and M1-182 move weeks.
+- 59: new core M1-187 (0.5 h, week 24): the slow `/version` case in the `timeouts` env, after M1-119 (#119)
+  and M1-185 merge; M1-185 proves it at family level only, and M1-138 depends on M1-187. M1-135's
+  acme-platform transcript ends `1 block, ... 1 optional check not run` and `NOT READY` (no TLS server for
+  `:443` in the env harness); the reason-line variant waits for M2-152. 03 net.dns: Alpine's `musl-utils`
+  ships `getent`; the M1-154 fixture stays a minimal musl image without it. New M2-154 (SEC-22 strace leg
+  for the net.dns nameserver sockets, M1-155 part 2 security review point 7).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -303,12 +309,12 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0052. ADR 0051 is M1-155's nameserver facade ADR (`m1/155-net-dns-direct`, not
+- The next free ADR is 0053. ADRs 0051 and 0052 are M1-155's (#118, `m1/155-net-dns-check2`, not
   merged), and 0050 is the macOS CI gate (merged in #110). ADR 0042 (the Gatekeeper constraints list
   wildcard) is in #48, accepted by security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165). ADR 0047 is in #85 (M1-133, merged). ADR 0048 is M1-136's docs-test ADR. ADR 0049 is
   correction-56's (Proposed).
-- The next ticket ids are M1-187 and M2-154, and the next correction is 59 (49 is in #85).
+- The next ticket ids are M1-188 and M2-155, and the next correction is 60 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -333,6 +339,11 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   move under that CI.
 - A security review on test-only PRs found a vacuous leak test (#41). Keep adding security review when a
   ticket tests redaction.
+- GitHub's macOS arm64 runner pool (`macos-15`) went unavailable from about 08:33 UTC on 2026-11-18 for
+  hours. Gate jobs queued for 15 minutes and were cancelled, so no PR could reach a green `ci-ok`. The
+  founder chose to wait rather than change the gate, so ADR 0050 stays. When it happens again, do not
+  merge around the gate or edit the workflow; hold merges and rerun the cancelled jobs once the
+  pool is back.
 
 **Environment facts from this session.**
 - The pinned toolchain 1.99.1 was installed and worked. `cargo-deny` and `cargo-nextest` are not installed,
@@ -558,6 +569,21 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - M1-118's PR (correction-58): its progress line's "not done, no owner yet" items now have owners
     (M1-185, M1-186, M2-142, M2-152); say so and keep the correction-58 clause.
   - M1-155's PR (correction-58): ADR 0051 is its nameserver facade ADR. M1-154 builds after it.
+  - Follow-ups that correction-59 gave ids:
+    - M1-187: add M1-185's `_kube/slow-version` tree to the `timeouts` env with `kube = true`, prove the
+      engine limit and `deadline_ms` at `jobs = 1` and `jobs = 8`, and regenerate the goldens. Build it
+      after #119 (M1-119) and M1-185 merge. A 0.1.0 gate.
+    - M2-154: the SEC-22 strace leg for net.dns direct lookups, in a mount namespace with a loopback
+      `resolv.conf` and a loopback scripted DNS server (M1-155 part 2 security review, point 7).
+  - M1-185's PR (correction-59): in its progress line, "The slow `/version` env clause stays OPEN" gains
+    "M1-187 owns it"; keep the correction-59 clause.
+  - #119 (M1-119, correction-59): keep the correction-59 clause in its progress line; the slow `/version`
+    case is M1-187's, not M1-185's.
+  - M1-135's PR (correction-59): the acme-platform golden ends `NOT READY` with the block, as built; keep
+    the correction-59 clause. M1-137 pastes that golden, not 10's README draft sample, which shows another
+    host.
+  - M1-154's PR (correction-59): keep the fixture a minimal musl image without `getent`; 03 now says
+    Alpine ships `getent` in `musl-utils`.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 and #80 (M1-117) (correction-48, correction-54): the second of the two to merge adds
