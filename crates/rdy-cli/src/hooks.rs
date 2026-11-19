@@ -48,6 +48,15 @@ pub struct RunHooks {
     /// `None` reads them from the process, which is what the binary does. A test pins it, so the
     /// developer's own variables cannot change a `--color auto` check.
     pub style_env: Option<crate::style::StyleEnv>,
+    /// The progress variables (`TERM`, `RUST_LOG`, the locale, `WT_SESSION`, `TERM_PROGRAM`). `None` reads
+    /// them from the process. A test pins it, so the developer's own variables cannot change a run.
+    pub progress_env: Option<crate::progress::ProgressEnv>,
+    /// Where the live progress line draws. `None` is the real stderr, which is what the binary does. A
+    /// test gives a buffer and pins `stderr_terminal` to see the line without a pty.
+    pub progress_capture: Option<crate::progress::ProgressCapture>,
+    /// The quiet time before the first frame of the live line. `None` is 250 ms. A test that must see
+    /// "a run ends before the first frame" gives a long one, so a slow machine cannot make it flaky.
+    pub progress_first_frame: Option<Duration>,
     /// Makes the write of the report files fail with "disk full" after the verdict exists, so a test
     /// can reach the exit 70 path of 07 section 4.1 without a full disk. It has no effect with
     /// `--no-report`. `false` (the default) writes the files.
@@ -71,6 +80,9 @@ mod tests {
             stderr_terminal,
             stderr_columns,
             style_env,
+            progress_env,
+            progress_capture,
+            progress_first_frame,
             fail_files,
         } = RunHooks::default();
         assert!(clock.is_none());
@@ -80,6 +92,9 @@ mod tests {
         assert!(stderr_terminal.is_none());
         assert!(stderr_columns.is_none());
         assert!(style_env.is_none());
+        assert!(progress_env.is_none());
+        assert!(progress_capture.is_none());
+        assert!(progress_first_frame.is_none());
         assert!(!fail_files);
     }
 }

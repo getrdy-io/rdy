@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-workload-gone-service-there"
+summary = "No workload carries the label, and the Service kube-dns has a ClusterIP"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

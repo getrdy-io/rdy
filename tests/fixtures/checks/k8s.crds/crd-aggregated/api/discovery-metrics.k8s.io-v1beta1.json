@@ -1,0 +1,76 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/metrics.k8s.io/v1beta1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "metrics.k8s.io/v1beta1",
+    "resources": [
+      {
+        "name": "pods",
+        "singularName": "pod",
+        "namespaced": true,
+        "kind": "PodMetrics",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "pods/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "PodMetrics",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      },
+      {
+        "name": "nodes",
+        "singularName": "node",
+        "namespaced": true,
+        "kind": "NodeMetrics",
+        "verbs": [
+          "delete",
+          "deletecollection",
+          "get",
+          "list",
+          "patch",
+          "create",
+          "update",
+          "watch"
+        ],
+        "storageVersionHash": "k3nVq1mZ8xw=",
+        "categories": [
+          "acme"
+        ]
+      },
+      {
+        "name": "nodes/status",
+        "singularName": "",
+        "namespaced": true,
+        "kind": "NodeMetrics",
+        "verbs": [
+          "get",
+          "patch",
+          "update"
+        ]
+      }
+    ]
+  }
+}

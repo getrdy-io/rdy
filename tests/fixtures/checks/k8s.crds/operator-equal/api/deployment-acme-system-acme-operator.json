@@ -1,0 +1,115 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/acme-system/deployments/acme-operator"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "name": "acme-operator",
+      "namespace": "acme-system",
+      "uid": "5c0e1c3f-3b5e-4f55-9d4a-2c0b6f0a1e10",
+      "resourceVersion": "48211",
+      "generation": 3,
+      "creationTimestamp": "2026-10-01T12:00:00Z",
+      "labels": {
+        "app.kubernetes.io/name": "acme-operator",
+        "app.kubernetes.io/managed-by": "acme-installer"
+      },
+      "annotations": {
+        "deployment.kubernetes.io/revision": "3",
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"env\": [{\"value\": \"MARKER-ANNOTATION-7731\"}]}]}}}}",
+        "acme.example/note": "MARKER-ANNOTATION-7731"
+      }
+    },
+    "spec": {
+      "replicas": 1,
+      "revisionHistoryLimit": 10,
+      "progressDeadlineSeconds": 600,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "acme-operator"
+        }
+      },
+      "strategy": {
+        "type": "RollingUpdate",
+        "rollingUpdate": {
+          "maxUnavailable": "25%",
+          "maxSurge": "25%"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/name": "acme-operator"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "acme-operator",
+              "image": "registry.acme.example/acme/operator:1.14.0-ubi8",
+              "args": [
+                "--leader-elect=true",
+                "--secret-ref=MARKER-ENV-5520"
+              ],
+              "env": [
+                {
+                  "name": "ACME_LICENSE_KEY",
+                  "value": "MARKER-ENV-5520"
+                },
+                {
+                  "name": "POD_NAMESPACE",
+                  "valueFrom": {
+                    "fieldRef": {
+                      "apiVersion": "v1",
+                      "fieldPath": "metadata.namespace"
+                    }
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "containerPort": 9402,
+                  "name": "metrics",
+                  "protocol": "TCP"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                }
+              },
+              "terminationMessagePath": "/dev/termination-log",
+              "terminationMessagePolicy": "File",
+              "imagePullPolicy": "IfNotPresent"
+            }
+          ],
+          "restartPolicy": "Always",
+          "serviceAccountName": "acme-operator",
+          "terminationGracePeriodSeconds": 30
+        }
+      }
+    },
+    "status": {
+      "observedGeneration": 3,
+      "replicas": 1,
+      "updatedReplicas": 1,
+      "readyReplicas": 1,
+      "availableReplicas": 1,
+      "conditions": [
+        {
+          "type": "Available",
+          "status": "True",
+          "lastUpdateTime": "2026-10-01T12:01:00Z",
+          "lastTransitionTime": "2026-10-01T12:01:00Z",
+          "reason": "MinimumReplicasAvailable",
+          "message": "Deployment has minimum availability."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-dns-both-forbidden"
+summary = "Nothing readable in kube-system or openshift-dns, on a cluster known to be OpenShift"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.dns"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/services/kube-dns"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "kube-dns",
+      "namespace": "kube-system",
+      "annotations": {
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "k8s-app": "kube-dns"
+      },
+      "ports": [
+        {
+          "name": "udp-53",
+          "port": 53,
+          "protocol": "UDP"
+        },
+        {
+          "name": "tcp-53",
+          "port": 53,
+          "protocol": "TCP"
+        },
+        {
+          "name": "tcp-9153",
+          "port": 9153,
+          "protocol": "TCP"
+        }
+      ],
+      "clusterIP": "None",
+      "clusterIPs": [
+        "None"
+      ]
+    }
+  }
+}

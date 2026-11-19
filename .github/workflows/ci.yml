@@ -59,6 +59,14 @@ jobs:
         run: cargo doc --workspace --no-deps --locked
       # The workspace build turns `runtime` on through the other crates. A probe gate without a runtime
       # (replay) builds rdy-engine alone, so lint and document that build too (ADR 0028).
+      # rdy-engine has a dev-dependency on itself with `testing` and `loopback` (Cargo.toml). `--all-targets`
+      # builds the tests, so it turns those features on and the steps with it lint the test build, not the
+      # library a dependent gets. `--lib` builds no dev-dependency, so these two lint the bare library
+      # (M1-173). It found three methods that nothing calls without `runtime`.
+      - name: cargo clippy rdy-engine bare library without default features
+        run: cargo clippy --locked -p rdy-engine --no-default-features --lib -- -D warnings
+      - name: cargo clippy rdy-engine bare library with the html feature
+        run: cargo clippy --locked -p rdy-engine --no-default-features --features html --lib -- -D warnings
       - name: cargo clippy rdy-engine without default features
         run: cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings
       # The replay backend is behind `testing`, so the probe gate without a runtime needs this build too.
@@ -69,8 +77,8 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p rdy-engine --no-default-features --no-deps
       # rdy-cloud builds rdy-engine with `default-features = false, features = ["html"]` (02, M1-077). Lint and
-      # document that build. `--all-targets` turns on the dev-dependency features, like the steps above, so
-      # the library alone is not linted without them (a gap carried in backlog correction-31).
+      # document that build. The bare-library step above lints it without the dev-dependency features. This
+      # one keeps the test build of it.
       - name: cargo clippy rdy-engine html feature without the runtime
         run: cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings
       - name: cargo doc rdy-engine html feature without the runtime
@@ -110,6 +118,12 @@ jobs:
         run: python3 -I scripts/gen-k8s-admission-fixtures.py --check
       - name: k8s.namespace fixtures are current
         run: python3 -I scripts/gen-k8s-namespace-fixtures.py --check
+      - name: k8s.crds fixtures are current
+        run: python3 -I scripts/gen-k8s-crds-fixtures.py --check
+      - name: k8s.ingress fixtures are current
+        run: python3 -I scripts/gen-k8s-ingress-fixtures.py --check
+      - name: k8s.dns fixtures are current
+        run: python3 -I scripts/gen-k8s-dns-fixtures.py --check
       - name: The k8s api trees of the fixture envs are current
         run: python3 -I scripts/gen-k8s-env-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and

@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/kube-system/services/kube-dns"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "services \"kube-dns\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "kube-dns",
+      "kind": "services"
+    },
+    "code": 404
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/networking.k8s.io/v1/ingressclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "IngressClassList",
+    "metadata": {
+      "resourceVersion": "9100",
+      "continue": "page-2"
+    },
+    "items": [
+      {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "IngressClass",
+        "metadata": {
+          "name": "traefik",
+          "uid": "00000000-0000-4000-8000-0000000000a1",
+          "resourceVersion": "4711",
+          "generation": 1,
+          "creationTimestamp": "2026-09-01T08:00:00Z",
+          "labels": {
+            "app.kubernetes.io/managed-by": "Helm",
+            "app.kubernetes.io/instance": "traefik-kube-system",
+            "app.kubernetes.io/name": "traefik",
+            "helm.sh/chart": "traefik-27.0.201"
+          },
+          "annotations": {
+            "meta.helm.sh/release-name": "traefik",
+            "meta.helm.sh/release-namespace": "kube-system",
+            "ingressclass.kubernetes.io/is-default-class": "true"
+          }
+        },
+        "spec": {
+          "controller": "traefik.io/ingress-controller"
+        }
+      }
+    ]
+  }
+}

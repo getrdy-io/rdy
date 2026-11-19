@@ -229,7 +229,8 @@ impl Catalog {
     ///
     /// 03 Appendix B: a date older than 180 days fails the release workflow, not the pull request
     /// workflow, or every pull request would turn red on day 181. A `today` that is not a date gives
-    /// no entries; the caller passes the date of the run.
+    /// no entries; the caller passes the date of the run (`parse_date` tells the two apart). An entry
+    /// dated after `today` is stale too.
     #[must_use]
     pub fn stale(&self, today: &str, max_days: i64) -> Vec<&Agent> {
         let Some(now) = days(today) else {
@@ -237,7 +238,11 @@ impl Catalog {
         };
         self.agents
             .iter()
-            .filter(|agent| days(&agent.checked_on).is_none_or(|then| now - then > max_days))
+            .filter(|agent| {
+                // A date in the future, or one that is not a date, is stale: nobody read the page on a
+                // day that has not come.
+                days(&agent.checked_on).is_none_or(|then| then > now || now - then > max_days)
+            })
             .collect()
     }
 }
@@ -336,6 +341,14 @@ fn check_url(field: &str, url: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Days since 1970-01-01 for a `YYYY-MM-DD` date, or `None` when the text is not a real date.
+///
+/// The release gate uses it to refuse a `--today` that is not a date.
+#[must_use]
+pub fn parse_date(text: &str) -> Option<i64> {
+    days(text)
 }
 
 /// Days since 1970-01-01 for a `YYYY-MM-DD` date, or `None` when the text is not a real date.
