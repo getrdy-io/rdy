@@ -166,7 +166,7 @@ jobs:
           path: target/distrib/
           merge-multiple: true
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-auditable@0.7.7
           fallback: none
